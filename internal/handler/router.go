@@ -82,6 +82,14 @@ func (h *Handler) Routes() http.Handler {
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)
 
+	// Redlib media paths — proxy directly to redlib
+	mux.HandleFunc("GET /img/", h.handleRedlibMedia)
+	mux.HandleFunc("GET /preview/", h.handleRedlibMedia)
+	mux.HandleFunc("GET /thumb/", h.handleRedlibMedia)
+	mux.HandleFunc("GET /emoji/", h.handleRedlibMedia)
+	mux.HandleFunc("GET /touch-icon-iphone.png", h.handleRedlibMedia)
+	mux.HandleFunc("GET /check_update.js", h.handleRedlibMedia)
+
 	// Page routes
 	mux.HandleFunc("GET /{$}", h.handleFrontPage)
 	mux.HandleFunc("GET /r/{sub}", h.handleSubreddit)

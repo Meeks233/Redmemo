@@ -31,7 +31,7 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
 			h.ratelimit.Increment()
-			body = h.rebrand(body)
+			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
 
 			w.Header().Set("X-Cache", "MISS")

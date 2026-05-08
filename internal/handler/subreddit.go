@@ -51,7 +51,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
 			h.ratelimit.Increment()
-			body = h.rebrand(body)
+			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), urlPath+"?after="+after, body, 5*time.Minute)
 
 			if h.cfg.RateLimit.ArchiveOnProxy {

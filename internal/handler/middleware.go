@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -74,6 +76,37 @@ func (h *Handler) rebrand(body []byte) []byte {
 	s := strings.ReplaceAll(string(body), "Redlib", brand)
 	s = strings.ReplaceAll(s, "redlib", strings.ToLower(brand))
 	return []byte(s)
+}
+
+var redlibMediaRe = regexp.MustCompile(`(?:src|href|poster|content)="(/(?:img|preview|thumb)/[^"]+)"`)
+
+func (h *Handler) rewriteMedia(body []byte) []byte {
+	return redlibMediaRe.ReplaceAllFunc(body, func(match []byte) []byte {
+		s := string(match)
+		eqIdx := strings.Index(s, `="`)
+		if eqIdx < 0 {
+			return match
+		}
+		attr := s[:eqIdx]
+		path := s[eqIdx+2 : len(s)-1]
+		path = strings.ReplaceAll(path, "&#38;", "&")
+
+		var realURL string
+		switch {
+		case strings.HasPrefix(path, "/img/"):
+			realURL = "https://i.redd.it" + path[len("/img"):]
+		case strings.HasPrefix(path, "/preview/external-pre/"):
+			realURL = "https://external-preview.redd.it" + path[len("/preview/external-pre"):]
+		case strings.HasPrefix(path, "/preview/pre/"):
+			realURL = "https://preview.redd.it" + path[len("/preview/pre"):]
+		case strings.HasPrefix(path, "/thumb/"):
+			realURL = "https://b.thumbs.redditmedia.com" + path[len("/thumb"):]
+		default:
+			return match
+		}
+
+		return []byte(attr + `="/proxy/media?url=` + url.QueryEscape(realURL) + `"`)
+	})
 }
 
 func readPreferences(r *http.Request) reddit.Preferences {

@@ -70,7 +70,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if h.isRedlibAlive(r) {
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && resp.StatusCode == 200 && !proxy.IsRateLimited(resp.StatusCode, body) {
-			body = h.rebrand(body)
+			body = h.rewriteMedia(h.rebrand(body))
 			for k, vv := range resp.Header {
 				for _, v := range vv {
 					w.Header().Add(k, v)
