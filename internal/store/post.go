@@ -105,12 +105,14 @@ type SubredditStat struct {
 	PostCount int64
 }
 
-func (s *PostStore) SubredditStats() ([]SubredditStat, error) {
+func (s *PostStore) SubredditStats(minPosts, limit int) ([]SubredditStat, error) {
 	rows, err := s.db.Query(`
 		SELECT subreddit, COUNT(*) AS cnt
 		FROM posts
 		GROUP BY subreddit
-		ORDER BY cnt DESC`)
+		HAVING COUNT(*) >= $1
+		ORDER BY cnt DESC
+		LIMIT $2`, minPosts, limit)
 	if err != nil {
 		return nil, fmt.Errorf("subreddit stats: %w", err)
 	}

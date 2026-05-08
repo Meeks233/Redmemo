@@ -35,7 +35,7 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if h.postStore != nil {
 		postCount, _ = h.postStore.Count()
 		subCount, _ = h.postStore.SubredditCount()
-		if stats, err := h.postStore.SubredditStats(); err == nil {
+		if stats, err := h.postStore.SubredditStats(10, 20); err == nil {
 			for _, s := range stats {
 				subStats = append(subStats, render.SubredditStatView{
 					Name:      s.Name,
