@@ -161,6 +161,15 @@ func (p *Pool) refreshLoop(ctx context.Context, mt *ManagedToken) {
 			ClientSecret: mt.StoredToken.ClientSecret,
 			Backend:      mt.StoredToken.Backend,
 		}
+		if tcfg.Backend == "password" {
+			for _, tc := range p.cfg.Tokens {
+				if tc.ClientID == tcfg.ClientID && tc.Backend == "password" {
+					tcfg.Username = tc.Username
+					tcfg.Password = tc.Password
+					break
+				}
+			}
+		}
 		result, err := p.client.Refresh(tcfg)
 		if err != nil {
 			log.Printf("oauth: refresh failed for token %d: %v", mt.StoredToken.ID, err)

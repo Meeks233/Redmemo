@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -30,6 +31,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	urlPath := r.URL.Path
 
 	cacheKey := urlPath + "?" + r.URL.RawQuery
+	var diag []string
 
 	// Level 1: Cache
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
@@ -38,6 +40,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		w.Write(cached)
 		return
 	}
+	diag = append(diag, "L1 Cache: MISS")
 
 	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
 	triedOAuth := false
@@ -64,8 +67,9 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					After:      after,
 					RestrictSR: restrictSR,
 				},
-				Sub:     sub,
-				NoPosts: len(posts) == 0,
+				Sub:                sub,
+				NoPosts:            len(posts) == 0,
+				AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -75,16 +79,33 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			}
 			return
 		}
+		diag = append(diag, fmt.Sprintf("L2 OAuth: %v", err))
 		log.Printf("handler: fallback search %q: %v", query, err)
+	} else {
+		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
 	// Level 3: Redlib proxy
-	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
+	if !h.cfg.Redlib.Enabled {
+		diag = append(diag, "L3 Redlib: disabled in config")
+	} else if !h.ratelimit.CanRequestRedlib() {
+		diag = append(diag, "L3 Redlib: rate limited locally")
+	} else {
 		resp, body, err := h.proxy.Forward(r)
-		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
+		if err != nil {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
+		} else if proxy.IsRateLimited(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
+			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
+		} else if proxy.IsServerError(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
+		} else {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 3*time.Minute)
+
+			go h.backgroundArchiveSearch(query, sub, sort, t, after)
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -92,50 +113,54 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			w.Write(body)
 			return
 		}
-		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		}
 	}
 
 	// Level 4: Own OAuth fallback (if not tried above)
-	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
-		restrictSR := sub != ""
-		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR)
-		if err == nil {
-			go h.archiver.ArchivePosts(posts, sub, "search")
+	if !triedOAuth {
+		if !h.ratelimit.CanRequestFallback(r.Context()) {
+			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+		} else {
+			restrictSR := sub != ""
+			posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR)
+			if err == nil {
+				go h.archiver.ArchivePosts(posts, sub, "search")
 
-			data := render.SearchPageData{
-				BasePage: render.BasePage{
-					URL:       urlPath,
-					Prefs:     prefs,
-					BrandName: h.cfg.Render.BrandName,
-					Version:   "0.1.0",
-				},
-				Posts:      posts,
-				Subreddits: subs,
-				Params: reddit.SearchParams{
-					Query:      query,
-					Sort:       sort,
-					Timeframe:  t,
-					After:      after,
-					RestrictSR: restrictSR,
-				},
-				Sub:     sub,
-				NoPosts: len(posts) == 0,
-			}
+				data := render.SearchPageData{
+					BasePage: render.BasePage{
+						URL:       urlPath,
+						Prefs:     prefs,
+						BrandName: h.cfg.Render.BrandName,
+						Version:   "0.1.0",
+					},
+					Posts:      posts,
+					Subreddits: subs,
+					Params: reddit.SearchParams{
+						Query:      query,
+						Sort:       sort,
+						Timeframe:  t,
+						After:      after,
+						RestrictSR: restrictSR,
+					},
+					Sub:                sub,
+					NoPosts:            len(posts) == 0,
+					AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
+				}
 
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("X-Source", "fallback")
-			if err := h.renderer.RenderSearch(w, data); err != nil {
-				log.Printf("handler: render search: %v", err)
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("X-Source", "fallback")
+				if err := h.renderer.RenderSearch(w, data); err != nil {
+					log.Printf("handler: render search: %v", err)
+				}
+				return
 			}
-			return
+			diag = append(diag, fmt.Sprintf("L4 OAuth fallback: %v", err))
+			log.Printf("handler: fallback search %q: %v", query, err)
 		}
-		log.Printf("handler: fallback search %q: %v", query, err)
+	} else {
+		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
 	}
 
-	// Level 5: Archive search
+	// Level 5: Archive search (offline fallback)
 	if query != "" {
 		stored, _ := h.postStore.Search(query, 25)
 		if len(stored) > 0 {
@@ -159,8 +184,9 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					Query: query,
 					Sort:  sort,
 				},
-				Sub:     sub,
-				NoPosts: len(posts) == 0,
+				Sub:                sub,
+				NoPosts:            len(posts) == 0,
+				AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -170,9 +196,33 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			}
 			return
 		}
+		diag = append(diag, fmt.Sprintf("L5 Archive: no results for %q", query))
+	} else {
+		diag = append(diag, "L5 Archive: empty query")
 	}
 
 	// Level 6: Error + background spawn
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
+	log.Printf("handler: all levels failed for search %q: %v", query, diag)
+	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
+}
+
+func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	restrictSR := sub != ""
+	var posts []reddit.Post
+	var err error
+
+	if h.oauthPool.HasAvailableTokens() {
+		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR)
+	} else {
+		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR)
+	}
+	if err != nil {
+		log.Printf("background archive search %q: %v", query, err)
+		return
+	}
+	h.archiver.ArchivePosts(posts, sub, "search")
 }

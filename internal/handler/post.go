@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -34,6 +35,8 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.Write(cached)
 		return
 	}
+	var diag []string
+	diag = append(diag, "L1 Cache: MISS")
 
 	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
 	triedOAuth := false
@@ -42,15 +45,32 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
 			return
 		}
+		diag = append(diag, "L2 OAuth: fetch failed")
+	} else {
+		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
 	// Level 3: Redlib proxy
-	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
+	if !h.cfg.Redlib.Enabled {
+		diag = append(diag, "L3 Redlib: disabled in config")
+	} else if !h.ratelimit.CanRequestRedlib() {
+		diag = append(diag, "L3 Redlib: rate limited locally")
+	} else {
 		resp, body, err := h.proxy.Forward(r)
-		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
+		if err != nil {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
+		} else if proxy.IsRateLimited(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
+			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
+		} else if proxy.IsServerError(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
+		} else {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
+
+			go h.backgroundArchivePost(sub, id, urlPath, commentSort, body)
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -58,17 +78,19 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 			w.Write(body)
 			return
 		}
-		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		}
 	}
 
 	// Level 4: Own OAuth fallback (if not tried above)
-	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
-		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
+	if !triedOAuth {
+		if !h.ratelimit.CanRequestFallback(r.Context()) {
+			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+		} else if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
 			return
+		} else {
+			diag = append(diag, "L4 OAuth fallback: fetch failed")
 		}
+	} else {
+		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
 	}
 
 	// Level 5: Archive
@@ -77,10 +99,39 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort)
 		return
 	}
+	diag = append(diag, "L5 Archive: no archived post for "+urlPath)
 
 	// Level 6: Error + background spawn
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
+	log.Printf("handler: all levels failed for %s: %v", urlPath, diag)
+	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
+}
+
+func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {
+	existing, _ := h.postStore.Get(urlPath)
+	if existing != nil && time.Since(existing.LastUpdated) < 10*time.Minute {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	post, comments, err := h.fetchPost(ctx, sub, id, commentSort)
+	if err != nil {
+		log.Printf("background archive post %s/%s: %v", sub, id, err)
+		return
+	}
+	h.archiver.ArchivePost(&post, sub, "background")
+	h.archiver.ArchiveComments(post.Permalink, comments)
+
+	if len(htmlSnapshot) > 0 {
+		permalink := post.Permalink
+		if permalink == "" {
+			permalink = urlPath
+		}
+		if err := h.postStore.SaveHTML(permalink, htmlSnapshot); err != nil {
+			log.Printf("background save html %s: %v", permalink, err)
+		}
+	}
 }
 
 func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) bool {

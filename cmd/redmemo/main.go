@@ -62,9 +62,10 @@ func main() {
 	oauthClient := oauth.NewClient()
 	oauthPool := oauth.NewPool(cfg.OAuth, oauthClient, tokenStore, redisCache)
 
-	// 6. Init Reddit client
+	// 6. Init Reddit clients
 	redditAdapter := &oauthAdapter{pool: oauthPool}
 	redditCli := reddit.NewClient(redditAdapter)
+	publicCli := reddit.NewPublicClient()
 
 	// 7. Init modules
 	rateLimiter := ratelimit.New(cfg.RateLimit, oauthPool)
@@ -107,7 +108,7 @@ func main() {
 
 	// 9. Register routes, start HTTP server
 	h := handler.New(
-		reverseProxy, rateLimiter, redisCache, renderer, redditCli, oauthPool,
+		reverseProxy, rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
 		postStore, commentStore, subStore, mediaIndexStore, mediaProxy, archiver, cfg,
 	)
 

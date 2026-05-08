@@ -180,3 +180,15 @@ func readMultiCookie(r *http.Request, baseName string) []string {
 	joined := strings.Join(parts, "+")
 	return strings.Split(joined, "+")
 }
+
+func allPostsNSFW(posts []reddit.Post, prefs reddit.Preferences) bool {
+	if len(posts) == 0 || prefs.ShowNSFW == "on" {
+		return false
+	}
+	for _, p := range posts {
+		if !p.Flags.NSFW {
+			return false
+		}
+	}
+	return true
+}

@@ -177,6 +177,10 @@ func (h *Handler) handleUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	setListCookie(w, "subscriptions", filtered)
+	if r.URL.Query().Get("redirect") == "settings" {
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/r/"+sub, http.StatusSeeOther)
 }
 
@@ -206,6 +210,10 @@ func (h *Handler) handleUnfilter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	setListCookie(w, "filters", filtered)
+	if r.URL.Query().Get("redirect") == "settings" {
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/r/"+sub, http.StatusSeeOther)
 }
 

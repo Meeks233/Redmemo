@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redmemo/redmemo/internal/transport"
 )
 
 const redditAPIBase = "https://oauth.reddit.com"
@@ -43,18 +45,19 @@ type TokenInfo struct {
 type Client struct {
 	pool       TokenProvider
 	httpClient *http.Client
+	etags      *etagCache
 }
 
 // NewClient creates a new Reddit API client.
 func NewClient(pool TokenProvider) *Client {
+	cli := transport.NewSpoofedClient(30 * time.Second)
+	cli.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	return &Client{
-		pool: pool,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		pool:       pool,
+		httpClient: cli,
+		etags:      newETagCache(2000),
 	}
 }
 
@@ -68,7 +71,7 @@ func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, after string, li
 		limit = 25
 	}
 
-	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&limit=%d", sub, sort, limit)
+	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&include_over_18=on&limit=%d", sub, sort, limit)
 	if after != "" {
 		path += "&after=" + after
 	}
@@ -86,7 +89,7 @@ func (c *Client) FetchPost(ctx context.Context, sub, id, commentSort string) (Po
 	if commentSort == "" {
 		commentSort = "confidence"
 	}
-	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&sort=%s", sub, id, commentSort)
+	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&include_over_18=on&sort=%s", sub, id, commentSort)
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
@@ -98,7 +101,7 @@ func (c *Client) FetchPost(ctx context.Context, sub, id, commentSort string) (Po
 
 // FetchSubredditAbout fetches subreddit metadata.
 func (c *Client) FetchSubredditAbout(ctx context.Context, sub string) (Subreddit, error) {
-	path := fmt.Sprintf("/r/%s/about.json?raw_json=1", sub)
+	path := fmt.Sprintf("/r/%s/about.json?raw_json=1&include_over_18=on", sub)
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
@@ -111,7 +114,7 @@ func (c *Client) FetchSubredditAbout(ctx context.Context, sub string) (Subreddit
 // FetchUser fetches user profile and listings.
 func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after string) (User, []Post, []Comment, error) {
 	// Fetch user about
-	aboutData, _, err := c.doRequest(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1", username))
+	aboutData, _, err := c.doRequest(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1&include_over_18=on", username))
 	if err != nil {
 		return User{}, nil, nil, err
 	}
@@ -124,7 +127,7 @@ func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after s
 	if listing == "" {
 		listing = "overview"
 	}
-	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1", username, listing)
+	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1&include_over_18=on", username, listing)
 	if sort != "" {
 		listPath += "&sort=" + sort
 	}
@@ -145,12 +148,12 @@ func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after s
 func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after string, restrictSR bool) ([]Post, []Subreddit, string, error) {
 	var path string
 	if sub != "" {
-		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&q=%s", sub, query)
+		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&include_over_18=on&q=%s", sub, query)
 		if restrictSR {
 			path += "&restrict_sr=on"
 		}
 	} else {
-		path = fmt.Sprintf("/search.json?raw_json=1&q=%s", query)
+		path = fmt.Sprintf("/search.json?raw_json=1&include_over_18=on&q=%s", query)
 	}
 	if sort != "" {
 		path += "&sort=" + sort
@@ -209,22 +212,32 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 		req.Header.Set(k, v)
 	}
 
+	cachedETag, cachedBody, hasCached := c.etags.Get(path)
+	if hasCached {
+		req.Header.Set("If-None-Match", cachedETag)
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Update token rate limits
+	c.pool.OnRequestComplete(token.ID, resp)
+
+	// 304 Not Modified — return cached body
+	if resp.StatusCode == http.StatusNotModified && hasCached {
+		return cachedBody, resp, nil
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, resp, fmt.Errorf("read body: %w", err)
 	}
 
-	// Update token rate limits
-	c.pool.OnRequestComplete(token.ID, resp)
-
 	// Handle redirects
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+	if resp.StatusCode >= 301 && resp.StatusCode <= 399 {
 		location := resp.Header.Get("Location")
 		if location != "" {
 			newPath := location
@@ -253,6 +266,11 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 
 	if err := checkAPIError(body); err != nil {
 		return nil, resp, err
+	}
+
+	// Cache ETag for future conditional requests
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		c.etags.Set(path, etag, body)
 	}
 
 	return body, resp, nil

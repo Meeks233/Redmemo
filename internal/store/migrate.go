@@ -82,6 +82,16 @@ var migrations = []string{
 		priority        INTEGER NOT NULL DEFAULT 0,
 		enabled         BOOLEAN NOT NULL DEFAULT TRUE
 	);`,
+
+	// v2: expand source constraint to support search and user listing archive paths
+	`ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
+	 ALTER TABLE posts ADD CONSTRAINT valid_source
+		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'search', 'user_listing'));`,
+
+	// v3: add 'background' source for async archiving from redlib proxy path
+	`ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
+	 ALTER TABLE posts ADD CONSTRAINT valid_source
+		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'search', 'user_listing', 'background'));`,
 }
 
 func RunMigrations(db *sql.DB) error {

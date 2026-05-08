@@ -23,6 +23,7 @@ type Handler struct {
 	cache        *cache.Cache
 	renderer     *render.Engine
 	redditCli    *reddit.Client
+	publicCli    *reddit.PublicClient
 	oauthPool    *oauth.Pool
 	postStore    *store.PostStore
 	commentStore *store.CommentStore
@@ -44,6 +45,7 @@ func New(
 	c *cache.Cache,
 	r *render.Engine,
 	rc *reddit.Client,
+	pc *reddit.PublicClient,
 	op *oauth.Pool,
 	ps *store.PostStore,
 	cs *store.CommentStore,
@@ -59,6 +61,7 @@ func New(
 		cache:        c,
 		renderer:     r,
 		redditCli:    rc,
+		publicCli:    pc,
 		oauthPool:    op,
 		postStore:    ps,
 		commentStore: cs,

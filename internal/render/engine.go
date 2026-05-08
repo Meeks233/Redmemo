@@ -120,6 +120,7 @@ type ErrorPageData struct {
 	BasePage
 	Message    string
 	StatusCode int
+	Details    []string
 }
 
 type InfoPageData struct {
@@ -194,13 +195,14 @@ func (e *Engine) RenderInfo(w io.Writer, data InfoPageData) error {
 	return e.renderPage(w, "info.html", data)
 }
 
-func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int) {
+func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, details ...string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(statusCode)
 	data := ErrorPageData{
 		BasePage:   e.basePage("", reddit.Preferences{}),
 		Message:    msg,
 		StatusCode: statusCode,
+		Details:    details,
 	}
 	e.renderPage(w, "error.html", data)
 }

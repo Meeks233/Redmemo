@@ -60,6 +60,8 @@ type OAuthConfig struct {
 type OAuthTokenConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
 	Backend      string `yaml:"backend"`
 }
 
@@ -67,7 +69,6 @@ type RateLimitConfig struct {
 	WindowSize     int           `yaml:"window_size"`
 	WindowDuration time.Duration `yaml:"window_duration"`
 	SafetyBuffer   int           `yaml:"safety_buffer"`
-	ArchiveOnProxy bool          `yaml:"archive_on_proxy"`
 }
 
 type PrefetchConfig struct {
@@ -117,7 +118,6 @@ func defaults() *Config {
 			WindowSize:     500,
 			WindowDuration: 10 * time.Minute,
 			SafetyBuffer:   50,
-			ArchiveOnProxy: true,
 		},
 		Prefetch: PrefetchConfig{
 			Enabled:       true,
@@ -179,8 +179,21 @@ func (c *Config) Validate() error {
 		if tok.ClientID == "" {
 			errs = append(errs, fmt.Errorf("oauth.tokens[%d].client_id is required", i))
 		}
-		if tok.Backend != "mobile_spoof" && tok.Backend != "generic_web" {
-			errs = append(errs, fmt.Errorf("oauth.tokens[%d].backend must be \"mobile_spoof\" or \"generic_web\"", i))
+		switch tok.Backend {
+		case "mobile_spoof", "generic_web", "password":
+		default:
+			errs = append(errs, fmt.Errorf("oauth.tokens[%d].backend must be \"mobile_spoof\", \"generic_web\", or \"password\"", i))
+		}
+		if tok.Backend == "password" {
+			if tok.ClientSecret == "" {
+				errs = append(errs, fmt.Errorf("oauth.tokens[%d].client_secret is required for password backend", i))
+			}
+			if tok.Username == "" {
+				errs = append(errs, fmt.Errorf("oauth.tokens[%d].username is required for password backend", i))
+			}
+			if tok.Password == "" {
+				errs = append(errs, fmt.Errorf("oauth.tokens[%d].password is required for password backend", i))
+			}
 		}
 	}
 	for i, sub := range c.Prefetch.Subreddits {

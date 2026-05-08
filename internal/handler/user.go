@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -27,6 +28,8 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		w.Write(cached)
 		return
 	}
+	var diag []string
+	diag = append(diag, "L1 Cache: MISS")
 
 	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
 	triedOAuth := false
@@ -35,15 +38,32 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
 			return
 		}
+		diag = append(diag, "L2 OAuth: fetch failed")
+	} else {
+		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
 	// Level 3: Redlib proxy
-	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
+	if !h.cfg.Redlib.Enabled {
+		diag = append(diag, "L3 Redlib: disabled in config")
+	} else if !h.ratelimit.CanRequestRedlib() {
+		diag = append(diag, "L3 Redlib: rate limited locally")
+	} else {
 		resp, body, err := h.proxy.Forward(r)
-		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
+		if err != nil {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
+		} else if proxy.IsRateLimited(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
+			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
+		} else if proxy.IsServerError(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
+		} else {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
+
+			go h.backgroundArchiveUser(name, listing, sort, after)
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -51,22 +71,44 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 			w.Write(body)
 			return
 		}
-		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		}
 	}
 
 	// Level 4: Own OAuth fallback (if not tried above)
-	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
-		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
+	if !triedOAuth {
+		if !h.ratelimit.CanRequestFallback(r.Context()) {
+			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+		} else if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
 			return
+		} else {
+			diag = append(diag, "L4 OAuth fallback: fetch failed")
 		}
+	} else {
+		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
 	}
 
 	// Level 5: Error + background spawn
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
+	log.Printf("handler: all levels failed for /user/%s: %v", name, diag)
+	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
+}
+
+func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var posts []reddit.Post
+	var err error
+
+	if h.oauthPool.HasAvailableTokens() {
+		_, posts, _, err = h.redditCli.FetchUser(ctx, name, listing, sort, after)
+	} else {
+		_, posts, _, err = h.publicCli.FetchUser(ctx, name, listing, sort, after)
+	}
+	if err != nil {
+		log.Printf("background archive user %s: %v", name, err)
+		return
+	}
+	h.archiver.ArchivePosts(posts, "", "user_listing")
 }
 
 func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences) bool {
@@ -85,11 +127,12 @@ func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, nam
 			BrandName: h.cfg.Render.BrandName,
 			Version:   "0.1.0",
 		},
-		User:    user,
-		Posts:   posts,
-		Listing: listing,
-		Sort:    [2]string{sort, r.URL.Query().Get("t")},
-		NoPosts: len(posts) == 0,
+		User:               user,
+		Posts:              posts,
+		Listing:            listing,
+		Sort:               [2]string{sort, r.URL.Query().Get("t")},
+		NoPosts:            len(posts) == 0,
+		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

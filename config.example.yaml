@@ -33,7 +33,6 @@ ratelimit:
   window_size: 500                     # total budget per window (conservative)
   window_duration: 10m
   safety_buffer: 50                    # reserved for prefetch
-  archive_on_proxy: true               # archive JSON while proxying redlib HTML
 
 prefetch:
   enabled: true

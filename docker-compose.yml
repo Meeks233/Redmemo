@@ -13,8 +13,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -60,11 +58,7 @@ services:
       - REDLIB_DEFAULT_REMOVE_DEFAULT_FEEDS=on
       - REDLIB_DEFAULT_USE_HLS=on
     healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/settings || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 20
-      start_period: 120s
+      disable: true
     restart: unless-stopped
 
 volumes:

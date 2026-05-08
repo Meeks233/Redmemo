@@ -2,16 +2,15 @@ package prefetch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
 	"time"
 
+	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/ratelimit"
 	"github.com/redmemo/redmemo/internal/reddit"
-	"github.com/redmemo/redmemo/internal/store"
 )
 
 // MediaDownloader abstracts the media proxy for async downloads.
@@ -21,34 +20,28 @@ type MediaDownloader interface {
 }
 
 type Scheduler struct {
-	cfg          config.PrefetchConfig
-	rateLimiter  *ratelimit.Manager
-	redditCli    *reddit.Client
-	postStore    *store.PostStore
-	commentStore *store.CommentStore
-	subStore     *store.SubredditStore
-	media        MediaDownloader
-	stopCh       chan struct{}
+	cfg         config.PrefetchConfig
+	rateLimiter *ratelimit.Manager
+	redditCli   *reddit.Client
+	archiver    *archive.Service
+	media       MediaDownloader
+	stopCh      chan struct{}
 }
 
 func New(
 	cfg config.PrefetchConfig,
 	rateLimiter *ratelimit.Manager,
 	redditCli *reddit.Client,
-	postStore *store.PostStore,
-	commentStore *store.CommentStore,
-	subStore *store.SubredditStore,
+	archiver *archive.Service,
 	media MediaDownloader,
 ) *Scheduler {
 	return &Scheduler{
-		cfg:          cfg,
-		rateLimiter:  rateLimiter,
-		redditCli:    redditCli,
-		postStore:    postStore,
-		commentStore: commentStore,
-		subStore:     subStore,
-		media:        media,
-		stopCh:       make(chan struct{}),
+		cfg:         cfg,
+		rateLimiter: rateLimiter,
+		redditCli:   redditCli,
+		archiver:    archiver,
+		media:       media,
+		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -130,16 +123,14 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 		return fmt.Errorf("fetch listing: %w", err)
 	}
 
-	for i := range posts {
-		s.savePost(&posts[i], sub.Name, "prefetch")
-	}
+	s.archiver.ArchivePosts(posts, sub.Name, "prefetch")
 
 	if *used < budget {
 		subInfo, err := s.redditCli.FetchSubredditAbout(ctx, sub.Name)
 		*used++
-	s.rateLimiter.IncrementPrefetch()
+		s.rateLimiter.IncrementPrefetch()
 		if err == nil {
-			s.saveSubreddit(&subInfo)
+			s.archiver.ArchiveSubreddit(&subInfo)
 		}
 	}
 
@@ -171,13 +162,11 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 		}
 		morePosts, _, nextAfter, err := s.redditCli.FetchSubreddit(ctx, sub.Name, sortBy, after, 25)
 		*used++
-	s.rateLimiter.IncrementPrefetch()
+		s.rateLimiter.IncrementPrefetch()
 		if err != nil {
 			return fmt.Errorf("fetch page %d: %w", page+1, err)
 		}
-		for i := range morePosts {
-			s.savePost(&morePosts[i], sub.Name, "prefetch")
-		}
+		s.archiver.ArchivePosts(morePosts, sub.Name, "prefetch")
 		if sub.FetchMedia && s.media != nil {
 			for i := range morePosts {
 				s.downloadPostMedia(&morePosts[i])
@@ -200,77 +189,12 @@ func (s *Scheduler) prefetchComments(ctx context.Context, sub, postID, permalink
 
 	_ = post
 
-	commentsJSON, err := json.Marshal(comments)
-	if err != nil {
-		return
-	}
-
 	urlPath := permalink
 	if urlPath == "" {
 		urlPath = fmt.Sprintf("/r/%s/comments/%s", sub, postID)
 	}
 
-	_ = s.commentStore.Save(urlPath, &store.StoredComments{
-		PostURLPath:  urlPath,
-		JSONData:     commentsJSON,
-		CommentCount: countComments(comments),
-	})
-}
-
-func countComments(comments []reddit.Comment) int {
-	count := 0
-	for i := range comments {
-		if comments[i].Kind == "t1" {
-			count++
-			count += countComments(comments[i].Replies)
-		}
-	}
-	return count
-}
-
-func (s *Scheduler) savePost(p *reddit.Post, subreddit, source string) {
-	jsonData, err := json.Marshal(p)
-	if err != nil {
-		return
-	}
-
-	urlPath := p.Permalink
-	if urlPath == "" {
-		urlPath = fmt.Sprintf("/r/%s/comments/%s", subreddit, p.ID)
-	}
-
-	_ = s.postStore.Save(&store.StoredPost{
-		URLPath:    urlPath,
-		Subreddit:  subreddit,
-		PostID:     p.ID,
-		Title:      p.Title,
-		JSONData:   jsonData,
-		Author:     p.Author.Name,
-		Score:      parseScore(p.Score),
-		CreatedUTC: time.Unix(int64(p.CreatedTS), 0),
-		Source:     source,
-	})
-}
-
-func (s *Scheduler) saveSubreddit(sub *reddit.Subreddit) {
-	jsonData, err := json.Marshal(sub)
-	if err != nil {
-		return
-	}
-
-	members := 0
-	if sub.Members[0] != "" {
-		fmt.Sscanf(sub.Members[1], "%d", &members)
-	}
-
-	_ = s.subStore.Save(&store.StoredSubreddit{
-		Name:        sub.Name,
-		Title:       sub.Title,
-		Description: sub.Description,
-		IconURL:     sub.Icon,
-		Members:     members,
-		JSONData:    jsonData,
-	})
+	s.archiver.ArchiveComments(urlPath, comments)
 }
 
 func (s *Scheduler) downloadPostMedia(p *reddit.Post) {
@@ -285,10 +209,4 @@ func (s *Scheduler) downloadPostMedia(p *reddit.Post) {
 			s.media.DownloadAsync(p.Gallery[i].URL)
 		}
 	}
-}
-
-func parseScore(score [2]string) int {
-	var n int
-	fmt.Sscanf(score[1], "%d", &n)
-	return n
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -38,6 +39,7 @@ func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences) {
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
+	var diag []string
 
 	// Level 1: Cache
 	if cached, _ := h.cache.GetHTML(r.Context(), urlPath+"?after="+after); cached != nil {
@@ -46,6 +48,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		w.Write(cached)
 		return
 	}
+	diag = append(diag, "L1 Cache: MISS")
 
 	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
 	triedOAuth := false
@@ -54,15 +57,32 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
 			return
 		}
+		diag = append(diag, "L2 OAuth: fetch failed")
+	} else {
+		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
 	// Level 3: Redlib proxy
-	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
+	if !h.cfg.Redlib.Enabled {
+		diag = append(diag, "L3 Redlib: disabled in config")
+	} else if !h.ratelimit.CanRequestRedlib() {
+		diag = append(diag, "L3 Redlib: rate limited locally")
+	} else {
 		resp, body, err := h.proxy.Forward(r)
-		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
+		if err != nil {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
+		} else if proxy.IsRateLimited(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
+			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
+		} else if proxy.IsServerError(resp.StatusCode, body) {
+			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
+		} else {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), urlPath+"?after="+after, body, 5*time.Minute)
+
+			go h.backgroundArchiveSubreddit(sub, sort, after)
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -70,17 +90,19 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 			w.Write(body)
 			return
 		}
-		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		}
 	}
 
 	// Level 4: Own OAuth fallback (if not tried above)
-	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
-		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
+	if !triedOAuth {
+		if !h.ratelimit.CanRequestFallback(r.Context()) {
+			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+		} else if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
 			return
+		} else {
+			diag = append(diag, "L4 OAuth fallback: fetch failed")
 		}
+	} else {
+		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
 	}
 
 	// Level 5: Archive
@@ -89,10 +111,33 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		h.renderSubredditFromArchive(w, r, sub, posts, prefs)
 		return
 	}
+	diag = append(diag, "L5 Archive: no archived posts for r/"+sub)
 
-	// Level 6: Rate limit page + background spawn
+	// Level 6: Error page
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
+	log.Printf("handler: all levels failed for /r/%s: %v", sub, diag)
+	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
+}
+
+func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
+	existing, _ := h.postStore.ListBySubreddit(sub, 1, 0)
+	if len(existing) > 0 && time.Since(existing[0].LastUpdated) < 10*time.Minute {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	posts, _, _, err := h.fetchSubreddit(ctx, sub, sort, after, 25)
+	if err != nil {
+		log.Printf("background archive sub %s: %v", sub, err)
+		return
+	}
+	h.archiver.ArchivePosts(posts, sub, "background")
+
+	subInfo, err := h.fetchSubredditAbout(ctx, sub)
+	if err == nil {
+		h.archiver.ArchiveSubreddit(&subInfo)
+	}
 }
 
 func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences) bool {
@@ -120,11 +165,12 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 			BrandName: h.cfg.Render.BrandName,
 			Version:   "0.1.0",
 		},
-		Sub:     subInfo,
-		Posts:   posts,
-		Sort:    [2]string{sort, r.URL.Query().Get("t")},
-		Ends:    [2]string{before, afterCursor},
-		NoPosts: len(posts) == 0,
+		Sub:                subInfo,
+		Posts:              posts,
+		Sort:               [2]string{sort, r.URL.Query().Get("t")},
+		Ends:               [2]string{before, afterCursor},
+		NoPosts:            len(posts) == 0,
+		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

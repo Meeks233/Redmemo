@@ -100,6 +100,15 @@ func (s *PostStore) SubredditCount() (int64, error) {
 	return count, err
 }
 
+func (s *PostStore) SaveHTML(urlPath string, html []byte) error {
+	htmlStr := string(html)
+	_, err := s.db.Exec(`
+		UPDATE posts SET rendered_html = $2, last_updated = NOW()
+		WHERE url_path = $1`, urlPath, htmlStr,
+	)
+	return err
+}
+
 func scanPosts(rows *sql.Rows) ([]*StoredPost, error) {
 	var posts []*StoredPost
 	for rows.Next() {
