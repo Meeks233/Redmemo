@@ -60,6 +60,7 @@ func (p *Proxy) Forward(r *http.Request) (*http.Response, []byte, error) {
 	outReq.RequestURI = ""
 
 	removeHopByHop(outReq.Header)
+	outReq.Header.Del("Accept-Encoding")
 
 	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		outReq.Header.Set("X-Forwarded-For", clientIP)
