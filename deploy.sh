@@ -80,9 +80,6 @@ for i in $(seq 1 10); do
     sleep 1
 done
 
-# --- 8. Clean up orphans ---
-docker compose up -d --remove-orphans 2>/dev/null || true
-
 echo ""
 log "=== Deploy complete ==="
 log "  RedMemo:  http://127.0.0.1:8080"

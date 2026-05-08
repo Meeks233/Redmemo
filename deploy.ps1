@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $WinDir  = $PSScriptRoot
 $WslDist = "Debian"
 $WslDir  = "~/redmemo"
+$Ports   = @(8080, 8081)
 
 function Log($msg)  { Write-Host "[deploy] $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "[deploy] $msg" -ForegroundColor Yellow }
@@ -43,6 +44,38 @@ wsl -d $WslDist -- bash -c "chmod +x $WslDir/deploy.sh; cd $WslDir; ./deploy.sh"
 if ($LASTEXITCODE -ne 0) {
     Err "Deployment failed"
     exit 1
+}
+
+# --- 6. Set up Windows portproxy (WSL2 Docker ports -> Windows localhost) ---
+$wslIp = (wsl -d $WslDist -- hostname -I).Trim().Split(" ")[0]
+Log "WSL IP: $wslIp, setting up port forwarding..."
+
+$needsElevation = $false
+foreach ($port in $Ports) {
+    $existing = netsh interface portproxy show v4tov4 | Select-String ":$port\s"
+    if (-not $existing) {
+        $needsElevation = $true
+        break
+    }
+}
+
+if ($needsElevation) {
+    $cmds = ($Ports | ForEach-Object {
+        "netsh interface portproxy delete v4tov4 listenport=$_ listenaddress=127.0.0.1 2>`$null;"
+        "netsh interface portproxy add v4tov4 listenport=$_ listenaddress=127.0.0.1 connectport=$_ connectaddress=$wslIp"
+    }) -join "; "
+
+    Start-Process powershell -Verb RunAs -ArgumentList "-Command", $cmds -Wait
+    Log "Port forwarding configured"
+} else {
+    # Update connectaddress in case WSL IP changed
+    $cmds = ($Ports | ForEach-Object {
+        "netsh interface portproxy delete v4tov4 listenport=$_ listenaddress=127.0.0.1 2>`$null;"
+        "netsh interface portproxy add v4tov4 listenport=$_ listenaddress=127.0.0.1 connectport=$_ connectaddress=$wslIp"
+    }) -join "; "
+
+    Start-Process powershell -Verb RunAs -ArgumentList "-Command", $cmds -Wait
+    Log "Port forwarding updated (WSL IP: $wslIp)"
 }
 
 Log "Done. Access http://127.0.0.1:8080"
