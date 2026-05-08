@@ -245,7 +245,6 @@ figcaption {
     bottom: 0;
     right: 0;
     visibility: hidden;
-    transition: all 0.1s ease-in-out;
     z-index: 2;
 }
 
@@ -275,7 +274,6 @@ figcaption {
     background: var(--popup-background);
     border: var(--popup-border);
     border-radius: 5px;
-    transition: all 0.1s ease-in-out;
 }
 
 .popup-inner svg {
@@ -326,6 +324,7 @@ figcaption {
 .popup:target {
     visibility: visible;
     opacity: 1;
+    transition: opacity 0.1s ease-in-out;
 }
 
 #reddit_url {
