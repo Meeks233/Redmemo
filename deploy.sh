@@ -12,19 +12,15 @@ log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
 warn() { echo -e "${YELLOW}[deploy]${NC} $*"; }
 err()  { echo -e "${RED}[deploy]${NC} $*"; }
 
-# --- 1. Stop old containers ---
-log "Stopping old containers..."
-docker compose down --remove-orphans 2>/dev/null || true
-
-# --- 2. Build redmemo image ---
+# --- 1. Build redmemo image (while old containers keep running) ---
 log "Building redmemo image..."
 docker compose build redmemo
 
-# --- 3. Start infrastructure first ---
-log "Starting postgres, redis, redlib..."
+# --- 2. Ensure infrastructure is up ---
+log "Starting infrastructure..."
 docker compose up -d postgres redis redlib
 
-# --- 4. Wait for health checks ---
+# --- 3. Wait for health checks ---
 log "Waiting for postgres..."
 for i in $(seq 1 30); do
     if docker compose exec -T postgres pg_isready -U redmemo -q 2>/dev/null; then
@@ -52,16 +48,16 @@ for i in $(seq 1 30); do
 done
 log "Redis ready"
 
-# --- 5. Flush Redis cache ---
+# --- 4. Flush Redis cache ---
 log "Flushing Redis cache..."
 docker compose exec -T redis redis-cli FLUSHALL
 log "Redis cache cleared"
 
-# --- 6. Start redmemo ---
-log "Starting redmemo..."
-docker compose up -d redmemo
+# --- 5. Recreate only redmemo with new image (infra stays up) ---
+log "Restarting redmemo..."
+docker compose up -d --no-deps --force-recreate redmemo
 
-# --- 7. Verify startup ---
+# --- 6. Verify startup ---
 sleep 3
 if docker compose ps redmemo | grep -q "Up"; then
     log "RedMemo container is running"
@@ -71,7 +67,7 @@ else
     exit 1
 fi
 
-# --- 8. Health check ---
+# --- 7. Health check ---
 for i in $(seq 1 10); do
     if curl -sf http://127.0.0.1:8080/info > /dev/null 2>&1; then
         log "Health check passed"
@@ -83,6 +79,9 @@ for i in $(seq 1 10); do
     fi
     sleep 1
 done
+
+# --- 8. Clean up orphans ---
+docker compose up -d --remove-orphans 2>/dev/null || true
 
 echo ""
 log "=== Deploy complete ==="
