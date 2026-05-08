@@ -11,3 +11,6 @@ bin/
 # Runtime config (contains secrets)
 config.yaml
 !config.example.yaml
+
+# Internal docs
+structure.md
