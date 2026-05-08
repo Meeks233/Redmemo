@@ -1,8 +1,7 @@
 services:
   redmemo:
     build: .
-    ports:
-      - "8080:8080"
+    network_mode: host
     volumes:
       - ./config.yaml:/etc/redmemo/config.yaml:ro
       - media_data:/data/media
@@ -15,6 +14,8 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    ports:
+      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./deploy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -32,6 +33,8 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
