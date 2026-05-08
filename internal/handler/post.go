@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -41,6 +42,10 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
+
+			if h.cfg.RateLimit.ArchiveOnProxy {
+				go h.archivePostByID(sub, id)
+			}
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -133,6 +138,23 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if err := h.renderer.RenderPost(w, data); err != nil {
 		log.Printf("handler: render post from archive: %v", err)
 	}
+}
+
+func (h *Handler) archivePostByID(sub, id string) {
+	if h.redditCli == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if !h.ratelimit.CanRequestFallback(ctx) {
+		return
+	}
+	post, comments, err := h.redditCli.FetchPost(ctx, sub, id, "confidence")
+	if err != nil {
+		log.Printf("handler: archive post %s/%s via oauth failed: %v", sub, id, err)
+		return
+	}
+	h.archivePost(post, comments, sub)
 }
 
 func (h *Handler) archivePost(post reddit.Post, comments []reddit.Comment, sub string) {

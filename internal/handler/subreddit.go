@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -158,8 +159,15 @@ func (h *Handler) archiveSubreddit(sub, sort string) {
 	if h.redditCli == nil {
 		return
 	}
-	posts, _, _, err := h.redditCli.FetchSubreddit(nil, sub, sort, "", 25)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if !h.ratelimit.CanRequestFallback(ctx) {
+		log.Printf("handler: skip archive %s, no OAuth budget", sub)
+		return
+	}
+	posts, _, _, err := h.redditCli.FetchSubreddit(ctx, sub, sort, "", 25)
 	if err != nil {
+		log.Printf("handler: archive %s via oauth failed: %v", sub, err)
 		return
 	}
 	h.archiveSubredditPosts(posts, sub)
