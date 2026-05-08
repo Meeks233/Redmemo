@@ -100,6 +100,32 @@ func (s *PostStore) SubredditCount() (int64, error) {
 	return count, err
 }
 
+type SubredditStat struct {
+	Name      string
+	PostCount int64
+}
+
+func (s *PostStore) SubredditStats() ([]SubredditStat, error) {
+	rows, err := s.db.Query(`
+		SELECT subreddit, COUNT(*) AS cnt
+		FROM posts
+		GROUP BY subreddit
+		ORDER BY cnt DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("subreddit stats: %w", err)
+	}
+	defer rows.Close()
+	var stats []SubredditStat
+	for rows.Next() {
+		var s SubredditStat
+		if err := rows.Scan(&s.Name, &s.PostCount); err != nil {
+			return nil, fmt.Errorf("scan subreddit stat: %w", err)
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
 func (s *PostStore) SaveHTML(urlPath string, html []byte) error {
 	htmlStr := string(html)
 	_, err := s.db.Exec(`

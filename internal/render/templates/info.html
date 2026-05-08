@@ -60,6 +60,20 @@
 				</tr>
 			</tbody>
 		</table>
+		{{ if .SubredditStats }}
+		<br />
+		<table>
+			<thead><tr><th>Archived Subreddit</th><th>Posts</th></tr></thead>
+			<tbody>
+				{{ range .SubredditStats }}
+				<tr>
+					<td><a href="/r/{{ .Name }}">r/{{ .Name }}</a></td>
+					<td>{{ .PostCount }}</td>
+				</tr>
+				{{ end }}
+			</tbody>
+		</table>
+		{{ end }}
 		{{ if .PrefetchSubs }}
 		<br />
 		<table>

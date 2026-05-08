@@ -31,9 +31,18 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var postCount, subCount int64
+	var subStats []render.SubredditStatView
 	if h.postStore != nil {
 		postCount, _ = h.postStore.Count()
 		subCount, _ = h.postStore.SubredditCount()
+		if stats, err := h.postStore.SubredditStats(); err == nil {
+			for _, s := range stats {
+				subStats = append(subStats, render.SubredditStatView{
+					Name:      s.Name,
+					PostCount: s.PostCount,
+				})
+			}
+		}
 	}
 
 	var mediaCount, mediaSize int64
@@ -62,6 +71,7 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		MediaSize:      formatBytes(mediaSize),
 		OAuthEnabled:   len(h.cfg.OAuth.Tokens) > 0,
 		PrefetchSubs:   prefetchSubs,
+		SubredditStats: subStats,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -134,6 +134,12 @@ type InfoPageData struct {
 	MediaSize      string
 	OAuthEnabled   bool
 	PrefetchSubs   []string
+	SubredditStats []SubredditStatView
+}
+
+type SubredditStatView struct {
+	Name      string
+	PostCount int64
 }
 
 func (e *Engine) basePage(url string, prefs reddit.Preferences) BasePage {
