@@ -74,8 +74,8 @@ func (h *Handler) rebrand(body []byte) []byte {
 		return body
 	}
 	s := string(body)
-	s = strings.ReplaceAll(s, `<span id="red">red</span><span id="lib">lib.</span>`, brand)
-	s = strings.ReplaceAll(s, `<span id="red">red</span><span id="lib">lib</span>`, brand)
+	s = strings.ReplaceAll(s, `<span id="lib">lib.</span>`, `<span id="lib">memo.</span>`)
+	s = strings.ReplaceAll(s, `<span id="lib">lib</span>`, `<span id="lib">memo</span>`)
 	s = strings.ReplaceAll(s, "Redlib", brand)
 	s = strings.ReplaceAll(s, "redlib", strings.ToLower(brand))
 	return []byte(s)
