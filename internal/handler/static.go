@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -12,19 +13,50 @@ func (h *Handler) staticHandler() http.Handler {
 }
 
 func (h *Handler) handleRedlibMedia(w http.ResponseWriter, r *http.Request) {
-	if h.proxy == nil {
+	if h.proxy != nil {
+		resp, body, err := h.proxy.Forward(r)
+		if err == nil && resp.StatusCode < 400 {
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.WriteHeader(resp.StatusCode)
+			w.Write(body)
+			return
+		}
+	}
+
+	// Redlib unavailable — reconstruct the CDN URL and serve via media proxy.
+	cdnURL := pathToCDNURL(r.URL.Path, r.URL.RawQuery)
+	if cdnURL == "" {
 		http.NotFound(w, r)
 		return
 	}
-	resp, body, err := h.proxy.Forward(r)
-	if err != nil || resp.StatusCode >= 400 {
-		http.NotFound(w, r)
-		return
+
+	r.URL.RawQuery = "url=" + url.QueryEscape(cdnURL)
+	h.mediaProxy.ServeMedia(w, r)
+}
+
+func pathToCDNURL(path, rawQuery string) string {
+	var base string
+	switch {
+	case strings.HasPrefix(path, "/img/"):
+		base = "https://i.redd.it/" + strings.TrimPrefix(path, "/img/")
+	case strings.HasPrefix(path, "/preview/pre/"):
+		base = "https://preview.redd.it/" + strings.TrimPrefix(path, "/preview/pre/")
+	case strings.HasPrefix(path, "/preview/external-pre/"):
+		base = "https://external-preview.redd.it/" + strings.TrimPrefix(path, "/preview/external-pre/")
+	case strings.HasPrefix(path, "/thumb/a/"):
+		base = "https://a.thumbs.redditmedia.com/" + strings.TrimPrefix(path, "/thumb/a/")
+	case strings.HasPrefix(path, "/thumb/b/"):
+		base = "https://b.thumbs.redditmedia.com/" + strings.TrimPrefix(path, "/thumb/b/")
+	case strings.HasPrefix(path, "/emoji/"):
+		base = "https://emoji.redditmedia.com/" + strings.TrimPrefix(path, "/emoji/")
+	default:
+		return ""
 	}
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(body)
+	if rawQuery != "" {
+		base += "?" + rawQuery
+	}
+	return base
 }
 
 var vredditClient = &http.Client{
