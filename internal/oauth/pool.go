@@ -171,11 +171,18 @@ func (p *Pool) refreshLoop(ctx context.Context, mt *ManagedToken) {
 }
 
 func (p *Pool) GetBestToken() *ManagedToken {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
+	now := time.Now()
 	var best *ManagedToken
 	for _, mt := range p.tokens {
+		if mt.RateRemaining <= 0 && now.After(mt.RateResetAt) {
+			mt.RateRemaining = 99
+			mt.RateResetAt = now.Add(10 * time.Minute)
+			remaining := 99
+			mt.StoredToken.RateRemaining = &remaining
+		}
 		if mt.RateRemaining <= 0 {
 			continue
 		}
@@ -229,10 +236,15 @@ func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	now := time.Now()
 	total := 0
 	for _, mt := range p.tokens {
-		if mt.RateRemaining > 0 {
-			total += mt.RateRemaining
+		remaining := mt.RateRemaining
+		if remaining <= 0 && now.After(mt.RateResetAt) {
+			remaining = 99
+		}
+		if remaining > 0 {
+			total += remaining
 		}
 	}
 	return total, nil
