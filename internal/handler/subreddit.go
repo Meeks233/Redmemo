@@ -51,6 +51,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
 			h.ratelimit.Increment()
+			body = h.rebrand(body)
 			h.cache.PutHTML(r.Context(), urlPath+"?after="+after, body, 5*time.Minute)
 
 			if h.cfg.RateLimit.ArchiveOnProxy {
@@ -58,7 +59,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 			}
 
 			w.Header().Set("X-Cache", "MISS")
-			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(resp.StatusCode)
 			w.Write(body)
 			return

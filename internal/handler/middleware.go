@@ -66,6 +66,16 @@ func recovery(next http.Handler) http.Handler {
 	})
 }
 
+func (h *Handler) rebrand(body []byte) []byte {
+	brand := h.cfg.Render.BrandName
+	if brand == "" || brand == "Redlib" {
+		return body
+	}
+	s := strings.ReplaceAll(string(body), "Redlib", brand)
+	s = strings.ReplaceAll(s, "redlib", strings.ToLower(brand))
+	return []byte(s)
+}
+
 func readPreferences(r *http.Request) reddit.Preferences {
 	p := reddit.Preferences{
 		FixedNavbar: "on",
