@@ -1,7 +1,12 @@
 services:
   redmemo:
     build: .
-    network_mode: host
+    ports:
+      - "8080:8080"
+    environment:
+      - REDMEMO_REDLIB_UPSTREAM=http://redlib:8080
+      - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:-redmemo_dev}@postgres:5432/redmemo?sslmode=disable
+      - REDMEMO_REDIS_ADDR=redis:6379
     volumes:
       - ./config.yaml:/etc/redmemo/config.yaml:ro
       - media_data:/data/media
@@ -56,18 +61,6 @@ services:
       - REDLIB_DEFAULT_REMOVE_DEFAULT_FEEDS=on
       - REDLIB_DEFAULT_USE_HLS=on
     restart: unless-stopped
-
-  # Optional: uncomment to enable nginx for media X-Accel-Redirect optimization
-  # nginx:
-  #   image: nginx:alpine
-  #   ports:
-  #     - "80:80"
-  #   volumes:
-  #     - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-  #     - media_data:/data/media:ro
-  #   depends_on:
-  #     - redmemo
-  #   restart: unless-stopped
 
 volumes:
   pg_data:
