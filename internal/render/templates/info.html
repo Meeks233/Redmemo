@@ -1,0 +1,79 @@
+{{ define "title" }}Instance Information | {{ .BrandName }}{{ end }}
+
+{{ define "subscriptions" }}{{ template "sub_list" dict "Prefs" .Prefs "Current" "" }}{{ end }}
+
+{{ define "search" }}{{ template "searchbox" dict "Root" "" "Query" "" }}{{ end }}
+
+{{ template "base" . }}
+
+{{ define "content" }}
+<div id="message">
+	<h1>Instance information</h1>
+	<br>
+	<div>
+		<table>
+			<thead><tr><th colspan="2">Redlib Instance</th></tr></thead>
+			<tbody>
+				<tr>
+					<td>Status</td>
+					<td>{{ if .RedlibOnline }}<span style="color:#4caf50;">● Online</span>{{ else }}<span style="color:#f44336;">● Offline</span>{{ end }}</td>
+				</tr>
+				<tr>
+					<td>Upstream</td>
+					<td>{{ .RedlibUpstream }}</td>
+				</tr>
+				{{ if .RedlibVersion }}
+				<tr>
+					<td>Redlib Version</td>
+					<td>{{ .RedlibVersion }}</td>
+				</tr>
+				{{ end }}
+			</tbody>
+		</table>
+		<br />
+		<table>
+			<thead><tr><th colspan="2">{{ .BrandName }} Instance</th></tr></thead>
+			<tbody>
+				<tr>
+					<td>Version</td>
+					<td>{{ .Version }}</td>
+				</tr>
+				<tr>
+					<td>Archived Posts</td>
+					<td>{{ .PostCount }}</td>
+				</tr>
+				<tr>
+					<td>Archived Subreddits</td>
+					<td>{{ .SubredditCount }}</td>
+				</tr>
+				<tr>
+					<td>Cached Media Files</td>
+					<td>{{ .MediaCount }}</td>
+				</tr>
+				<tr>
+					<td>Media Storage Used</td>
+					<td>{{ .MediaSize }}</td>
+				</tr>
+				<tr>
+					<td>OAuth Fallback</td>
+					<td>{{ if .OAuthEnabled }}Enabled{{ else }}Disabled{{ end }}</td>
+				</tr>
+			</tbody>
+		</table>
+		{{ if .PrefetchSubs }}
+		<br />
+		<table>
+			<thead><tr><th colspan="2">Prefetch Subreddits</th></tr></thead>
+			<tbody>
+				{{ range .PrefetchSubs }}
+				<tr>
+					<td><a href="/r/{{ . }}">r/{{ . }}</a></td>
+					<td></td>
+				</tr>
+				{{ end }}
+			</tbody>
+		</table>
+		{{ end }}
+	</div>
+</div>
+{{ end }}

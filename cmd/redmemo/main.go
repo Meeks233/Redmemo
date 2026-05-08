@@ -105,7 +105,7 @@ func main() {
 	// 9. Register routes, start HTTP server
 	h := handler.New(
 		reverseProxy, rateLimiter, redisCache, renderer, redditCli,
-		postStore, commentStore, subStore, mediaProxy, cfg,
+		postStore, commentStore, subStore, mediaIndexStore, mediaProxy, cfg,
 	)
 
 	srv := &http.Server{

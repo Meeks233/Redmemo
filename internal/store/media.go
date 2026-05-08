@@ -89,6 +89,11 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	return tx.Commit()
 }
 
+func (s *MediaIndexStore) Stats() (count int64, totalSize int64, err error) {
+	err = s.db.QueryRow(`SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(file_size), 0) FROM media_index WHERE file_path IS NOT NULL`).Scan(&count, &totalSize)
+	return
+}
+
 func (s *MediaIndexStore) MarkEvicted(hash string) error {
 	_, err := s.db.Exec(`
 		UPDATE media_index SET file_path = NULL WHERE hash = $1`, hash,

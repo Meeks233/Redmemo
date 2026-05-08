@@ -88,6 +88,18 @@ func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	return scanPosts(rows)
 }
 
+func (s *PostStore) Count() (int64, error) {
+	var count int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts`).Scan(&count)
+	return count, err
+}
+
+func (s *PostStore) SubredditCount() (int64, error) {
+	var count int64
+	err := s.db.QueryRow(`SELECT COUNT(DISTINCT subreddit) FROM posts`).Scan(&count)
+	return count, err
+}
+
 func scanPosts(rows *sql.Rows) ([]*StoredPost, error) {
 	var posts []*StoredPost
 	for rows.Next() {

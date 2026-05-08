@@ -38,6 +38,7 @@ var pageTemplates = map[string]string{
 	"user.html":      "templates/user.html",
 	"settings.html":  "templates/settings.html",
 	"error.html":     "templates/error.html",
+	"info.html":      "templates/info.html",
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
@@ -121,6 +122,19 @@ type ErrorPageData struct {
 	StatusCode int
 }
 
+type InfoPageData struct {
+	BasePage
+	RedlibOnline   bool
+	RedlibUpstream string
+	RedlibVersion  string
+	PostCount      int64
+	SubredditCount int64
+	MediaCount     int64
+	MediaSize      string
+	OAuthEnabled   bool
+	PrefetchSubs   []string
+}
+
 func (e *Engine) basePage(url string, prefs reddit.Preferences) BasePage {
 	return BasePage{
 		URL:       url,
@@ -171,6 +185,13 @@ func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 		data.BrandName = e.cfg.BrandName
 	}
 	return e.renderPage(w, "settings.html", data)
+}
+
+func (e *Engine) RenderInfo(w io.Writer, data InfoPageData) error {
+	if data.BrandName == "" {
+		data.BrandName = e.cfg.BrandName
+	}
+	return e.renderPage(w, "info.html", data)
 }
 
 func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int) {

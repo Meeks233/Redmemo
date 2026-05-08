@@ -24,6 +24,7 @@ type Handler struct {
 	postStore    *store.PostStore
 	commentStore *store.CommentStore
 	subStore     *store.SubredditStore
+	mediaStore   *store.MediaIndexStore
 	mediaProxy   *media.Proxy
 	cfg          *config.Config
 
@@ -42,6 +43,7 @@ func New(
 	ps *store.PostStore,
 	cs *store.CommentStore,
 	ss *store.SubredditStore,
+	ms *store.MediaIndexStore,
 	mp *media.Proxy,
 	cfg *config.Config,
 ) *Handler {
@@ -54,6 +56,7 @@ func New(
 		postStore:    ps,
 		commentStore: cs,
 		subStore:     ss,
+		mediaStore:   ms,
 		mediaProxy:   mp,
 		cfg:          cfg,
 	}
@@ -103,6 +106,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /user/{name}/{listing}", h.handleUser)
 	mux.HandleFunc("GET /search", h.handleSearch)
 	mux.HandleFunc("GET /r/{sub}/search", h.handleSubSearch)
+
+	// Info
+	mux.HandleFunc("GET /info", h.handleInfo)
 
 	// Settings
 	mux.HandleFunc("GET /settings", h.handleSettings)
