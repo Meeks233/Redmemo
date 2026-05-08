@@ -90,6 +90,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /touch-icon-iphone.png", h.handleRedlibMedia)
 	mux.HandleFunc("GET /check_update.js", h.handleRedlibMedia)
 
+	// Video proxy — v.redd.it
+	mux.HandleFunc("GET /vid/", h.handleVideoProxy)
+	mux.HandleFunc("GET /hls/", h.handleVideoProxy)
+
 	// Page routes
 	mux.HandleFunc("GET /{$}", h.handleFrontPage)
 	mux.HandleFunc("GET /r/{sub}", h.handleSubreddit)

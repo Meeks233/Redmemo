@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -33,7 +34,7 @@ func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cach
 }
 
 func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
-	originalURL := r.URL.Query().Get("url")
+	originalURL := html.UnescapeString(r.URL.Query().Get("url"))
 	if originalURL == "" {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
 		return

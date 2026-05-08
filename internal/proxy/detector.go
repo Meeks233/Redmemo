@@ -38,11 +38,10 @@ func ExtractResetTime(body []byte) int {
 
 // IsServerError reports whether the redlib response indicates a server error.
 func IsServerError(statusCode int, body []byte) bool {
-	if statusCode >= 500 {
+	if statusCode >= 400 {
 		return true
 	}
-	if statusCode == 200 {
-		return strings.Contains(string(body), "Reddit is having issues")
-	}
-	return false
+	s := string(body)
+	return strings.Contains(s, "Reddit is having issues") ||
+		strings.Contains(s, "Failed to parse page JSON data")
 }
