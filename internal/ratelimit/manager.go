@@ -29,6 +29,8 @@ type Manager struct {
 	resetAt      time.Time
 	exhausted    bool
 
+	prefetchUsed int
+
 	budget BudgetSource
 	stopCh chan struct{}
 }
@@ -40,6 +42,7 @@ type StatusSnapshot struct {
 	ResetAt      time.Time `json:"reset_at"`
 	Exhausted    bool      `json:"exhausted"`
 	SafetyBuffer int       `json:"safety_buffer"`
+	PrefetchUsed int       `json:"prefetch_used"`
 }
 
 func New(cfg config.RateLimitConfig, budget BudgetSource) *Manager {
@@ -75,10 +78,22 @@ func (m *Manager) CanRequestFallback(ctx context.Context) bool {
 }
 
 // CanPrefetch reports whether prefetching is allowed and the available budget.
-// Prefetch uses own OAuth tokens (not redlib quota). Additionally, when the
-// redlib window is about to reset (< 2 min remaining), the safety buffer is
-// released for prefetch use via redlib.
+// Budget is capped at safetyBuffer per window so prefetch never starves user
+// requests. Uses own OAuth tokens; additionally when the redlib window is about
+// to reset (< 2 min remaining), unused redlib quota is released for prefetch.
 func (m *Manager) CanPrefetch(ctx context.Context) (bool, int) {
+	m.mu.RLock()
+	windowBudget := m.safetyBuffer - m.prefetchUsed
+	redlibBudget := 0
+	if !m.exhausted && time.Until(m.resetAt) < 2*time.Minute && m.remaining > 0 {
+		redlibBudget = m.remaining
+	}
+	m.mu.RUnlock()
+
+	if windowBudget <= 0 {
+		return false, 0
+	}
+
 	var oauthBudget int
 	if m.budget != nil {
 		b, err := m.budget.RemainingBudget(ctx)
@@ -87,15 +102,18 @@ func (m *Manager) CanPrefetch(ctx context.Context) (bool, int) {
 		}
 	}
 
-	m.mu.RLock()
-	redlibBudget := 0
-	if !m.exhausted && time.Until(m.resetAt) < 2*time.Minute && m.remaining > 0 {
-		redlibBudget = m.remaining
+	available := oauthBudget + redlibBudget
+	if available > windowBudget {
+		available = windowBudget
 	}
-	m.mu.RUnlock()
+	return available > 0, available
+}
 
-	total := oauthBudget + redlibBudget
-	return total > 0, total
+// IncrementPrefetch records one prefetch request consumed in the current window.
+func (m *Manager) IncrementPrefetch() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prefetchUsed++
 }
 
 // Status returns a snapshot of the current rate limit state.
@@ -109,6 +127,7 @@ func (m *Manager) Status() StatusSnapshot {
 		ResetAt:      m.resetAt,
 		Exhausted:    m.exhausted,
 		SafetyBuffer: m.safetyBuffer,
+		PrefetchUsed: m.prefetchUsed,
 	}
 }
 
@@ -171,6 +190,7 @@ func (m *Manager) ResetWindow() {
 	defer m.mu.Unlock()
 	m.remaining = m.windowSize
 	m.used = 0
+	m.prefetchUsed = 0
 	m.exhausted = false
 	m.resetAt = time.Now().Add(m.windowDur)
 }

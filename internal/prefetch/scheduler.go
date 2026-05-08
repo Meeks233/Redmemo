@@ -125,6 +125,7 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 
 	posts, _, after, err := s.redditCli.FetchSubreddit(ctx, sub.Name, sortBy, "", 25)
 	*used++
+	s.rateLimiter.IncrementPrefetch()
 	if err != nil {
 		return fmt.Errorf("fetch listing: %w", err)
 	}
@@ -136,6 +137,7 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 	if *used < budget {
 		subInfo, err := s.redditCli.FetchSubredditAbout(ctx, sub.Name)
 		*used++
+	s.rateLimiter.IncrementPrefetch()
 		if err == nil {
 			s.saveSubreddit(&subInfo)
 		}
@@ -169,6 +171,7 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 		}
 		morePosts, _, nextAfter, err := s.redditCli.FetchSubreddit(ctx, sub.Name, sortBy, after, 25)
 		*used++
+	s.rateLimiter.IncrementPrefetch()
 		if err != nil {
 			return fmt.Errorf("fetch page %d: %w", page+1, err)
 		}
@@ -189,6 +192,7 @@ func (s *Scheduler) prefetchSub(ctx context.Context, sub config.PrefetchSubConfi
 func (s *Scheduler) prefetchComments(ctx context.Context, sub, postID, permalink string, used *int) {
 	post, comments, err := s.redditCli.FetchPost(ctx, sub, postID, "confidence")
 	*used++
+	s.rateLimiter.IncrementPrefetch()
 	if err != nil {
 		log.Printf("prefetch: comments for %s/%s failed: %v", sub, postID, err)
 		return
