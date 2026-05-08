@@ -73,7 +73,10 @@ func (h *Handler) rebrand(body []byte) []byte {
 	if brand == "" || brand == "Redlib" {
 		return body
 	}
-	s := strings.ReplaceAll(string(body), "Redlib", brand)
+	s := string(body)
+	s = strings.ReplaceAll(s, `<span id="red">red</span><span id="lib">lib.</span>`, brand)
+	s = strings.ReplaceAll(s, `<span id="red">red</span><span id="lib">lib</span>`, brand)
+	s = strings.ReplaceAll(s, "Redlib", brand)
 	s = strings.ReplaceAll(s, "redlib", strings.ToLower(brand))
 	return []byte(s)
 }
