@@ -55,8 +55,9 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	// Level 3: Own OAuth fallback
 	if h.ratelimit.CanRequestFallback(r.Context()) {
-		h.renderPostFallback(w, r, sub, id, commentSort, prefs)
-		return
+		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
+			return
+		}
 	}
 
 	// Level 4: Archive
@@ -69,12 +70,11 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
 }
 
-func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) {
+func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) bool {
 	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
 	if err != nil {
 		log.Printf("handler: fallback fetch post %s/%s: %v", sub, id, err)
-		h.renderer.RenderError(w, "获取帖子失败: "+err.Error(), http.StatusBadGateway)
-		return
+		return false
 	}
 
 	go h.archivePost(post, comments, sub)
@@ -98,6 +98,7 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	if err := h.renderer.RenderPost(w, data); err != nil {
 		log.Printf("handler: render post: %v", err)
 	}
+	return true
 }
 
 func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string) {

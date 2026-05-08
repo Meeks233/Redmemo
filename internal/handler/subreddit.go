@@ -71,8 +71,9 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 
 	// Level 3: Own OAuth fallback
 	if h.ratelimit.CanRequestFallback(r.Context()) {
-		h.renderSubredditFallback(w, r, sub, sort, after, prefs)
-		return
+		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
+			return
+		}
 	}
 
 	// Level 4: Archive
@@ -86,7 +87,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
 }
 
-func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences) {
+func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences) bool {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -94,8 +95,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, 25)
 	if err != nil {
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
-		h.renderer.RenderError(w, "获取子版块失败: "+err.Error(), http.StatusBadGateway)
-		return
+		return false
 	}
 
 	subInfo, _ := h.redditCli.FetchSubredditAbout(r.Context(), sub)
@@ -122,6 +122,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	if err := h.renderer.RenderSubreddit(w, data); err != nil {
 		log.Printf("handler: render subreddit: %v", err)
 	}
+	return true
 }
 
 func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Request, sub string, stored []*store.StoredPost, prefs reddit.Preferences) {

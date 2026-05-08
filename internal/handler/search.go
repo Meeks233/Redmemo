@@ -61,38 +61,35 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	if h.ratelimit.CanRequestFallback(r.Context()) {
 		restrictSR := sub != ""
 		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR)
-		if err != nil {
-			log.Printf("handler: fallback search %q: %v", query, err)
-			h.renderer.RenderError(w, "搜索失败: "+err.Error(), http.StatusBadGateway)
+		if err == nil {
+			data := render.SearchPageData{
+				BasePage: render.BasePage{
+					URL:       urlPath,
+					Prefs:     prefs,
+					BrandName: h.cfg.Render.BrandName,
+					Version:   "0.1.0",
+				},
+				Posts:      posts,
+				Subreddits: subs,
+				Params: reddit.SearchParams{
+					Query:      query,
+					Sort:       sort,
+					Timeframe:  t,
+					After:      after,
+					RestrictSR: restrictSR,
+				},
+				Sub:     sub,
+				NoPosts: len(posts) == 0,
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Source", "fallback")
+			if err := h.renderer.RenderSearch(w, data); err != nil {
+				log.Printf("handler: render search: %v", err)
+			}
 			return
 		}
-
-		data := render.SearchPageData{
-			BasePage: render.BasePage{
-				URL:       urlPath,
-				Prefs:     prefs,
-				BrandName: h.cfg.Render.BrandName,
-				Version:   "0.1.0",
-			},
-			Posts:      posts,
-			Subreddits: subs,
-			Params: reddit.SearchParams{
-				Query:      query,
-				Sort:       sort,
-				Timeframe:  t,
-				After:      after,
-				RestrictSR: restrictSR,
-			},
-			Sub:     sub,
-			NoPosts: len(posts) == 0,
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("X-Source", "fallback")
-		if err := h.renderer.RenderSearch(w, data); err != nil {
-			log.Printf("handler: render search: %v", err)
-		}
-		return
+		log.Printf("handler: fallback search %q: %v", query, err)
 	}
 
 	// Level 4: Archive search

@@ -48,32 +48,29 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	// Level 3: Own OAuth fallback
 	if h.ratelimit.CanRequestFallback(r.Context()) {
 		user, posts, _, err := h.redditCli.FetchUser(r.Context(), name, listing, sort, after)
-		if err != nil {
-			log.Printf("handler: fallback fetch user %s: %v", name, err)
-			h.renderer.RenderError(w, "获取用户页失败: "+err.Error(), http.StatusBadGateway)
+		if err == nil {
+			data := render.UserPageData{
+				BasePage: render.BasePage{
+					URL:       urlPath,
+					Prefs:     prefs,
+					BrandName: h.cfg.Render.BrandName,
+					Version:   "0.1.0",
+				},
+				User:    user,
+				Posts:   posts,
+				Listing: listing,
+				Sort:    [2]string{sort, r.URL.Query().Get("t")},
+				NoPosts: len(posts) == 0,
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Source", "fallback")
+			if err := h.renderer.RenderUser(w, data); err != nil {
+				log.Printf("handler: render user: %v", err)
+			}
 			return
 		}
-
-		data := render.UserPageData{
-			BasePage: render.BasePage{
-				URL:       urlPath,
-				Prefs:     prefs,
-				BrandName: h.cfg.Render.BrandName,
-				Version:   "0.1.0",
-			},
-			User:    user,
-			Posts:   posts,
-			Listing: listing,
-			Sort:    [2]string{sort, r.URL.Query().Get("t")},
-			NoPosts: len(posts) == 0,
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("X-Source", "fallback")
-		if err := h.renderer.RenderUser(w, data); err != nil {
-			log.Printf("handler: render user: %v", err)
-		}
-		return
+		log.Printf("handler: fallback fetch user %s: %v", name, err)
 	}
 
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
