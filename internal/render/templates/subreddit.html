@@ -34,7 +34,7 @@
 			{{ end }}
 		</form>
 
-		{{ if .AllPostsHiddenNSFW }}
+		{{ if and .AllPostsHiddenNSFW (not .Sub.NSFW) }}
 		<center>All posts are hidden because they are NSFW. Enable "Show NSFW posts" in settings to view.</center>
 		{{ end }}
 
@@ -47,7 +47,7 @@
 		{{ else }}
 		<div id="posts">
 		{{ range .Posts }}
-			{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on")) }}
+			{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") (not $.Sub.NSFW)) }}
 			<hr class="sep" />
 			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
 			{{ end }}
