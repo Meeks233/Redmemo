@@ -47,7 +47,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	if h.oauthPool.HasAvailableTokens() {
 		triedOAuth = true
 		restrictSR := sub != ""
-		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR)
+		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 10)
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
 
@@ -121,7 +121,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			diag = append(diag, "L4 OAuth fallback: rate limited locally")
 		} else {
 			restrictSR := sub != ""
-			posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR)
+			posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 10)
 			if err == nil {
 				go h.archiver.ArchivePosts(posts, sub, "search")
 
@@ -216,9 +216,9 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 	var err error
 
 	if h.oauthPool.HasAvailableTokens() {
-		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR)
+		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 25)
 	} else {
-		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR)
+		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 25)
 	}
 	if err != nil {
 		log.Printf("background archive search %q: %v", query, err)

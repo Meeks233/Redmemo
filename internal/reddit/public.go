@@ -110,15 +110,18 @@ func (c *PublicClient) FetchPost(ctx context.Context, sub, id, commentSort strin
 	return ParsePostPage(data)
 }
 
-func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, after string, restrictSR bool) ([]Post, []Subreddit, string, error) {
+func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, after string, restrictSR bool, limit int) ([]Post, []Subreddit, string, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
 	var path string
 	if sub != "" {
-		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&q=%s", sub, query)
+		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&limit=%d&q=%s", sub, limit, query)
 		if restrictSR {
 			path += "&restrict_sr=on"
 		}
 	} else {
-		path = fmt.Sprintf("/search.json?raw_json=1&q=%s", query)
+		path = fmt.Sprintf("/search.json?raw_json=1&limit=%d&q=%s", limit, query)
 	}
 	if sort != "" {
 		path += "&sort=" + sort

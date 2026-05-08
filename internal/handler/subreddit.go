@@ -20,23 +20,23 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	if frontPage == "" {
 		frontPage = "popular"
 	}
-	h.serveSubreddit(w, r, frontPage, prefs.PostSort, prefs)
+	h.serveSubreddit(w, r, frontPage, prefs.PostSort, prefs, 5)
 }
 
 func (h *Handler) handleSubreddit(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	prefs := readPreferences(r)
-	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs)
+	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs, 25)
 }
 
 func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	sort := r.PathValue("sort")
 	prefs := readPreferences(r)
-	h.serveSubreddit(w, r, sub, sort, prefs)
+	h.serveSubreddit(w, r, sub, sort, prefs, 25)
 }
 
-func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences) {
+func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences, limit int) {
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
 	var diag []string
@@ -54,7 +54,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	triedOAuth := false
 	if h.oauthPool.HasAvailableTokens() {
 		triedOAuth = true
-		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
+		if h.renderSubredditFallback(w, r, sub, sort, after, prefs, limit) {
 			return
 		}
 		diag = append(diag, "L2 OAuth: fetch failed")
@@ -96,7 +96,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	if !triedOAuth {
 		if !h.ratelimit.CanRequestFallback(r.Context()) {
 			diag = append(diag, "L4 OAuth fallback: rate limited locally")
-		} else if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
+		} else if h.renderSubredditFallback(w, r, sub, sort, after, prefs, limit) {
 			return
 		} else {
 			diag = append(diag, "L4 OAuth fallback: fetch failed")
@@ -106,7 +106,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	}
 
 	// Level 5: Archive
-	posts, _ := h.postStore.ListBySubreddit(sub, 25, 0)
+	posts, _ := h.postStore.ListBySubreddit(sub, limit, 0)
 	if len(posts) > 0 {
 		h.renderSubredditFromArchive(w, r, sub, posts, prefs)
 		return
@@ -140,12 +140,12 @@ func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
 	}
 }
 
-func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences) bool {
+func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences, limit int) bool {
 	if sort == "" {
 		sort = "hot"
 	}
 
-	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, 25)
+	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, limit)
 	if err != nil {
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
 		return false
