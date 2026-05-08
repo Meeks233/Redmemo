@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/handler"
@@ -84,9 +85,11 @@ func main() {
 	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache)
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
+	archiver := archive.NewService(postStore, commentStore, subStore)
+
 	prefetcher := prefetch.New(
 		cfg.Prefetch, rateLimiter, redditCli,
-		postStore, commentStore, subStore, mediaProxy,
+		archiver, mediaProxy,
 	)
 
 	// 8. Start background tasks
@@ -104,8 +107,8 @@ func main() {
 
 	// 9. Register routes, start HTTP server
 	h := handler.New(
-		reverseProxy, rateLimiter, redisCache, renderer, redditCli,
-		postStore, commentStore, subStore, mediaIndexStore, mediaProxy, cfg,
+		reverseProxy, rateLimiter, redisCache, renderer, redditCli, oauthPool,
+		postStore, commentStore, subStore, mediaIndexStore, mediaProxy, archiver, cfg,
 	)
 
 	srv := &http.Server{

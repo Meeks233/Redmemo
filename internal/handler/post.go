@@ -35,17 +35,22 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Level 2: Redlib proxy
+	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
+	triedOAuth := false
+	if h.oauthPool.HasAvailableTokens() {
+		triedOAuth = true
+		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
+			return
+		}
+	}
+
+	// Level 3: Redlib proxy
 	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
-
-			if h.cfg.RateLimit.ArchiveOnProxy {
-				go h.archivePostByID(sub, id)
-			}
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -55,23 +60,26 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
 			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 		}
 	}
 
-	// Level 3: Own OAuth fallback
-	if h.ratelimit.CanRequestFallback(r.Context()) {
+	// Level 4: Own OAuth fallback (if not tried above)
+	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
 			return
 		}
 	}
 
-	// Level 4: Archive
+	// Level 5: Archive
 	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
 		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort)
 		return
 	}
 
+	// Level 6: Error + background spawn
+	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
 }
 
@@ -82,7 +90,10 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		return false
 	}
 
-	go h.archivePost(post, comments, sub)
+	go func() {
+		h.archiver.ArchivePost(&post, sub, "oauth_fallback")
+		h.archiver.ArchiveComments(post.Permalink, comments)
+	}()
 
 	data := render.PostPageData{
 		BasePage: render.BasePage{
@@ -138,70 +149,4 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if err := h.renderer.RenderPost(w, data); err != nil {
 		log.Printf("handler: render post from archive: %v", err)
 	}
-}
-
-func (h *Handler) archivePostByID(sub, id string) {
-	if h.redditCli == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if !h.ratelimit.CanRequestFallback(ctx) {
-		return
-	}
-	post, comments, err := h.redditCli.FetchPost(ctx, sub, id, "confidence")
-	if err != nil {
-		log.Printf("handler: archive post %s/%s via oauth failed: %v", sub, id, err)
-		return
-	}
-	h.archivePost(post, comments, sub)
-}
-
-func (h *Handler) archivePost(post reddit.Post, comments []reddit.Comment, sub string) {
-	postData, err := json.Marshal(post)
-	if err != nil {
-		return
-	}
-	urlPath := post.Permalink
-	if urlPath == "" {
-		return
-	}
-	score := 0
-	if post.Score[1] != "" {
-		json.Unmarshal([]byte(post.Score[1]), &score)
-	}
-	h.postStore.Save(&store.StoredPost{
-		URLPath:    urlPath,
-		Subreddit:  sub,
-		PostID:     post.ID,
-		Title:      post.Title,
-		JSONData:   postData,
-		Author:     post.Author.Name,
-		Score:      score,
-		CreatedUTC: time.Unix(int64(post.CreatedTS), 0),
-		Source:     "oauth_fallback",
-	})
-
-	if len(comments) > 0 {
-		commentsData, err := json.Marshal(comments)
-		if err != nil {
-			return
-		}
-		h.commentStore.Save(urlPath, &store.StoredComments{
-			PostURLPath:  urlPath,
-			JSONData:     commentsData,
-			CommentCount: countComments(comments),
-		})
-	}
-}
-
-func countComments(comments []reddit.Comment) int {
-	n := 0
-	for i := range comments {
-		if comments[i].Kind == "t1" {
-			n++
-			n += countComments(comments[i].Replies)
-		}
-	}
-	return n
 }

@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/proxy"
+	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 )
 
@@ -26,7 +28,16 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Level 2: Redlib proxy
+	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
+	triedOAuth := false
+	if h.oauthPool.HasAvailableTokens() {
+		triedOAuth = true
+		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
+			return
+		}
+	}
+
+	// Level 3: Redlib proxy
 	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
@@ -42,36 +53,49 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
 			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 		}
 	}
 
-	// Level 3: Own OAuth fallback
-	if h.ratelimit.CanRequestFallback(r.Context()) {
-		user, posts, _, err := h.redditCli.FetchUser(r.Context(), name, listing, sort, after)
-		if err == nil {
-			data := render.UserPageData{
-				BasePage: render.BasePage{
-					URL:       urlPath,
-					Prefs:     prefs,
-					BrandName: h.cfg.Render.BrandName,
-					Version:   "0.1.0",
-				},
-				User:    user,
-				Posts:   posts,
-				Listing: listing,
-				Sort:    [2]string{sort, r.URL.Query().Get("t")},
-				NoPosts: len(posts) == 0,
-			}
-
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("X-Source", "fallback")
-			if err := h.renderer.RenderUser(w, data); err != nil {
-				log.Printf("handler: render user: %v", err)
-			}
+	// Level 4: Own OAuth fallback (if not tried above)
+	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
+		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
 			return
 		}
-		log.Printf("handler: fallback fetch user %s: %v", name, err)
 	}
 
+	// Level 5: Error + background spawn
+	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
+}
+
+func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences) bool {
+	user, posts, _, err := h.redditCli.FetchUser(r.Context(), name, listing, sort, after)
+	if err != nil {
+		log.Printf("handler: fallback fetch user %s: %v", name, err)
+		return false
+	}
+
+	go h.archiver.ArchivePosts(posts, "", "user_listing")
+
+	data := render.UserPageData{
+		BasePage: render.BasePage{
+			URL:       urlPath,
+			Prefs:     prefs,
+			BrandName: h.cfg.Render.BrandName,
+			Version:   "0.1.0",
+		},
+		User:    user,
+		Posts:   posts,
+		Listing: listing,
+		Sort:    [2]string{sort, r.URL.Query().Get("t")},
+		NoPosts: len(posts) == 0,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Source", "fallback")
+	if err := h.renderer.RenderUser(w, data); err != nil {
+		log.Printf("handler: render user: %v", err)
+	}
+	return true
 }

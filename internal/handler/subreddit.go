@@ -47,17 +47,22 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		return
 	}
 
-	// Level 2: Redlib proxy
+	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
+	triedOAuth := false
+	if h.oauthPool.HasAvailableTokens() {
+		triedOAuth = true
+		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
+			return
+		}
+	}
+
+	// Level 3: Redlib proxy
 	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
 		resp, body, err := h.proxy.Forward(r)
 		if err == nil && !proxy.IsRateLimited(resp.StatusCode, body) && !proxy.IsServerError(resp.StatusCode, body) {
 			h.ratelimit.Increment()
 			body = h.rewriteMedia(h.rebrand(body))
 			h.cache.PutHTML(r.Context(), urlPath+"?after="+after, body, 5*time.Minute)
-
-			if h.cfg.RateLimit.ArchiveOnProxy {
-				go h.archiveSubreddit(sub, sort)
-			}
 
 			w.Header().Set("X-Cache", "MISS")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -67,24 +72,26 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		}
 		if err == nil && proxy.IsRateLimited(resp.StatusCode, body) {
 			h.ratelimit.OnRedlibRateLimited()
+			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 		}
 	}
 
-	// Level 3: Own OAuth fallback
-	if h.ratelimit.CanRequestFallback(r.Context()) {
+	// Level 4: Own OAuth fallback (if not tried above)
+	if !triedOAuth && h.ratelimit.CanRequestFallback(r.Context()) {
 		if h.renderSubredditFallback(w, r, sub, sort, after, prefs) {
 			return
 		}
 	}
 
-	// Level 4: Archive
+	// Level 5: Archive
 	posts, _ := h.postStore.ListBySubreddit(sub, 25, 0)
 	if len(posts) > 0 {
 		h.renderSubredditFromArchive(w, r, sub, posts, prefs)
 		return
 	}
 
-	// Level 5: Rate limit page
+	// Level 6: Rate limit page + background spawn
+	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests)
 }
 
@@ -101,7 +108,10 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 
 	subInfo, _ := h.redditCli.FetchSubredditAbout(r.Context(), sub)
 
-	go h.archiveSubredditPosts(posts, sub)
+	go func() {
+		h.archiver.ArchivePosts(posts, sub, "oauth_fallback")
+		h.archiver.ArchiveSubreddit(&subInfo)
+	}()
 
 	data := render.SubredditPageData{
 		BasePage: render.BasePage{
@@ -152,51 +162,5 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("X-Source", "archive")
 	if err := h.renderer.RenderSubreddit(w, data); err != nil {
 		log.Printf("handler: render subreddit from archive: %v", err)
-	}
-}
-
-func (h *Handler) archiveSubreddit(sub, sort string) {
-	if h.redditCli == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if !h.ratelimit.CanRequestFallback(ctx) {
-		log.Printf("handler: skip archive %s, no OAuth budget", sub)
-		return
-	}
-	posts, _, _, err := h.redditCli.FetchSubreddit(ctx, sub, sort, "", 25)
-	if err != nil {
-		log.Printf("handler: archive %s via oauth failed: %v", sub, err)
-		return
-	}
-	h.archiveSubredditPosts(posts, sub)
-}
-
-func (h *Handler) archiveSubredditPosts(posts []reddit.Post, sub string) {
-	for i := range posts {
-		data, err := json.Marshal(posts[i])
-		if err != nil {
-			continue
-		}
-		urlPath := posts[i].Permalink
-		if urlPath == "" {
-			continue
-		}
-		score := 0
-		if posts[i].Score[1] != "" {
-			json.Unmarshal([]byte(posts[i].Score[1]), &score)
-		}
-		h.postStore.Save(&store.StoredPost{
-			URLPath:    urlPath,
-			Subreddit:  sub,
-			PostID:     posts[i].ID,
-			Title:      posts[i].Title,
-			JSONData:   data,
-			Author:     posts[i].Author.Name,
-			Score:      score,
-			CreatedUTC: time.Unix(int64(posts[i].CreatedTS), 0),
-			Source:     "redlib_proxy",
-		})
 	}
 }

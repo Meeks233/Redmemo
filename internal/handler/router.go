@@ -5,9 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/media"
+	"github.com/redmemo/redmemo/internal/oauth"
 	"github.com/redmemo/redmemo/internal/proxy"
 	"github.com/redmemo/redmemo/internal/ratelimit"
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -21,11 +23,13 @@ type Handler struct {
 	cache        *cache.Cache
 	renderer     *render.Engine
 	redditCli    *reddit.Client
+	oauthPool    *oauth.Pool
 	postStore    *store.PostStore
 	commentStore *store.CommentStore
 	subStore     *store.SubredditStore
 	mediaStore   *store.MediaIndexStore
 	mediaProxy   *media.Proxy
+	archiver     *archive.Service
 	cfg          *config.Config
 
 	// Redlib health check cache
@@ -40,11 +44,13 @@ func New(
 	c *cache.Cache,
 	r *render.Engine,
 	rc *reddit.Client,
+	op *oauth.Pool,
 	ps *store.PostStore,
 	cs *store.CommentStore,
 	ss *store.SubredditStore,
 	ms *store.MediaIndexStore,
 	mp *media.Proxy,
+	arc *archive.Service,
 	cfg *config.Config,
 ) *Handler {
 	return &Handler{
@@ -53,11 +59,13 @@ func New(
 		cache:        c,
 		renderer:     r,
 		redditCli:    rc,
+		oauthPool:    op,
 		postStore:    ps,
 		commentStore: cs,
 		subStore:     ss,
 		mediaStore:   ms,
 		mediaProxy:   mp,
+		archiver:     arc,
 		cfg:          cfg,
 	}
 }

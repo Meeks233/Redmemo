@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -21,6 +22,11 @@ type ManagedToken struct {
 	RateResetAt   time.Time
 }
 
+const (
+	dynamicSpoofBackend = "dynamic_spoof"
+	maxDynamicTokens    = 3
+)
+
 type Pool struct {
 	mu     sync.RWMutex
 	tokens []*ManagedToken
@@ -30,6 +36,9 @@ type Pool struct {
 	cfg    config.OAuthConfig
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	spawnMu sync.Mutex
+	bgCtx   context.Context
 }
 
 func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache) *Pool {
@@ -43,6 +52,14 @@ func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStor
 
 func (p *Pool) Start(ctx context.Context) error {
 	ctx, p.cancel = context.WithCancel(ctx)
+	p.bgCtx = ctx
+
+	// Clean up expired dynamic tokens from DB.
+	if n, err := p.store.DeleteExpiredByBackend(dynamicSpoofBackend); err != nil {
+		log.Printf("oauth: cleanup expired dynamic tokens: %v", err)
+	} else if n > 0 {
+		log.Printf("oauth: cleaned up %d expired dynamic tokens", n)
+	}
 
 	stored, err := p.store.ListEnabled()
 	if err != nil {
@@ -248,6 +265,106 @@ func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
 		}
 	}
 	return total, nil
+}
+
+// HasAvailableTokens reports whether any token in the pool has remaining quota.
+func (p *Pool) HasAvailableTokens() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	now := time.Now()
+	for _, mt := range p.tokens {
+		if mt.RateRemaining > 0 {
+			return true
+		}
+		if now.After(mt.RateResetAt) {
+			return true
+		}
+	}
+	return false
+}
+
+// SpawnTokenIfNeeded creates a dynamic OAuth token in the background when the
+// pool has no available tokens and hasn't reached the dynamic token cap.
+func (p *Pool) SpawnTokenIfNeeded(ctx context.Context) {
+	if p.HasAvailableTokens() {
+		return
+	}
+
+	if !p.spawnMu.TryLock() {
+		return
+	}
+	defer p.spawnMu.Unlock()
+
+	if p.HasAvailableTokens() {
+		return
+	}
+
+	if p.dynamicCount() >= maxDynamicTokens {
+		log.Printf("oauth: dynamic token cap reached (%d/%d)", p.dynamicCount(), maxDynamicTokens)
+		return
+	}
+
+	log.Printf("oauth: spawning dynamic token (current dynamic: %d/%d)", p.dynamicCount(), maxDynamicTokens)
+	if err := p.spawnOne(ctx); err != nil {
+		log.Printf("oauth: spawn dynamic token failed: %v", err)
+	}
+}
+
+func (p *Pool) dynamicCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	n := 0
+	for _, mt := range p.tokens {
+		if mt.StoredToken.Backend == dynamicSpoofBackend {
+			n++
+		}
+	}
+	return n
+}
+
+func (p *Pool) spawnOne(ctx context.Context) error {
+	result, err := p.client.Authenticate(config.OAuthTokenConfig{Backend: "mobile_spoof"})
+	if err != nil {
+		return fmt.Errorf("authenticate: %w", err)
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
+	remaining := 99
+	st := &store.StoredToken{
+		ClientID:      "dynamic",
+		AccessToken:   result.AccessToken,
+		ExpiresAt:     &expiresAt,
+		RateRemaining: &remaining,
+		Backend:       dynamicSpoofBackend,
+		Enabled:       true,
+		LastUsed:      &now,
+	}
+	if err := p.store.Upsert(st); err != nil {
+		return fmt.Errorf("persist token: %w", err)
+	}
+
+	mt := &ManagedToken{
+		StoredToken:   *st,
+		Identity:      GenerateIdentity(),
+		RateRemaining: 99,
+		RateResetAt:   now.Add(10 * time.Minute),
+	}
+
+	p.mu.Lock()
+	p.tokens = append(p.tokens, mt)
+	p.mu.Unlock()
+
+	bgCtx := p.bgCtx
+	if bgCtx == nil {
+		bgCtx = ctx
+	}
+	p.wg.Add(1)
+	go p.refreshLoop(bgCtx, mt)
+
+	log.Printf("oauth: dynamic token spawned, expires in %ds", result.ExpiresIn)
+	return nil
 }
 
 func (p *Pool) Stop() {

@@ -90,6 +90,31 @@ func (s *TokenStore) Upsert(token *StoredToken) error {
 	return nil
 }
 
+func (s *TokenStore) DeleteExpiredByBackend(backend string) (int64, error) {
+	res, err := s.db.Exec(`
+		DELETE FROM oauth_tokens
+		WHERE backend = $1 AND expires_at IS NOT NULL AND expires_at < NOW()`,
+		backend,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired tokens: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+func (s *TokenStore) CountByBackend(backend string) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM oauth_tokens
+		WHERE backend = $1 AND enabled = TRUE`,
+		backend,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count tokens by backend: %w", err)
+	}
+	return count, nil
+}
+
 func scanTokens(rows *sql.Rows) ([]*StoredToken, error) {
 	var tokens []*StoredToken
 	for rows.Next() {
