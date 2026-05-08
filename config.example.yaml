@@ -1,0 +1,55 @@
+server:
+  listen: ":8080"
+  read_timeout: 30s
+  write_timeout: 60s
+
+redlib:
+  upstream: "http://redlib:8080"
+  enabled: true                        # false = standalone mode, no redlib dependency
+
+postgres:
+  dsn: "postgres://redmemo:password@postgres:5432/redmemo?sslmode=disable"
+  max_open_conns: 50
+  max_idle_conns: 10
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+  max_memory_mb: 256
+
+media:
+  root_path: "/data/media"
+  max_size_gb: 50
+  eviction_check_interval: 5m
+  eviction_threshold: 0.8              # trigger eviction at 80% capacity
+
+oauth:
+  tokens:
+    - client_id: "ohXpoqrZYub1kg"
+      backend: "mobile_spoof"
+
+ratelimit:
+  window_size: 500                     # total budget per window (conservative)
+  window_duration: 10m
+  safety_buffer: 50                    # reserved for prefetch
+  archive_on_proxy: true               # archive JSON while proxying redlib HTML
+
+prefetch:
+  enabled: true
+  check_interval: 30s
+  subreddits:
+    - name: "golang"
+      sort: "hot"
+      max_pages: 2
+      fetch_comments: true
+      fetch_media: true
+      priority: 10
+    - name: "linux"
+      sort: "new"
+      max_pages: 1
+      priority: 5
+
+render:
+  brand_name: "RedMemo"
+  show_archive_badge: true

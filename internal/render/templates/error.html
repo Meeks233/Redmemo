@@ -1,0 +1,12 @@
+{{ define "title" }}Error: {{ .Message }}{{ end }}
+
+{{ template "base" . }}
+
+{{ define "content" }}
+<div id="error">
+	<h1>{{ .Message }}</h1>
+	<h3><a href="https://www.redditstatus.com/">Reddit Status</a></h3>
+	<br />
+	<h3>Head back <a href="/">home</a>?</h3>
+</div>
+{{ end }}

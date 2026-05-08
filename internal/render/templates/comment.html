@@ -1,0 +1,44 @@
+{{ define "comment_tree" }}
+{{ if and (eq .Kind "more") (eq .ParentKind "t1") }}
+	<a class="deeper_replies" href="{{ .PostLink }}{{ .ParentID }}">&rarr; More replies ({{ .MoreCount }})</a>
+{{ else if eq .Kind "t1" }}
+<div id="{{ .ID }}" class="comment">
+	<div class="comment_left">
+		<p class="comment_score" title="{{ index .Score 1 }}">
+			{{ if ne .Prefs.HideScore "on" }}{{ index .Score 0 }}{{ else }}&#x2022;{{ end }}
+		</p>
+		<div class="line"></div>
+	</div>
+	<details class="comment_right" {{ if or (not .Collapsed) .Highlighted }}open{{ end }}>
+		<summary class="comment_data">
+			{{ if ne .Author.Name "[deleted]" }}
+				<a class="comment_author {{ .Author.Distinguished }} {{ if eq .Author.Name .PostAuthor }}op{{ end }}" href="/user/{{ .Author.Name }}">u/{{ .Author.Name }}</a>
+			{{ else }}
+				<span class="comment_author {{ .Author.Distinguished }}">u/[deleted]</span>
+			{{ end }}
+			{{ if .Author.Flair.FlairParts }}
+				<small class="author_flair">{{ template "render_flair" .Author.Flair.FlairParts }}</small>
+			{{ end }}
+			<a href="{{ .PostLink }}{{ .ID }}/?context=3#{{ .ID }}" class="created" title="{{ .Created }}">{{ .RelTime }}</a>
+			{{ if index .Edited 0 }}<span class="edited" title="{{ index .Edited 1 }}">edited {{ index .Edited 0 }}</span>{{ end }}
+			{{ if and .Awards (ne .Prefs.HideAwards "on") }}
+			<span class="dot">&bull;</span>
+			{{ range .Awards }}
+			<span class="award" title="{{ .Name }}">
+				<img alt="{{ .Name }}" src="{{ .IconURL }}" width="16" height="16"/>
+			</span>
+			{{ end }}
+			{{ end }}
+		</summary>
+		{{ if .IsFiltered }}
+		<div class="comment_body_filtered {{ if .Highlighted }}highlighted{{ end }}">(Filtered content)</div>
+		{{ else }}
+		<div class="comment_body {{ if .Highlighted }}highlighted{{ end }}">{{ .Body }}</div>
+		{{ end }}
+		<blockquote class="replies">
+			{{ range .Replies }}{{ template "comment_tree" . }}{{ end }}
+		</blockquote>
+	</details>
+</div>
+{{ end }}
+{{ end }}

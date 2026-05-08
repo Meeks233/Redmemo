@@ -1,0 +1,72 @@
+{{ define "title" }}{{ if .SingleThread }}{{ (index .Comments 0).Author.Name }} comments on {{ .Post.Title }} - r/{{ .Post.Community }}{{ else }}{{ .Post.Title }} - r/{{ .Post.Community }}{{ end }}{{ end }}
+
+{{ define "subscriptions" }}{{ template "sub_list" dict "Prefs" .Prefs "Current" .Post.Community }}{{ end }}
+
+{{ define "search" }}{{ template "searchbox" dict "Root" (concat "/r/" .Post.Community) "Query" "" }}{{ end }}
+
+{{ define "head_extra" }}
+<meta name="author" content="u/{{ .Post.Author.Name }}">
+<meta name="title" content="{{ .Post.Title }} - r/{{ .Post.Community }}">
+<meta property="og:title" content="{{ .Post.Title }} - r/{{ .Post.Community }}">
+<meta property="og:description" content="View on {{ .BrandName }}, an alternative private front-end to Reddit.">
+<meta property="og:url" content="{{ .Post.Permalink }}">
+{{ if eq .Post.PostType "image" }}
+<meta property="og:type" content="image">
+<meta property="og:image" content="{{ .Post.Thumbnail.URL }}">
+<meta property="twitter:card" content="summary_large_image">
+<meta property="twitter:image" content="{{ .Post.Thumbnail.URL }}">
+{{ else if or (eq .Post.PostType "video") (eq .Post.PostType "gif") }}
+<meta property="twitter:card" content="video">
+<meta property="og:type" content="video">
+<meta property="og:video" content="{{ .Post.Media.URL }}">
+<meta property="og:video:type" content="video/mp4">
+{{ else }}
+<meta property="og:type" content="website">
+{{ if .SingleThread }}
+<script src="/highlighted.js" defer></script>
+{{ end }}
+{{ end }}
+{{ end }}
+
+{{ template "base" . }}
+
+{{ define "content" }}
+	<div id="column_one">
+		{{ template "post_detail" dict "Post" .Post "Prefs" .Prefs }}
+
+		<div id="commentQueryForms">
+			<form id="sort">
+				<p id="comment_count">{{ index .Post.Comments 0 }} {{ commentsWord (index .Post.Comments 1) }} <span id="sorted_by">sorted by </span></p>
+				<select name="sort" title="Sort comments by" id="commentSortSelect">
+					{{ $sorts := list "confidence" "top" "new" "controversial" "old" }}
+					{{ range $sorts }}
+						<option value="{{ . }}" {{ if eq . $.Sort }}selected{{ end }}>{{ capitalize . }}</option>
+					{{ end }}
+				</select>
+				<button id="sort_submit" class="submit">{{ template "submit_svg" }}</button>
+			</form>
+			<form id="sort">
+				<input id="search" class="commentQuery" type="search" name="q" value="{{ .CommentQuery }}" placeholder="Search comments">
+				<input type="hidden" name="type" value="comment">
+			</form>
+		</div>
+
+		<div>
+		{{ if .CommentQuery }}
+		Comments containing "{{ .CommentQuery }}"&nbsp;|&nbsp;<a id="allCommentsLink" href="{{ .URLWithoutQuery }}">All comments</a>
+		{{ end }}
+		</div>
+
+		{{ range .Comments }}
+		<div class="thread">
+			{{ if $.SingleThread }}
+			<p class="thread_nav"><a href="{{ $.Post.Permalink }}">View all comments</a></p>
+			{{ if eq .ParentKind "t1" }}
+			<p class="thread_nav"><a href="?context=9999">Show parent comments</a></p>
+			{{ end }}
+			{{ end }}
+			{{ template "comment_tree" . }}
+		</div>
+		{{ end }}
+	</div>
+{{ end }}
