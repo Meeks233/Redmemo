@@ -61,7 +61,11 @@ services:
       - REDLIB_DEFAULT_REMOVE_DEFAULT_FEEDS=on
       - REDLIB_DEFAULT_USE_HLS=on
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/settings || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
     restart: unless-stopped
 
 volumes:
