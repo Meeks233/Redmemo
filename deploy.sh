@@ -12,16 +12,19 @@ log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
 warn() { echo -e "${YELLOW}[deploy]${NC} $*"; }
 err()  { echo -e "${RED}[deploy]${NC} $*"; }
 
-# --- 1. Kill old redmemo process ---
-log "Stopping old redmemo process..."
-pkill -f './redmemo' 2>/dev/null && log "Killed old process" || log "No old process running"
-sleep 1
+# --- 1. Stop old containers ---
+log "Stopping old containers..."
+docker compose down --remove-orphans 2>/dev/null || true
 
-# --- 2. Start infrastructure (postgres, redis, redlib) ---
-log "Starting infrastructure containers..."
+# --- 2. Build redmemo image ---
+log "Building redmemo image..."
+docker compose build redmemo
+
+# --- 3. Start infrastructure first ---
+log "Starting postgres, redis, redlib..."
 docker compose up -d postgres redis redlib
 
-# --- 3. Wait for health checks ---
+# --- 4. Wait for health checks ---
 log "Waiting for postgres..."
 for i in $(seq 1 30); do
     if docker compose exec -T postgres pg_isready -U redmemo -q 2>/dev/null; then
@@ -29,6 +32,7 @@ for i in $(seq 1 30); do
     fi
     if [ "$i" -eq 30 ]; then
         err "Postgres failed to start"
+        docker compose logs postgres | tail -10
         exit 1
     fi
     sleep 1
@@ -48,44 +52,41 @@ for i in $(seq 1 30); do
 done
 log "Redis ready"
 
-# --- 4. Flush Redis cache ---
+# --- 5. Flush Redis cache ---
 log "Flushing Redis cache..."
 docker compose exec -T redis redis-cli FLUSHALL
 log "Redis cache cleared"
 
-# --- 5. Build redmemo ---
-log "Building redmemo..."
-go build -o ./redmemo ./cmd/redmemo
-log "Build complete"
-
 # --- 6. Start redmemo ---
 log "Starting redmemo..."
-nohup ./redmemo config.yaml > redmemo.log 2>&1 &
-REDMEMO_PID=$!
-log "RedMemo started (PID: $REDMEMO_PID)"
+docker compose up -d redmemo
 
 # --- 7. Verify startup ---
-sleep 2
-if kill -0 "$REDMEMO_PID" 2>/dev/null; then
-    log "RedMemo is running"
+sleep 3
+if docker compose ps redmemo | grep -q "Up"; then
+    log "RedMemo container is running"
 else
-    err "RedMemo failed to start, check redmemo.log:"
-    tail -20 redmemo.log
+    err "RedMemo failed to start:"
+    docker compose logs --tail=30 redmemo
     exit 1
 fi
 
-# --- 8. Quick health check ---
-sleep 1
-if curl -sf http://127.0.0.1:8080/info > /dev/null 2>&1; then
-    log "Health check passed: http://127.0.0.1:8080"
-else
-    warn "Health check pending, redmemo may still be initializing"
-    warn "Check: curl http://127.0.0.1:8080/info"
-fi
+# --- 8. Health check ---
+for i in $(seq 1 10); do
+    if curl -sf http://127.0.0.1:8080/info > /dev/null 2>&1; then
+        log "Health check passed"
+        break
+    fi
+    if [ "$i" -eq 10 ]; then
+        warn "Health check pending, container may still be initializing"
+        warn "Check: curl http://127.0.0.1:8080/info"
+    fi
+    sleep 1
+done
 
 echo ""
 log "=== Deploy complete ==="
 log "  RedMemo:  http://127.0.0.1:8080"
 log "  Redlib:   http://127.0.0.1:8081"
-log "  Logs:     tail -f redmemo.log"
-log "  Stop:     pkill -f './redmemo'"
+log "  Logs:     docker compose logs -f redmemo"
+log "  Stop:     docker compose down"
