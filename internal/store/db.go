@@ -7,29 +7,17 @@ import (
 	_ "github.com/lib/pq"
 )
 
-type PostgresConfig struct {
-	Host     string
-	Port     int
-	User     string
-	Password string
-	DBName   string
-	SSLMode  string
-}
-
-func New(cfg PostgresConfig) (*sql.DB, error) {
-	if cfg.Port == 0 {
-		cfg.Port = 5432
-	}
-	if cfg.SSLMode == "" {
-		cfg.SSLMode = "disable"
-	}
-
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode)
-
+func New(dsn string, maxOpen, maxIdle int) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	if maxOpen > 0 {
+		db.SetMaxOpenConns(maxOpen)
+	}
+	if maxIdle > 0 {
+		db.SetMaxIdleConns(maxIdle)
 	}
 
 	if err := db.Ping(); err != nil {

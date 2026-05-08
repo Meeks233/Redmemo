@@ -4,3 +4,10 @@ reddit.md
 
 # Redlib reference clone
 _redlib_ref/
+
+# Build output
+bin/
+
+# Runtime config (contains secrets)
+config.yaml
+!config.example.yaml

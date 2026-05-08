@@ -2,14 +2,11 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-
-	_ "github.com/lib/pq"
 
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
@@ -38,19 +35,11 @@ func main() {
 	log.Printf("config: loaded %s", cfg)
 
 	// 2. Init PostgreSQL
-	db, err := sql.Open("postgres", cfg.Postgres.DSN)
+	db, err := store.New(cfg.Postgres.DSN, cfg.Postgres.MaxOpenConns, cfg.Postgres.MaxIdleConns)
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(cfg.Postgres.MaxOpenConns)
-	db.SetMaxIdleConns(cfg.Postgres.MaxIdleConns)
-	if err := db.Ping(); err != nil {
-		log.Fatalf("postgres ping: %v", err)
-	}
-	if err := store.RunMigrations(db); err != nil {
-		log.Fatalf("migrations: %v", err)
-	}
 	log.Println("postgres: connected and migrated")
 
 	// 3. Init Redis
