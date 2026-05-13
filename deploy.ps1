@@ -37,13 +37,27 @@ if ($hasConfig.Trim() -eq "no") {
     Warn "Edit $WslDir/config.yaml in WSL if needed"
 }
 
-# --- 5. Run deploy.sh in WSL ---
+# --- 5. Run deploy.sh in WSL (first deploy, synchronous) ---
 Log "Starting deployment in WSL..."
-wsl -d $WslDist -- bash -c "chmod +x $WslDir/deploy.sh; cd $WslDir; ./deploy.sh"
-
+wsl -d $WslDist -- bash -c "chmod +x $WslDir/deploy.sh; cd $WslDir; ./deploy.sh --watch"
 if ($LASTEXITCODE -ne 0) {
     Err "Deployment failed"
     exit 1
+}
+
+# Health check
+$deployed = $false
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 2
+    $check = wsl -d $WslDist -- bash -c "curl -sf http://127.0.0.1:8080/settings > /dev/null 2>&1 && echo ok || echo no"
+    if ($check.Trim() -eq "ok") {
+        Log "Deployment succeeded"
+        $deployed = $true
+        break
+    }
+}
+if (-not $deployed) {
+    Warn "Deployment health check timed out, continuing anyway"
 }
 
 # --- 6. Set up Windows portproxy (WSL2 Docker ports -> Windows localhost) ---
@@ -79,3 +93,94 @@ if ($needsElevation) {
 }
 
 Log "Done. Access http://127.0.0.1:8080"
+
+# --- 7. Keep WSL alive in background ---
+$wslKeepAlive = Start-Process -FilePath "wsl" -ArgumentList "-d", $WslDist, "--", "bash", "-c", "trap 'exit 0' TERM INT; while true; do sleep 3600; done" -PassThru -WindowStyle Hidden
+
+# --- 8. Watch mode: auto-deploy on new commits, Ctrl+R manual, Ctrl+C exit ---
+$lastCommit = (git -C $WinDir rev-parse HEAD 2>$null)
+Log "Watch mode active (commit: $($lastCommit.Substring(0,8)))"
+Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
+
+function Invoke-Redeploy {
+    param([string]$Reason)
+    Log "=== Redeploying ($Reason) ==="
+
+    # Rsync
+    Log "Syncing files..."
+    wsl -d $WslDist -- bash -c $rsyncCmd
+    if ($LASTEXITCODE -ne 0) {
+        Err "rsync failed, skipping this redeploy"
+        return
+    }
+    Log "Sync complete"
+
+    # Run deploy.sh --redeploy (skip infra, just rebuild + recreate redmemo)
+    Log "Rebuilding in WSL..."
+    wsl -d $WslDist -- bash -c "cd $WslDir; ./deploy.sh --redeploy"
+    if ($LASTEXITCODE -ne 0) {
+        Err "Redeploy failed"
+        return
+    }
+
+    # Health check
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Seconds 1
+        $check = wsl -d $WslDist -- bash -c "curl -sf http://127.0.0.1:8080/settings > /dev/null 2>&1 && echo ok || echo no"
+        if ($check.Trim() -eq "ok") {
+            Log "Redeploy succeeded!"
+            return
+        }
+    }
+    Warn "Health check pending after redeploy"
+}
+
+# Ctrl+C handling: we intercept it so we can clean up gracefully
+[Console]::TreatControlCAsInput = $true
+
+$pollInterval = 2
+$tickCount = 0
+try {
+    while ($true) {
+        # Check for keypresses
+        if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            # Ctrl+C to exit
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'C') {
+                break
+            }
+            # Ctrl+R to redeploy
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'R') {
+                Invoke-Redeploy -Reason "manual Ctrl+R"
+                $lastCommit = (git -C $WinDir rev-parse HEAD 2>$null)
+                Log "Watch mode active (commit: $($lastCommit.Substring(0,8)))"
+                Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
+            }
+        }
+
+        # Poll for new commits every 2 seconds
+        $tickCount++
+        if ($tickCount -ge ($pollInterval * 10)) {
+            $tickCount = 0
+            $currentCommit = (git -C $WinDir rev-parse HEAD 2>$null)
+            if ($currentCommit -and $lastCommit -and $currentCommit -ne $lastCommit) {
+                $shortOld = $lastCommit.Substring(0, 8)
+                $shortNew = $currentCommit.Substring(0, 8)
+                $commitMsg = (git -C $WinDir log -1 --format="%s" 2>$null)
+                Log "New commit detected: $shortOld -> $shortNew ($commitMsg)"
+                $lastCommit = $currentCommit
+                Invoke-Redeploy -Reason "new commit $shortNew"
+                Log "Watch mode active (commit: $shortNew)"
+                Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
+            }
+        }
+
+        Start-Sleep -Milliseconds 100
+    }
+} finally {
+    [Console]::TreatControlCAsInput = $false
+    if ($wslKeepAlive -and -not $wslKeepAlive.HasExited) {
+        $wslKeepAlive.Kill()
+    }
+    Log "Exiting watch mode"
+}

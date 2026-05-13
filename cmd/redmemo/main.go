@@ -12,14 +12,15 @@ import (
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/handler"
+	"github.com/redmemo/redmemo/internal/legacy"
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/oauth"
 	"github.com/redmemo/redmemo/internal/prefetch"
-	"github.com/redmemo/redmemo/internal/proxy"
 	"github.com/redmemo/redmemo/internal/ratelimit"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 func main() {
@@ -57,46 +58,77 @@ func main() {
 	mediaIndexStore := store.NewMediaIndexStore(db)
 	tokenStore := store.NewTokenStore(db)
 	subStore := store.NewSubredditStore(db)
+	settingsStore := store.NewSettingsStore(db)
 
-	// 5. Init OAuth
+	// 5. Rebuild site_settings on every startup
+	//    Priority: env_override > legacy_sync > existing KV > default
+	//
+	// Step A: upstream sync (writes with source="legacy_sync", won't overwrite env_override)
+	if cfg.Legacy.SyncEnabled {
+		result, err := legacy.SyncSettings(cfg.Legacy)
+		if err != nil {
+			log.Printf("legacy sync: %v (continuing with existing settings)", err)
+		} else if result != nil {
+			n, err := settingsStore.SetBatchIfLowerPriority(result.Settings, "legacy_sync")
+			if err != nil {
+				log.Printf("legacy sync: persist failed: %v", err)
+			} else {
+				log.Printf("legacy sync: %d settings from %s (%d updated in DB)",
+					len(result.Settings), result.Source, n)
+			}
+		}
+	}
+	// Step B: env var overrides (always win — scans all REDMEMO_DEFAULT_* vars)
+	envSettings := config.ScanExplicitSettings()
+	// Demote DB rows whose env var was removed since last startup
+	if demoted, err := settingsStore.DemoteOrphans(envSettings); err != nil {
+		log.Printf("settings: demote orphans failed: %v", err)
+	} else if demoted > 0 {
+		log.Printf("settings: demoted %d env_override rows (env var removed)", demoted)
+	}
+	if len(envSettings) > 0 {
+		if err := settingsStore.SetBatch(envSettings, "env_override"); err != nil {
+			log.Printf("settings: failed to persist env overrides: %v", err)
+		} else {
+			log.Printf("settings: persisted %d env var overrides to DB", len(envSettings))
+		}
+	}
+
+	// 6. Init shared context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 7. Init UA pool
+	uaPool := useragent.NewPool(settingsStore)
+
+	// 8. Init OAuth
 	oauthClient := oauth.NewClient()
 	oauthPool := oauth.NewPool(cfg.OAuth, oauthClient, tokenStore, redisCache)
 
-	// 6. Init Reddit clients
+	// 9. Init Reddit clients
 	redditAdapter := &oauthAdapter{pool: oauthPool}
 	redditCli := reddit.NewClient(redditAdapter)
-	publicCli := reddit.NewPublicClient()
+	publicCli := reddit.NewPublicClient(uaPool)
 
-	// 7. Init modules
+	// 10. Init modules
 	rateLimiter := ratelimit.New(cfg.RateLimit, oauthPool)
-
-	var reverseProxy *proxy.Proxy
-	if cfg.Redlib.Enabled {
-		reverseProxy, err = proxy.New(cfg.Redlib)
-		if err != nil {
-			log.Fatalf("proxy: %v", err)
-		}
-	}
 
 	renderer, err := render.New(cfg.Render)
 	if err != nil {
 		log.Fatalf("render: %v", err)
 	}
 
-	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache)
+	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, uaPool)
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)
 
 	prefetcher := prefetch.New(
-		cfg.Prefetch, rateLimiter, redditCli,
-		archiver, mediaProxy,
+		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
+		redditCli, archiver, mediaProxy,
 	)
 
-	// 8. Start background tasks
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+	// 11. Start background tasks
 	if err := oauthPool.Start(ctx); err != nil {
 		log.Printf("oauth pool start: %v (continuing without tokens)", err)
 	}
@@ -106,10 +138,11 @@ func main() {
 		prefetcher.Start(ctx)
 	}
 
-	// 9. Register routes, start HTTP server
+	// 12. Register routes, start HTTP server
 	h := handler.New(
-		reverseProxy, rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
-		postStore, commentStore, subStore, mediaIndexStore, mediaProxy, archiver, cfg,
+		rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
+		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
+		mediaProxy, archiver, prefetcher, uaPool, cfg,
 	)
 
 	srv := &http.Server{
@@ -119,7 +152,7 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
-	// 10. Graceful shutdown
+	// 13. Graceful shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -163,4 +196,17 @@ func (a *oauthAdapter) GetBestToken() *reddit.TokenInfo {
 
 func (a *oauthAdapter) OnRequestComplete(tokenID int, resp *http.Response) {
 	a.pool.OnRequestComplete(tokenID, resp)
+}
+
+// settingsAdapter bridges store.SettingsStore → prefetch.SettingsProvider interface.
+type settingsAdapter struct {
+	store *store.SettingsStore
+}
+
+func (a *settingsAdapter) Get(key string) string {
+	v, ok, err := a.store.Get(key)
+	if err != nil || !ok {
+		return ""
+	}
+	return v
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type Proxy struct {
@@ -22,14 +23,16 @@ type Proxy struct {
 	mediaStore *store.MediaIndexStore
 	cache      *cache.Cache
 	httpClient *http.Client
+	uaPool     *useragent.Pool
 }
 
-func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache) *Proxy {
+func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache, uaPool *useragent.Pool) *Proxy {
 	return &Proxy{
 		rootPath:   cfg.RootPath,
 		mediaStore: mediaStore,
 		cache:      c,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
+		uaPool:     uaPool,
 	}
 }
 
@@ -84,7 +87,7 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.uaPool.Get())
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -150,7 +153,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 		http.Error(w, "bad upstream url", http.StatusBadGateway)
 		return
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", p.uaPool.Get())
 
 	for _, h := range []string{"Range", "If-Modified-Since", "Cache-Control"} {
 		if v := r.Header.Get(h); v != "" {

@@ -69,5 +69,14 @@ func templateFuncs() template.FuncMap {
 		"list": func(items ...string) []string {
 			return items
 		},
+		"split": strings.Split,
+		"inList": func(item, delimited string) bool {
+			for _, s := range strings.Split(delimited, "+") {
+				if strings.EqualFold(s, item) {
+					return true
+				}
+			}
+			return false
+		},
 	}
 }

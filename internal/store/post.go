@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/lib/pq"
 )
 
 type PostStore struct {
@@ -72,6 +74,152 @@ func (s *PostStore) ListBySubreddit(sub string, limit, offset int) ([]*StoredPos
 	return scanPosts(rows)
 }
 
+func (s *PostStore) ListRecent(limit int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		ORDER BY created_utc DESC
+		LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recent posts: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListRecentBySubs(subs []string, limit int) ([]*StoredPost, error) {
+	if len(subs) == 0 {
+		return nil, nil
+	}
+	query := `
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		WHERE subreddit = ANY($1)
+		ORDER BY created_utc DESC
+		LIMIT $2`
+	rows, err := s.db.Query(query, pq.Array(subs), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent posts by subs: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListRecentExcludingSubs(subs []string, limit int) ([]*StoredPost, error) {
+	if len(subs) == 0 {
+		return s.ListRecent(limit)
+	}
+	query := `
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		WHERE subreddit != ALL($1)
+		ORDER BY created_utc DESC
+		LIMIT $2`
+	rows, err := s.db.Query(query, pq.Array(subs), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent posts excluding subs: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListNewlyArchived(limit int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		WHERE first_seen >= NOW() - INTERVAL '30 days'
+		ORDER BY first_seen DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list newly archived: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListTopScored(limit int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		WHERE first_seen >= NOW() - INTERVAL '30 days'
+		ORDER BY score DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list top scored: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListNotorious(limit int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts
+		WHERE first_seen >= NOW() - INTERVAL '30 days'
+		  AND score < 0
+		ORDER BY score ASC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list notorious: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
+func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, mode string) ([]*StoredPost, error) {
+	var baseWhere, orderBy string
+	switch sort {
+	case "new_archive":
+		baseWhere = "first_seen >= NOW() - INTERVAL '30 days'"
+		orderBy = "first_seen DESC"
+	case "top":
+		baseWhere = "first_seen >= NOW() - INTERVAL '30 days'"
+		orderBy = "score DESC"
+	case "notorious":
+		baseWhere = "first_seen >= NOW() - INTERVAL '30 days' AND score < 0"
+		orderBy = "score ASC"
+	default:
+		baseWhere = "1=1"
+		orderBy = "created_utc DESC"
+	}
+
+	where := baseWhere
+	var args []any
+	argN := 1
+
+	if len(subs) > 0 && mode == "whitelist" {
+		where += fmt.Sprintf(" AND subreddit = ANY($%d)", argN)
+		args = append(args, pq.Array(subs))
+		argN++
+	} else if len(subs) > 0 && mode == "blacklist" {
+		where += fmt.Sprintf(" AND subreddit != ALL($%d)", argN)
+		args = append(args, pq.Array(subs))
+		argN++
+	}
+
+	args = append(args, limit)
+	limitN := argN
+	argN++
+	args = append(args, offset)
+	q := fmt.Sprintf(`SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source
+		FROM posts WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d`, where, orderBy, limitN, argN)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list homepage (%s): %w", sort, err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
 func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
@@ -92,6 +240,23 @@ func (s *PostStore) Count() (int64, error) {
 	var count int64
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts`).Scan(&count)
 	return count, err
+}
+
+func (s *PostStore) DistinctSubreddits() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT subreddit FROM posts ORDER BY subreddit`)
+	if err != nil {
+		return nil, fmt.Errorf("distinct subreddits: %w", err)
+	}
+	defer rows.Close()
+	var subs []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		subs = append(subs, s)
+	}
+	return subs, rows.Err()
 }
 
 func (s *PostStore) SubredditCount() (int64, error) {

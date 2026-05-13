@@ -3,9 +3,9 @@ server:
   read_timeout: 30s
   write_timeout: 60s
 
-redlib:
-  upstream: "http://redlib:8080"
-  enabled: true                        # false = standalone mode, no redlib dependency
+legacy:
+  sync_enabled: true                   # one-time settings sync from old redlib instance
+  instance: ""                         # empty = Docker DNS (redlib:8080); set to explicit address to override
 
 postgres:
   dsn: "postgres://redmemo:password@postgres:5432/redmemo?sslmode=disable"

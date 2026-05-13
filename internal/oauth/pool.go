@@ -66,19 +66,29 @@ func (p *Pool) Start(ctx context.Context) error {
 		return err
 	}
 
+	now := time.Now()
 	p.mu.Lock()
 	for _, st := range stored {
 		mt := &ManagedToken{
 			StoredToken: *st,
 			Identity:    GenerateIdentity(),
 		}
-		if st.RateRemaining != nil {
-			mt.RateRemaining = *st.RateRemaining
+		if st.RateResetAt != nil && st.RateResetAt.After(now) {
+			mt.RateResetAt = *st.RateResetAt
+			if st.RateRemaining != nil {
+				mt.RateRemaining = *st.RateRemaining
+			} else {
+				mt.RateRemaining = 99
+			}
 		} else {
 			mt.RateRemaining = 99
-		}
-		if st.RateResetAt != nil {
-			mt.RateResetAt = *st.RateResetAt
+			mt.RateResetAt = now.Add(10 * time.Minute)
+			remaining := 99
+			resetAt := mt.RateResetAt
+			st.RateRemaining = &remaining
+			st.RateResetAt = &resetAt
+			mt.StoredToken = *st
+			log.Printf("oauth: token %d window expired, reset to 99", st.ID)
 		}
 		p.tokens = append(p.tokens, mt)
 	}
@@ -203,11 +213,21 @@ func (p *Pool) GetBestToken() *ManagedToken {
 	now := time.Now()
 	var best *ManagedToken
 	for _, mt := range p.tokens {
-		if mt.RateRemaining <= 0 && now.After(mt.RateResetAt) {
+		if now.After(mt.RateResetAt) {
 			mt.RateRemaining = 99
 			mt.RateResetAt = now.Add(10 * time.Minute)
 			remaining := 99
+			resetAt := mt.RateResetAt
 			mt.StoredToken.RateRemaining = &remaining
+			mt.StoredToken.RateResetAt = &resetAt
+			if p.store != nil {
+				snapshot := mt.StoredToken
+				go func() {
+					if err := p.store.UpdateToken(&snapshot); err != nil {
+						log.Printf("oauth: persist reset for token %d: %v", snapshot.ID, err)
+					}
+				}()
+			}
 		}
 		if mt.RateRemaining <= 0 {
 			continue
@@ -255,6 +275,15 @@ func (p *Pool) OnRequestComplete(tokenID int, resp *http.Response) {
 	if mt.RateRemaining < 10 {
 		log.Printf("oauth: token %d low on quota (%d remaining)", tokenID, mt.RateRemaining)
 	}
+
+	if p.store != nil {
+		snapshot := mt.StoredToken
+		go func() {
+			if err := p.store.UpdateToken(&snapshot); err != nil {
+				log.Printf("oauth: persist rate state for token %d: %v", tokenID, err)
+			}
+		}()
+	}
 }
 
 // RemainingBudget implements ratelimit.BudgetSource.
@@ -266,7 +295,7 @@ func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
 	total := 0
 	for _, mt := range p.tokens {
 		remaining := mt.RateRemaining
-		if remaining <= 0 && now.After(mt.RateResetAt) {
+		if now.After(mt.RateResetAt) {
 			remaining = 99
 		}
 		if remaining > 0 {
@@ -274,6 +303,81 @@ func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
 		}
 	}
 	return total, nil
+}
+
+type TokenStatusInfo struct {
+	Backend       string
+	RateRemaining int
+	RateResetAt   time.Time
+	Dynamic       bool
+}
+
+func (p *Pool) TokenStatuses() []TokenStatusInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]TokenStatusInfo, len(p.tokens))
+	for i, mt := range p.tokens {
+		out[i] = TokenStatusInfo{
+			Backend:       mt.StoredToken.Backend,
+			RateRemaining: mt.RateRemaining,
+			RateResetAt:   mt.RateResetAt,
+			Dynamic:       mt.StoredToken.Backend == dynamicSpoofBackend,
+		}
+	}
+	return out
+}
+
+// WindowInfo returns the rate limit window state: reset time, total capacity, and current remaining.
+func (p *Pool) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	now := time.Now()
+	for _, mt := range p.tokens {
+		capacity += 99
+		if now.After(mt.RateResetAt) {
+			remaining += 99
+		} else if mt.RateRemaining > 0 {
+			remaining += mt.RateRemaining
+		}
+		if mt.RateResetAt.After(resetAt) {
+			resetAt = mt.RateResetAt
+		}
+	}
+	return
+}
+
+// EarliestReset returns (seconds until soonest reset, window total seconds).
+// For tokens whose window has expired, rolls forward to the next 10-min
+// boundary so there is always a meaningful countdown when tokens exist.
+func (p *Pool) EarliestReset() (int, int) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	const window = 10 * time.Minute
+	windowSec := int(window.Seconds())
+	now := time.Now()
+	earliest := 0
+	for _, mt := range p.tokens {
+		if mt.RateResetAt.IsZero() {
+			continue
+		}
+		resetAt := mt.RateResetAt
+		if !resetAt.After(now) {
+			elapsed := now.Sub(resetAt)
+			resetAt = resetAt.Add((elapsed/window + 1) * window)
+		}
+		secs := int(time.Until(resetAt).Seconds())
+		if secs > 0 && (earliest == 0 || secs < earliest) {
+			earliest = secs
+		}
+	}
+	return earliest, windowSec
+}
+
+func (p *Pool) EarliestResetSeconds() int {
+	s, _ := p.EarliestReset()
+	return s
 }
 
 // HasAvailableTokens reports whether any token in the pool has remaining quota.

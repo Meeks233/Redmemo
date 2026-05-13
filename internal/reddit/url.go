@@ -46,7 +46,7 @@ func FormatURL(rawURL string) string {
 		if m := vRedditDASH.FindStringSubmatch(rawURL); m != nil {
 			return "/vid/" + m[1] + "/" + m[2]
 		}
-		return rawURL
+		return "/vid/" + pathAndQuery
 
 	case "i.redd.it":
 		return "/img/" + pathAndQuery
@@ -90,7 +90,7 @@ func FormatURL(rawURL string) string {
 }
 
 var (
-	vRedditDASH = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/DASH_(\d{2,4}(?:\.mp4|$|\?source=fallback).*)`)
+	vRedditDASH = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/((?:DASH|CMAF)_\d{2,4}(?:\.mp4|$|\?source=fallback).*)`)
 	vRedditHLS  = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/(HLSPlaylist\.m3u8.*)$`)
 )
 

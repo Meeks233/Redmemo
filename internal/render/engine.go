@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -38,7 +39,6 @@ var pageTemplates = map[string]string{
 	"user.html":      "templates/user.html",
 	"settings.html":  "templates/settings.html",
 	"error.html":     "templates/error.html",
-	"info.html":      "templates/info.html",
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
@@ -74,6 +74,8 @@ type SubredditPageData struct {
 	NoPosts            bool
 	AllPostsFiltered   bool
 	RedirectURL        string
+	HomepageSort       string
+	HasOAuth           bool
 }
 
 type PostPageData struct {
@@ -84,6 +86,7 @@ type PostPageData struct {
 	CommentQuery    string
 	SingleThread    bool
 	URLWithoutQuery string
+	HasOAuth        bool
 }
 
 type SearchPageData struct {
@@ -114,20 +117,6 @@ type UserPageData struct {
 
 type SettingsPageData struct {
 	BasePage
-}
-
-type ErrorPageData struct {
-	BasePage
-	Message    string
-	StatusCode int
-	Details    []string
-}
-
-type InfoPageData struct {
-	BasePage
-	RedlibOnline   bool
-	RedlibUpstream string
-	RedlibVersion  string
 	PostCount      int64
 	SubredditCount int64
 	MediaCount     int64
@@ -135,6 +124,32 @@ type InfoPageData struct {
 	OAuthEnabled   bool
 	PrefetchSubs   []string
 	SubredditStats []SubredditStatView
+	ArchivedSubs   []string
+}
+
+type TokenView struct {
+	Index         int
+	Backend       string
+	Kind          string // "static" or "dynamic"
+	RateRemaining int
+	RateReset     string // relative: "in 5m30s" or "expired"
+	HasBudget     bool
+}
+
+type ErrorPageData struct {
+	BasePage
+	Message        string
+	StatusCode     int
+	Details        []string
+	TokenBudget    int
+	ResetSeconds   int
+	WindowSeconds  int
+	IsCountdown    bool
+	IsDebug        bool
+	Tokens         []TokenView
+	UAList         []string
+	UACurrentIndex int
+	UAFetchedAt    string
 }
 
 type SubredditStatView struct {
@@ -166,6 +181,23 @@ func (e *Engine) RenderSubreddit(w io.Writer, data SubredditPageData) error {
 	return e.renderPage(w, "subreddit.html", data)
 }
 
+func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
+	tmpl := e.pages["subreddit.html"]
+	if tmpl == nil {
+		return fmt.Errorf("subreddit template not found")
+	}
+	for i, p := range posts {
+		if i > 0 {
+			io.WriteString(w, `<hr class="sep" />`)
+		}
+		data := map[string]any{"Post": p, "Prefs": prefs}
+		if err := tmpl.ExecuteTemplate(w, "post_in_list", data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Engine) RenderPost(w io.Writer, data PostPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
@@ -194,11 +226,54 @@ func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 	return e.renderPage(w, "settings.html", data)
 }
 
-func (e *Engine) RenderInfo(w io.Writer, data InfoPageData) error {
-	if data.BrandName == "" {
-		data.BrandName = e.cfg.BrandName
+type DebugData struct {
+	Details        []string
+	TokenBudget    int
+	Tokens         []TokenView
+	UAList         []string
+	UACurrentIndex int
+	UAFetchedAt    string
+}
+
+func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
+	data := ErrorPageData{
+		BasePage:       e.basePage("", reddit.Preferences{}),
+		Message:        msg,
+		StatusCode:     200,
+		Details:        d.Details,
+		TokenBudget:    d.TokenBudget,
+		IsDebug:        true,
+		Tokens:         d.Tokens,
+		UAList:         d.UAList,
+		UACurrentIndex: d.UACurrentIndex,
+		UAFetchedAt:    d.UAFetchedAt,
 	}
-	return e.renderPage(w, "info.html", data)
+	e.renderPage(w, "error.html", data)
+}
+
+func (e *Engine) RenderCountdown(w io.Writer, prefs reddit.Preferences, remaining int, resetSeconds int, windowSeconds int) {
+	data := ErrorPageData{
+		BasePage:      e.basePage("", prefs),
+		StatusCode:    200,
+		TokenBudget:   remaining,
+		ResetSeconds:  resetSeconds,
+		WindowSeconds: windowSeconds,
+		IsCountdown:   true,
+	}
+	e.renderPage(w, "error.html", data)
+}
+
+func (e *Engine) RenderRateLimit(w http.ResponseWriter, resetSeconds int, details []string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusTooManyRequests)
+	data := ErrorPageData{
+		BasePage:     e.basePage("", reddit.Preferences{}),
+		Message:      "All upstreams are rate-limited, please try again later",
+		StatusCode:   http.StatusTooManyRequests,
+		Details:      details,
+		ResetSeconds: resetSeconds,
+	}
+	e.renderPage(w, "error.html", data)
 }
 
 func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, details ...string) {
@@ -213,7 +288,23 @@ func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, 
 	e.renderPage(w, "error.html", data)
 }
 
+func AvailableThemes() []string {
+	entries, _ := fs.ReadDir(staticFS, "static/themes")
+	themes := make([]string, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, ".css") {
+			themes = append(themes, strings.TrimSuffix(name, ".css"))
+		}
+	}
+	return themes
+}
+
 func (e *Engine) StaticHandler() http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
-	return http.FileServerFS(sub)
+	fs := http.FileServerFS(sub)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+		fs.ServeHTTP(w, r)
+	})
 }

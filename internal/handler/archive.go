@@ -6,10 +6,17 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 )
 
+func (h *Handler) notifyUserRequest() {
+	if h.prefetcher != nil {
+		h.prefetcher.NotifyUserRequest()
+	}
+}
+
 func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, after string, limit int) ([]reddit.Post, string, string, error) {
 	if h.oauthPool.HasAvailableTokens() {
 		posts, before, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, after, limit)
 		if err == nil {
+			h.notifyUserRequest()
 			return posts, before, after, nil
 		}
 	}
@@ -20,6 +27,7 @@ func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (r
 	if h.oauthPool.HasAvailableTokens() {
 		post, comments, err := h.redditCli.FetchPost(ctx, sub, id, commentSort)
 		if err == nil {
+			h.notifyUserRequest()
 			return post, comments, nil
 		}
 	}
@@ -30,6 +38,7 @@ func (h *Handler) fetchSubredditAbout(ctx context.Context, sub string) (reddit.S
 	if h.oauthPool.HasAvailableTokens() {
 		info, err := h.redditCli.FetchSubredditAbout(ctx, sub)
 		if err == nil {
+			h.notifyUserRequest()
 			return info, nil
 		}
 	}

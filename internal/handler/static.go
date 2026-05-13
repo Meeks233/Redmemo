@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/redmemo/redmemo/internal/render"
 )
 
 func (h *Handler) staticHandler() http.Handler {
@@ -13,18 +16,6 @@ func (h *Handler) staticHandler() http.Handler {
 }
 
 func (h *Handler) handleRedlibMedia(w http.ResponseWriter, r *http.Request) {
-	if h.proxy != nil {
-		resp, body, err := h.proxy.Forward(r)
-		if err == nil && resp.StatusCode < 400 {
-			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-			w.Header().Set("Cache-Control", "public, max-age=86400")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(body)
-			return
-		}
-	}
-
-	// Redlib unavailable — reconstruct the CDN URL and serve via media proxy.
 	cdnURL := pathToCDNURL(r.URL.Path, r.URL.RawQuery)
 	if cdnURL == "" {
 		http.NotFound(w, r)
@@ -59,10 +50,6 @@ func pathToCDNURL(path, rawQuery string) string {
 	return base
 }
 
-var vredditClient = &http.Client{
-	Timeout: 60 * 1000 * 1000 * 1000, // 60s as time.Duration
-}
-
 func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
@@ -81,18 +68,22 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 		upstream += "?" + r.URL.RawQuery
 	}
 
+	if strings.HasSuffix(path, ".m3u8") || strings.Contains(path, "HLSPlaylist") {
+		h.proxyHLSManifest(w, r, upstream)
+		return
+	}
+
+	r.URL.RawQuery = "url=" + url.QueryEscape(upstream)
+	h.mediaProxy.ServeMedia(w, r)
+}
+
+func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstream string) {
 	req, err := http.NewRequestWithContext(r.Context(), "GET", upstream, nil)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-	for _, hdr := range []string{"Range", "If-Modified-Since", "Cache-Control"} {
-		if v := r.Header.Get(hdr); v != "" {
-			req.Header.Set(hdr, v)
-		}
-	}
+	req.Header.Set("User-Agent", h.uaPool.Get())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -101,46 +92,133 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+	s := strings.ReplaceAll(string(body), "https://v.redd.it/", "/vid/")
+
 	ct := resp.Header.Get("Content-Type")
 	if ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
-		w.Header().Set("Content-Length", cl)
-	}
-	if cr := resp.Header.Get("Content-Range"); cr != "" {
-		w.Header().Set("Content-Range", cr)
-	}
-	if ar := resp.Header.Get("Accept-Ranges"); ar != "" {
-		w.Header().Set("Accept-Ranges", ar)
-	}
-
-	// For HLS manifests, rewrite absolute v.redd.it URLs to local /hls/ paths
-	if strings.Contains(ct, "mpegurl") || strings.HasSuffix(path, ".m3u8") {
-		body, _ := io.ReadAll(resp.Body)
-		s := string(body)
-		s = strings.ReplaceAll(s, "https://v.redd.it/", "/vid/")
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(s)))
-		w.WriteHeader(resp.StatusCode)
-		w.Write([]byte(s))
-		return
-	}
-
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(s)))
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	w.Write([]byte(s))
 }
 
 func (h *Handler) handleWiki(w http.ResponseWriter, r *http.Request) {
-	if h.cfg.Redlib.Enabled && h.ratelimit.CanRequestRedlib() {
-		resp, body, err := h.proxy.Forward(r)
-		if err == nil {
-			h.ratelimit.Increment()
-			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-			w.WriteHeader(resp.StatusCode)
-			w.Write(body)
-			return
+	h.renderer.RenderError(w, "Wiki page is currently unavailable", http.StatusServiceUnavailable)
+}
+
+func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
+	budget, _ := h.oauthPool.RemainingBudget(r.Context())
+	reset, window := h.oauthPool.EarliestReset()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	fmt.Fprintf(w, `{"remaining":%d,"reset":%d,"window":%d}`, budget, reset, window)
+}
+
+func (h *Handler) handleCountdown(w http.ResponseWriter, r *http.Request) {
+	prefs := h.readPreferences(r)
+	budget, _ := h.oauthPool.RemainingBudget(r.Context())
+	reset, window := h.oauthPool.EarliestReset()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	h.renderer.RenderCountdown(w, prefs, budget, reset, window)
+}
+
+func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
+	prefs := h.readPreferences(r)
+	if prefs.EnableDebug != "on" {
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	}
+
+	var details []string
+
+	// OAuth tokens → structured view
+	statuses := h.oauthPool.TokenStatuses()
+	tokenViews := make([]render.TokenView, len(statuses))
+	for i, ts := range statuses {
+		kind := "static"
+		if ts.Dynamic {
+			kind = "dynamic"
+		}
+		var resetStr string
+		if ts.RateResetAt.IsZero() {
+			resetStr = "unknown"
+		} else if d := time.Until(ts.RateResetAt); d > 0 {
+			resetStr = "in " + formatDuration(d)
+		} else {
+			resetStr = "available"
+		}
+		tokenViews[i] = render.TokenView{
+			Index:         i,
+			Backend:       ts.Backend,
+			Kind:          kind,
+			RateRemaining: ts.RateRemaining,
+			RateReset:     resetStr,
+			HasBudget:     ts.RateRemaining > 0,
 		}
 	}
-	h.renderer.RenderError(w, "Wiki 页面暂时不可用", http.StatusServiceUnavailable)
+
+	// Archive stats
+	postCount, _ := h.postStore.Count()
+	subCount, _ := h.postStore.SubredditCount()
+	details = append(details, fmt.Sprintf("Archived posts: %d", postCount))
+	details = append(details, fmt.Sprintf("Archived subreddits: %d", subCount))
+
+	// Media stats
+	mediaCount, mediaSize, _ := h.mediaStore.Stats()
+	details = append(details, fmt.Sprintf("Cached media: %d files, %s", mediaCount, formatBytes(mediaSize)))
+
+	// Config
+	details = append(details, fmt.Sprintf("Listen: %s", h.cfg.Server.Listen))
+	details = append(details, fmt.Sprintf("Brand: %s", h.cfg.Render.BrandName))
+	details = append(details, fmt.Sprintf("Prefetch enabled: %v (%d subs)", h.cfg.Prefetch.Enabled, len(h.cfg.Prefetch.Subreddits)))
+	details = append(details, fmt.Sprintf("Media cap: %d GB", h.cfg.Media.MaxSizeGB))
+
+	// Redis
+	details = append(details, fmt.Sprintf("Redis: %s", h.cfg.Redis.Addr))
+
+	// Total token budget
+	budget, _ := h.oauthPool.RemainingBudget(r.Context())
+
+	dd := render.DebugData{
+		Details:     details,
+		TokenBudget: budget,
+		Tokens:      tokenViews,
+	}
+
+	if h.uaPool != nil {
+		dd.UAList = h.uaPool.List()
+		currentUA := h.uaPool.Get()
+		for i, ua := range dd.UAList {
+			if ua == currentUA {
+				dd.UACurrentIndex = i
+				break
+			}
+		}
+		if h.settingsStore != nil {
+			if ts, ok, _ := h.settingsStore.Get("_ua_pool_fetched_at"); ok && ts != "" {
+				if t, err := time.Parse(time.RFC3339, ts); err == nil {
+					dd.UAFetchedAt = formatDuration(time.Since(t)) + " ago"
+				} else {
+					dd.UAFetchedAt = ts
+				}
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	h.renderer.RenderDebug(w, "Instance Diagnostics", dd)
 }
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
+}
+

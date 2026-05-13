@@ -1,22 +1,140 @@
-{{ define "title" }}Error: {{ .Message }}{{ end }}
+{{ define "title" }}{{ if or .IsCountdown .ResetSeconds }}Countdown{{ else if and (ge .StatusCode 200) (lt .StatusCode 300) }}{{ .Message }}{{ else }}Error: {{ .Message }}{{ end }}{{ end }}
 
 {{ template "base" . }}
 
 {{ define "content" }}
-<div id="error">
-	<h1>{{ .Message }}</h1>
-	{{ if .Details }}
-	<div style="text-align:left; max-width:600px; margin:1em auto; padding:1em; background:#1a1a2e; border-radius:8px; font-size:0.9em;">
-		<h4 style="margin-top:0;">Diagnostics</h4>
-		<ul style="list-style:none; padding:0; margin:0;">
-		{{ range .Details }}
-			<li style="padding:0.3em 0; border-bottom:1px solid #333;">{{ . }}</li>
-		{{ end }}
-		</ul>
+{{ if or .IsCountdown .ResetSeconds }}
+<div id="countdown-page" data-total="{{ .ResetSeconds }}" data-remaining="{{ .TokenBudget }}" data-window="{{ .WindowSeconds }}">
+	<div class="countdown-ring-wrap">
+		<svg class="countdown-ring" viewBox="0 0 200 200">
+			<circle class="countdown-track" cx="100" cy="100" r="90" />
+			<circle class="countdown-arc" id="cd-arc" cx="100" cy="100" r="90" />
+		</svg>
 	</div>
-	{{ end }}
-	<h3><a href="https://www.redditstatus.com/">Reddit Status</a></h3>
-	<br />
-	<h3>Head back <a href="/">home</a>?</h3>
+	<div class="countdown-timer" id="cd-time"></div>
 </div>
+<script>
+(function() {
+	var el = document.getElementById('countdown-page');
+	var total = parseInt(el.dataset.total, 10) || 0;
+	var remaining = parseInt(el.dataset.remaining, 10) || 0;
+	var window_s = parseInt(el.dataset.window, 10) || 600;
+	var circ = 2 * Math.PI * 90;
+	var arc = document.getElementById('cd-arc');
+	var timeEl = document.getElementById('cd-time');
+
+	arc.style.strokeDasharray = circ;
+
+	function fmt(sec) {
+		if (sec <= 0) return '0:00';
+		var m = Math.floor(sec / 60), s = sec % 60;
+		return m + ':' + (s < 10 ? '0' : '') + s;
+	}
+
+	function run(secs, win) {
+		var t = secs;
+		function tick() {
+			timeEl.textContent = fmt(t);
+			arc.style.strokeDashoffset = circ * (1 - t / win);
+			if (t <= 0) {
+				fetch('/api/status').then(function(r){return r.json()}).then(function(d) {
+					if (d.reset > 0) run(d.reset, d.window || 600);
+					else location.reload();
+				}).catch(function(){ location.reload(); });
+				return;
+			}
+			t--;
+			setTimeout(tick, 1000);
+		}
+		tick();
+	}
+
+	if (total > 0) {
+		run(total, window_s);
+	} else {
+		timeEl.textContent = remaining + '';
+		arc.style.strokeDashoffset = 0;
+	}
+})();
+</script>
+{{ else }}
+<div id="error"{{ if .IsDebug }} data-token-budget="{{ .TokenBudget }}"{{ end }}>
+	<div class="prefs">
+		<fieldset>
+			<legend>{{ .Message }}</legend>
+			<div class="error-icon">
+				{{ if and (ge .StatusCode 200) (lt .StatusCode 300) }}
+				<svg class="heart-alive" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path class="heart-shape" d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" stroke="#22c55e" fill="rgba(34,197,94,0.15)"/>
+					<path class="ecg-line" d="M3 12h2l2 -3l3 6l2 -3h3" stroke="#22c55e" fill="none"/>
+				</svg>
+				{{ else }}
+				<svg class="heart-broken" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path class="heart-shape" d="M19 14.828L13.405 20.422a2.032 2.032 0 0 1-2.81 0L4.998 14.818a5.523 5.523 0 0 1-.735-6.565A5.477 5.477 0 0 1 12 5.052a5.477 5.477 0 0 1 7.737 3.2 5.523 5.523 0 0 1-.737 6.576" stroke="#ef4444" fill="rgba(239,68,68,0.15)"/>
+					<path class="slash-line" d="m2 2 20 20" stroke="#ef4444"/>
+				</svg>
+				{{ end }}
+			</div>
+			<p class="error-status-code" id="error-message">{{ .StatusCode }}</p>
+			{{ if .Details }}
+			<div class="error-diagnostics">
+				<h4>Diagnostics</h4>
+				<ul>
+				{{ range .Details }}
+					<li>{{ . }}</li>
+				{{ end }}
+				</ul>
+			</div>
+			{{ end }}
+			{{ if .Tokens }}
+			<div class="error-diagnostics">
+				<h4>OAuth Tokens ({{ len .Tokens }} total, {{ .TokenBudget }} remaining)</h4>
+				<ul class="token-list">
+				{{ range .Tokens }}
+					<li class="{{ if .HasBudget }}token-ok{{ else }}token-empty{{ end }}">
+						<span class="token-index">#{{ .Index }}</span>
+						<span class="token-backend">{{ .Backend }}</span>
+						<span class="token-kind">{{ .Kind }}</span>
+						<span class="token-remaining">{{ .RateRemaining }} left</span>
+						<span class="token-reset">{{ .RateReset }}</span>
+					</li>
+				{{ end }}
+				</ul>
+			</div>
+			{{ end }}
+			{{ if .UAList }}
+			<div class="error-diagnostics">
+				<h4>User-Agent Pool ({{ len .UAList }} entries{{ if .UAFetchedAt }}, fetched {{ .UAFetchedAt }}{{ end }})</h4>
+				<ul class="ua-list">
+				{{ range $i, $ua := .UAList }}
+					<li{{ if eq $i $.UACurrentIndex }} class="ua-current"{{ end }}>{{ if eq $i $.UACurrentIndex }}<span class="ua-arrow">&#9654;</span> {{ end }}{{ $ua }}</li>
+				{{ end }}
+				</ul>
+			</div>
+			{{ end }}
+			<div class="error-links">
+				<a href="https://www.redditstatus.com/">Reddit Status</a>
+				<span class="dot">&bull;</span>
+				<a href="/">Back to home</a>
+			</div>
+		</fieldset>
+	</div>
+</div>
+{{ if .IsDebug }}
+<script>
+(function() {
+	var el = document.getElementById('error');
+	var budget = parseInt(el.dataset.tokenBudget, 10);
+	var msg = document.getElementById('error-message');
+	if (budget <= 0) {
+		msg.textContent = "Using Memo only 😭";
+	} else if (budget < 50) {
+		msg.textContent = "We're running out of ammo 🤕";
+	} else {
+		msg.textContent = "All right 😎";
+	}
+})();
+</script>
+{{ end }}
+{{ end }}
 {{ end }}

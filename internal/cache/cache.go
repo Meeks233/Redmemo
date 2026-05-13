@@ -167,6 +167,20 @@ func (c *Cache) FlushMediaAccess(ctx context.Context) (map[string]time.Time, err
 	return result, nil
 }
 
+// --- Generic key-value ---
+
+func (c *Cache) Get(ctx context.Context, key string) (string, error) {
+	val, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return val, err
+}
+
+func (c *Cache) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	return c.client.Set(ctx, key, value, ttl).Err()
+}
+
 // --- Health check ---
 
 func (c *Cache) Ping(ctx context.Context) error {

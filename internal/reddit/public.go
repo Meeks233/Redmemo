@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/redmemo/redmemo/internal/transport"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type PublicClient struct {
 	httpClient *http.Client
+	uaPool     *useragent.Pool
 
 	mu         sync.Mutex
 	tokens     int
@@ -21,9 +23,10 @@ type PublicClient struct {
 	refillRate time.Duration
 }
 
-func NewPublicClient() *PublicClient {
+func NewPublicClient(uaPool *useragent.Pool) *PublicClient {
 	return &PublicClient{
 		httpClient: transport.NewSpoofedClient(15 * time.Second),
+		uaPool:     uaPool,
 		tokens:     8,
 		maxTokens:  8,
 		lastRefill: time.Now(),
@@ -61,7 +64,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "RedMemo/1.0 (offline archiver)")
+	req.Header.Set("User-Agent", c.uaPool.Get())
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)

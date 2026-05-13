@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
-	Redlib    RedlibConfig    `yaml:"redlib"`
+	Legacy    LegacyConfig    `yaml:"legacy"`
 	Postgres  PostgresConfig  `yaml:"postgres"`
 	Redis     RedisConfig     `yaml:"redis"`
 	Media     MediaConfig     `yaml:"media"`
@@ -28,9 +29,16 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `yaml:"write_timeout"`
 }
 
-type RedlibConfig struct {
-	Upstream string `yaml:"upstream"`
-	Enabled  bool   `yaml:"enabled"`
+type LegacyConfig struct {
+	SyncEnabled bool   `yaml:"sync_enabled"`
+	Instance    string `yaml:"instance"`
+}
+
+func (lc *LegacyConfig) ResolvedInstance() string {
+	if lc.Instance != "" {
+		return lc.Instance
+	}
+	return "http://redlib:8080"
 }
 
 type PostgresConfig struct {
@@ -98,8 +106,8 @@ func defaults() *Config {
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 60 * time.Second,
 		},
-		Redlib: RedlibConfig{
-			Enabled: true,
+		Legacy: LegacyConfig{
+			SyncEnabled: true,
 		},
 		Postgres: PostgresConfig{
 			MaxOpenConns: 50,
@@ -142,6 +150,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	translateLegacyEnvVars()
 	applyEnvOverrides(cfg)
 
 	if err := cfg.Validate(); err != nil {
@@ -159,9 +168,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Redis.Addr == "" {
 		errs = append(errs, errors.New("redis.addr is required"))
-	}
-	if c.Redlib.Enabled && c.Redlib.Upstream == "" {
-		errs = append(errs, errors.New("redlib.upstream is required when redlib is enabled"))
 	}
 	if c.Media.RootPath == "" {
 		errs = append(errs, errors.New("media.root_path is required"))
@@ -205,17 +211,72 @@ func (c *Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// applyEnvOverrides applies environment variable overrides.
-// Format: REDMEMO_SECTION_KEY (e.g. REDMEMO_POSTGRES_DSN).
+// translateLegacyEnvVars scans the process environment for REDLIB_* and
+// LIBREDDIT_* variables and injects REDMEMO_* equivalents — but only when
+// the REDMEMO_* version is not already set. This lets users switch their
+// docker-compose from the redlib image to redmemo without touching env vars.
+//
+// The scan is fully automatic: any new REDLIB_FOO_BAR variable is translated
+// to REDMEMO_FOO_BAR without requiring code changes here.
+//
+// Precedence: REDMEMO_* > REDLIB_* > LIBREDDIT_*
+func translateLegacyEnvVars() {
+	// Pass 1: collect REDLIB_* (higher priority)
+	// Pass 2: collect LIBREDDIT_* (lower priority, only fills gaps)
+	for _, prefix := range []string{"REDLIB_", "LIBREDDIT_"} {
+		for _, entry := range os.Environ() {
+			eqIdx := strings.IndexByte(entry, '=')
+			if eqIdx < 0 {
+				continue
+			}
+			key := entry[:eqIdx]
+			val := entry[eqIdx+1:]
+			if val == "" {
+				continue
+			}
+
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+
+			suffix := key[len(prefix):]
+			target := "REDMEMO_" + suffix
+
+			if os.Getenv(target) != "" {
+				continue
+			}
+			os.Setenv(target, val)
+			log.Printf("config: translated %s → %s=%s", key, target, val)
+		}
+	}
+
+	// PORT → REDMEMO_SERVER_LISTEN  (Heroku-style port convention)
+	if os.Getenv("REDMEMO_SERVER_LISTEN") == "" {
+		for _, key := range []string{"REDLIB_PORT", "PORT"} {
+			if port := os.Getenv(key); port != "" {
+				if !strings.HasPrefix(port, ":") {
+					port = ":" + port
+				}
+				os.Setenv("REDMEMO_SERVER_LISTEN", port)
+				log.Printf("config: translated %s → REDMEMO_SERVER_LISTEN=%s", key, port)
+				break
+			}
+		}
+	}
+}
+
+// applyEnvOverrides applies REDMEMO_* environment variable overrides to the
+// config struct. Runs after translateLegacyEnvVars so translated values are
+// already available.
 func applyEnvOverrides(cfg *Config) {
 	envMap := map[string]*string{
-		"REDMEMO_SERVER_LISTEN":    &cfg.Server.Listen,
-		"REDMEMO_REDLIB_UPSTREAM":  &cfg.Redlib.Upstream,
-		"REDMEMO_POSTGRES_DSN":     &cfg.Postgres.DSN,
-		"REDMEMO_REDIS_ADDR":       &cfg.Redis.Addr,
-		"REDMEMO_REDIS_PASSWORD":   &cfg.Redis.Password,
-		"REDMEMO_MEDIA_ROOT_PATH":  &cfg.Media.RootPath,
+		"REDMEMO_SERVER_LISTEN":     &cfg.Server.Listen,
+		"REDMEMO_POSTGRES_DSN":      &cfg.Postgres.DSN,
+		"REDMEMO_REDIS_ADDR":        &cfg.Redis.Addr,
+		"REDMEMO_REDIS_PASSWORD":    &cfg.Redis.Password,
+		"REDMEMO_MEDIA_ROOT_PATH":   &cfg.Media.RootPath,
 		"REDMEMO_RENDER_BRAND_NAME": &cfg.Render.BrandName,
+		"REDMEMO_LEGACY_INSTANCE":   &cfg.Legacy.Instance,
 	}
 
 	for env, ptr := range envMap {
@@ -224,9 +285,42 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 
-	if v := os.Getenv("REDMEMO_REDLIB_ENABLED"); v != "" {
-		cfg.Redlib.Enabled = parseBool(v)
+	if v := os.Getenv("REDMEMO_LEGACY_SYNC"); v != "" {
+		cfg.Legacy.SyncEnabled = parseBool(v)
 	}
+}
+
+func settingEnvName(cookieName string) string {
+	return "REDMEMO_DEFAULT_" + strings.ToUpper(cookieName)
+}
+
+func IsSettingExplicitlySet(settingName string) bool {
+	return os.Getenv(settingEnvName(settingName)) != ""
+}
+
+func GetExplicitSetting(settingName string) string {
+	return os.Getenv(settingEnvName(settingName))
+}
+
+// ScanExplicitSettings returns all REDMEMO_DEFAULT_* env vars as a
+// cookie-name → value map. Fully dynamic — no hardcoded list.
+func ScanExplicitSettings() map[string]string {
+	const prefix = "REDMEMO_DEFAULT_"
+	settings := make(map[string]string)
+	for _, entry := range os.Environ() {
+		eqIdx := strings.IndexByte(entry, '=')
+		if eqIdx < 0 {
+			continue
+		}
+		key := entry[:eqIdx]
+		val := entry[eqIdx+1:]
+		if val == "" || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		cookieName := strings.ToLower(key[len(prefix):])
+		settings[cookieName] = val
+	}
+	return settings
 }
 
 func parseBool(s string) bool {
@@ -237,9 +331,9 @@ func parseBool(s string) bool {
 // String returns a redacted summary of the config for logging.
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{server=%s, redlib=%v/%s, postgres=***, redis=%s, media=%s/%dGB, oauth=%d tokens, prefetch=%v/%d subs}",
+		"Config{server=%s, legacy_sync=%v/%s, postgres=***, redis=%s, media=%s/%dGB, oauth=%d tokens, prefetch=%v/%d subs}",
 		c.Server.Listen,
-		c.Redlib.Enabled, c.Redlib.Upstream,
+		c.Legacy.SyncEnabled, c.Legacy.ResolvedInstance(),
 		c.Redis.Addr,
 		c.Media.RootPath, c.Media.MaxSizeGB,
 		len(c.OAuth.Tokens),

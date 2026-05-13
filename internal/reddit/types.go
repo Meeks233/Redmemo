@@ -23,6 +23,8 @@ type Post struct {
 	RelTime       string         // relative time "3h ago"
 	Created       string         // absolute time "May 08 2026, 12:00:00 UTC"
 	CreatedTS     uint64         // Unix timestamp
+	ArchivedRelTime string       // relative archive time "2d ago"
+	ArchivedTime    string       // absolute archive time
 	NumDuplicates uint64         `json:"num_duplicates"`
 	Comments      [2]string      // [formatted, raw] via FormatNum
 	Gallery       []GalleryMedia
@@ -157,6 +159,8 @@ type Preferences struct {
 	AvailableThemes                []string // derived from embedded CSS filenames
 	Theme                          string
 	FrontPage                      string
+	FrontPageSubs                  string
+	FrontPageSubsMode              string
 	Layout                         string
 	Wide                           string
 	BlurSpoiler                    string
@@ -176,6 +180,9 @@ type Preferences struct {
 	HideAwards                     string
 	HideScore                      string
 	RemoveDefaultFeeds             string
+	EnableDebug                    string
+	EnableNaturalPrefetch          string
+	PrefetchSubs                   string
 }
 
 // Params holds common query parameters for listing endpoints.

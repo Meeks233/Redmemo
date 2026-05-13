@@ -1,12 +1,14 @@
-{{/* Visit Reddit confirmation popup */}}
+{{/* Visit Reddit confirmation modal overlay */}}
 {{ define "visit_reddit_confirmation" }}
-<div class="popup" id="popup">
-	<div class="popup-inner">
-		<h1>You are about to leave this site</h1>
+<div class="modal-overlay" id="reddit-modal" onclick="if(event.target===this)this.classList.remove('visible')">
+	<div class="modal-box">
+		<h2>You are about to leave this site</h2>
 		<p>Do you want to continue?</p>
-		<p id="reddit_url">https://www.reddit.com{{ . }}</p>
-		<a id="goback" href="#">No, go back!</a>
-		<a id="toreddit" href="https://www.reddit.com{{ . }}" rel="nofollow">Yes, take me to Reddit</a>
+		<p class="modal-url">https://www.reddit.com{{ . }}</p>
+		<div class="modal-actions">
+			<button class="modal-cancel" onclick="document.getElementById('reddit-modal').classList.remove('visible')">No, go back</button>
+			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" rel="nofollow">Yes, take me to Reddit</a>
+		</div>
 	</div>
 </div>
 {{ end }}
@@ -56,26 +58,7 @@
 {{- end -}}
 {{ end }}
 
-{{/* Feed/subscription list */}}
-{{ define "sub_list" }}
-<details id="feeds">
-	<summary>Feeds</summary>
-	<div id="feed_list">
-		<p>MAIN FEEDS</p>
-		<a href="/">Home</a>
-		{{ if ne .Prefs.RemoveDefaultFeeds "on" }}
-			<a href="/r/popular">Popular</a>
-			<a href="/r/all">All</a>
-		{{ end }}
-		{{ if .Prefs.Subscriptions }}
-			<p>REDDIT FEEDS</p>
-			{{ range .Prefs.Subscriptions }}
-				<a href="/r/{{ . }}" {{ if eq . $.Current }}class="selected"{{ end }}>{{ . }}</a>
-			{{ end }}
-		{{ end }}
-	</div>
-</details>
-{{ end }}
+{{ define "sub_list" }}{{ end }}
 
 {{/* Submit arrow SVG */}}
 {{ define "submit_svg" }}
@@ -98,6 +81,10 @@
 		<a class="post_author {{ $post.Author.Distinguished }}" href="/user/{{ $post.Author.Name }}">u/{{ $post.Author.Name }}</a>
 		<span class="dot">&bull;</span>
 		<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
+		{{ if $post.ArchivedRelTime }}
+			<span class="dot">&bull;</span>
+			<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
+		{{ end }}
 		{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
 			{{ range $post.Awards }}
 			<span class="award" title="{{ .Name }}">
@@ -191,6 +178,10 @@
 		{{ end }}
 		<span class="dot">&bull;</span>
 		<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
+		{{ if $post.ArchivedRelTime }}
+			<span class="dot">&bull;</span>
+			<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
+		{{ end }}
 		{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
 		<span class="dot">&bull;</span>
 		<span class="awards">
@@ -279,10 +270,7 @@
 			<li class="mobile_item"><a target="_blank" href="https://archive.is/latest/{{ $post.Media.URL }}">archive</a></li>
 			{{ end }}
 			<li>
-				<a {{ if ne $prefs.DisableVisitRedditConfirmation "on" }}href="#popup"{{ else }}href="https://reddit.com{{ $post.Permalink }}" rel="nofollow"{{ end }}>reddit</a>
-				{{ if ne $prefs.DisableVisitRedditConfirmation "on" }}
-					{{ template "visit_reddit_confirmation" $post.Permalink }}
-				{{ end }}
+				<a href="https://reddit.com{{ $post.Permalink }}" rel="nofollow">reddit</a>
 			</li>
 			{{ if $post.Media.DownloadName }}
 			<li>

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redmemo/redmemo/internal/proxy"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
@@ -17,7 +16,7 @@ import (
 func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	id := r.PathValue("id")
-	prefs := readPreferences(r)
+	prefs := h.readPreferences(r)
 	urlPath := r.URL.Path
 	commentSort := r.URL.Query().Get("sort")
 	if commentSort == "" {
@@ -50,58 +49,28 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
-	// Level 3: Redlib proxy
-	if !h.cfg.Redlib.Enabled {
-		diag = append(diag, "L3 Redlib: disabled in config")
-	} else if !h.ratelimit.CanRequestRedlib() {
-		diag = append(diag, "L3 Redlib: rate limited locally")
-	} else {
-		resp, body, err := h.proxy.Forward(r)
-		if err != nil {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
-		} else if proxy.IsRateLimited(resp.StatusCode, body) {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		} else if proxy.IsServerError(resp.StatusCode, body) {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
-		} else {
-			h.ratelimit.Increment()
-			body = h.rewriteMedia(h.rebrand(body))
-			h.cache.PutHTML(r.Context(), cacheKey, body, 5*time.Minute)
-
-			go h.backgroundArchivePost(sub, id, urlPath, commentSort, body)
-
-			w.Header().Set("X-Cache", "MISS")
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(body)
-			return
-		}
-	}
-
-	// Level 4: Own OAuth fallback (if not tried above)
+	// Level 3: Own OAuth fallback (if not tried above)
 	if !triedOAuth {
 		if !h.ratelimit.CanRequestFallback(r.Context()) {
-			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+			diag = append(diag, "L3 OAuth fallback: rate limited locally")
 		} else if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
 			return
 		} else {
-			diag = append(diag, "L4 OAuth fallback: fetch failed")
+			diag = append(diag, "L3 OAuth fallback: fetch failed")
 		}
 	} else {
-		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
+		diag = append(diag, "L3 OAuth fallback: skipped (already tried at L2)")
 	}
 
-	// Level 5: Archive
+	// Level 4: Archive
 	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
 		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort)
 		return
 	}
-	diag = append(diag, "L5 Archive: no archived post for "+urlPath)
+	diag = append(diag, "L4 Archive: no archived post for "+urlPath)
 
-	// Level 6: Error + background spawn
+	// Level 5: Error + background spawn
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 	log.Printf("handler: all levels failed for %s: %v", urlPath, diag)
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
@@ -134,6 +103,31 @@ func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, ht
 	}
 }
 
+func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
+	sub := r.PathValue("sub")
+	id := r.PathValue("id")
+	commentSort := r.URL.Query().Get("sort")
+
+	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"ok":false,"error":"fetch failed: %s"}`, err.Error())
+		return
+	}
+
+	go func() {
+		h.archiver.ArchivePost(&post, sub, "manual_refresh")
+		h.archiver.ArchiveComments(post.Permalink, comments)
+	}()
+
+	urlPath := "/r/" + sub + "/comments/" + id
+	h.cache.InvalidateHTML(r.Context(), urlPath)
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, `{"ok":true}`)
+}
+
 func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) bool {
 	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
 	if err != nil {
@@ -157,6 +151,7 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		Comments:        comments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
+		HasOAuth:        h.oauthPool.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -192,6 +187,7 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		Comments:        comments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
+		HasOAuth:        h.oauthPool.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

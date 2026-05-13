@@ -1,16 +1,14 @@
 package handler
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"net/url"
-	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
+	"github.com/redmemo/redmemo/internal/render"
 )
 
 func (h *Handler) applyMiddleware(next http.Handler) http.Handler {
@@ -68,117 +66,76 @@ func recovery(next http.Handler) http.Handler {
 	})
 }
 
-func (h *Handler) rebrand(body []byte) []byte {
-	brand := h.cfg.Render.BrandName
-	if brand == "" || brand == "Redlib" {
-		return body
-	}
-	s := string(body)
-	s = strings.ReplaceAll(s, `<span id="lib">lib.</span>`, `<span id="lib">memo.</span>`)
-	s = strings.ReplaceAll(s, `<span id="lib">lib</span>`, `<span id="lib">memo</span>`)
-	s = strings.ReplaceAll(s, "Redlib", brand)
-	s = strings.ReplaceAll(s, "redlib", strings.ToLower(brand))
-	return []byte(s)
+
+var prefDefaults = map[string]string{
+	"front_page":      "default",
+	"front_page_subs":      "all",
+	"front_page_subs_mode": "whitelist",
+	"layout":        "card",
+	"wide":          "off",
+	"blur_spoiler":  "on",
+	"show_nsfw":     "on",
+	"blur_nsfw":     "on",
+	"video_quality": "best",
+	"use_hls":       "off",
+	"autoplay_videos":                 "off",
+	"fixed_navbar":                    "on",
+	"hide_hls_notification":           "off",
+	"hide_sidebar_and_summary":        "off",
+	"hide_awards":                     "off",
+	"hide_score":                      "off",
+	"remove_default_feeds":            "off",
+	"disable_visit_reddit_confirmation": "off",
+	"comment_sort": "confidence",
+	"post_sort":    "hot",
+	"enable_debug":            "off",
+	"enable_natural_prefetch": "off",
+	"prefetch_subs":           "",
 }
 
-var redlibMediaRe = regexp.MustCompile(`(?:src|href|poster|content)="(/(?:img|preview|thumb)/[^"]+)"`)
-
-func (h *Handler) rewriteMedia(body []byte) []byte {
-	return redlibMediaRe.ReplaceAllFunc(body, func(match []byte) []byte {
-		s := string(match)
-		eqIdx := strings.Index(s, `="`)
-		if eqIdx < 0 {
-			return match
+func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
+	pref := func(name string) string {
+		if v := h.siteDefaults[name]; v != "" {
+			return v
 		}
-		attr := s[:eqIdx]
-		path := s[eqIdx+2 : len(s)-1]
-		path = strings.ReplaceAll(path, "&#38;", "&")
-
-		var realURL string
-		switch {
-		case strings.HasPrefix(path, "/img/"):
-			realURL = "https://i.redd.it" + path[len("/img"):]
-		case strings.HasPrefix(path, "/preview/external-pre/"):
-			realURL = "https://external-preview.redd.it" + path[len("/preview/external-pre"):]
-		case strings.HasPrefix(path, "/preview/pre/"):
-			realURL = "https://preview.redd.it" + path[len("/preview/pre"):]
-		case strings.HasPrefix(path, "/thumb/"):
-			realURL = "https://b.thumbs.redditmedia.com" + path[len("/thumb"):]
-		default:
-			return match
-		}
-
-		return []byte(attr + `="/proxy/media?url=` + url.QueryEscape(realURL) + `"`)
-	})
-}
-
-func readPreferences(r *http.Request) reddit.Preferences {
-	p := reddit.Preferences{
-		FixedNavbar: "on",
+		return prefDefaults[name]
 	}
 
-	cookieStr := func(name string) string {
-		c, err := r.Cookie(name)
-		if err != nil {
-			return ""
-		}
-		return c.Value
+	p := reddit.Preferences{}
+
+	if c, err := r.Cookie("theme"); err == nil {
+		p.Theme = c.Value
+	} else {
+		p.Theme = pref("theme")
 	}
 
-	p.Theme = cookieStr("theme")
-	p.FrontPage = cookieStr("front_page")
-	p.Layout = cookieStr("layout")
-	p.Wide = cookieStr("wide")
-	p.BlurSpoiler = cookieStr("blur_spoiler")
-	p.ShowNSFW = cookieStr("show_nsfw")
-	p.BlurNSFW = cookieStr("blur_nsfw")
-	p.HideHLSNotification = cookieStr("hide_hls_notification")
-	p.VideoQuality = cookieStr("video_quality")
-	p.HideSidebarAndSummary = cookieStr("hide_sidebar_and_summary")
-	p.UseHLS = cookieStr("use_hls")
-	p.AutoplayVideos = cookieStr("autoplay_videos")
-	p.CommentSort = cookieStr("comment_sort")
-	p.PostSort = cookieStr("post_sort")
-	p.HideAwards = cookieStr("hide_awards")
-	p.HideScore = cookieStr("hide_score")
-	p.RemoveDefaultFeeds = cookieStr("remove_default_feeds")
-	p.DisableVisitRedditConfirmation = cookieStr("disable_visit_reddit_confirmation")
+	p.FrontPage = pref("front_page")
+	p.FrontPageSubs = pref("front_page_subs")
+	p.FrontPageSubsMode = pref("front_page_subs_mode")
+	p.Layout = pref("layout")
+	p.Wide = pref("wide")
+	p.BlurSpoiler = pref("blur_spoiler")
+	p.ShowNSFW = pref("show_nsfw")
+	p.BlurNSFW = pref("blur_nsfw")
+	p.HideHLSNotification = pref("hide_hls_notification")
+	p.VideoQuality = pref("video_quality")
+	p.HideSidebarAndSummary = pref("hide_sidebar_and_summary")
+	p.UseHLS = pref("use_hls")
+	p.AutoplayVideos = pref("autoplay_videos")
+	p.CommentSort = pref("comment_sort")
+	p.PostSort = pref("post_sort")
+	p.HideAwards = pref("hide_awards")
+	p.HideScore = pref("hide_score")
+	p.RemoveDefaultFeeds = pref("remove_default_feeds")
+	p.DisableVisitRedditConfirmation = pref("disable_visit_reddit_confirmation")
+	p.FixedNavbar = pref("fixed_navbar")
+	p.EnableDebug = pref("enable_debug")
+	p.EnableNaturalPrefetch = pref("enable_natural_prefetch")
+	p.PrefetchSubs = pref("prefetch_subs")
 
-	if v := cookieStr("fixed_navbar"); v != "" {
-		p.FixedNavbar = v
-	}
-
-	p.Subscriptions = readMultiCookie(r, "subscriptions")
-	p.Filters = readMultiCookie(r, "filters")
+	p.AvailableThemes = render.AvailableThemes()
 
 	return p
-}
-
-// readMultiCookie reads a +delimited list that may be split across numbered
-// cookies (e.g. subscriptions, subscriptions1, subscriptions2, ...) to match
-// redlib's cookie format for large subscription/filter lists.
-func readMultiCookie(r *http.Request, baseName string) []string {
-	var parts []string
-	for i := 0; ; i++ {
-		name := baseName
-		if i > 0 {
-			name = baseName + fmt.Sprintf("%d", i)
-		}
-		c, err := r.Cookie(name)
-		if err != nil || c.Value == "" {
-			if i == 0 {
-				i++ // try subscriptions1 even if subscriptions is missing
-				continue
-			}
-			break
-		}
-		parts = append(parts, c.Value)
-	}
-	if len(parts) == 0 {
-		return nil
-	}
-	joined := strings.Join(parts, "+")
-	return strings.Split(joined, "+")
 }
 
 func allPostsNSFW(posts []reddit.Post, prefs reddit.Preferences) bool {

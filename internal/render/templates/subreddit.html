@@ -12,18 +12,25 @@
 	<div id="column_one">
 		<form id="sort">
 			<div id="sort_options">
-				{{ $methods := list "hot" "new" "top" "rising" "controversial" }}
-				{{ if .Sub.Name }}
-					{{ range $methods }}
-						<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/r/{{ $.Sub.Name }}/{{ . }}">{{ capitalize . }}</a>
-					{{ end }}
+				{{ if .HomepageSort }}
+					<a {{ if eq .HomepageSort "new" }}class="selected"{{ end }} href="/?sort=new">New</a>
+					<a {{ if eq .HomepageSort "new_archive" }}class="selected"{{ end }} href="/?sort=new_archive">Archive</a>
+					<a {{ if eq .HomepageSort "top" }}class="selected"{{ end }} href="/?sort=top">Top</a>
+					<a {{ if eq .HomepageSort "notorious" }}class="selected"{{ end }} href="/?sort=notorious">Notorious</a>
 				{{ else }}
-					{{ range $methods }}
-						<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/{{ . }}">{{ capitalize . }}</a>
+					{{ $methods := list "hot" "new" "top" "rising" "controversial" }}
+					{{ if .Sub.Name }}
+						{{ range $methods }}
+							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/r/{{ $.Sub.Name }}/{{ . }}">{{ capitalize . }}</a>
+						{{ end }}
+					{{ else }}
+						{{ range $methods }}
+							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/{{ . }}">{{ capitalize . }}</a>
+						{{ end }}
 					{{ end }}
 				{{ end }}
 			</div>
-			{{ if or (eq (index .Sort 0) "top") (eq (index .Sort 0) "controversial") }}
+			{{ if and (not .HomepageSort) (or (eq (index .Sort 0) "top") (eq (index .Sort 0) "controversial")) }}
 			<select id="timeframe" name="t" title="Timeframe">
 				{{ $timeframes := list "hour" "day" "week" "month" "year" "all" }}
 				{{ range $timeframes }}
@@ -39,7 +46,19 @@
 		{{ end }}
 
 		{{ if .NoPosts }}
-		<center>No posts were found.</center>
+			{{ if .HomepageSort }}
+			<div class="empty-state">
+				{{ if .HasOAuth }}
+				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>
+				<p>Try searching for something? No posts this month.</p>
+				{{ else }}
+				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.114 4.462A14.5 14.5 0 0 1 12 2a10 10 0 0 1 9.313 13.643"/><path d="M15.557 15.556A14.5 14.5 0 0 1 12 22 10 10 0 0 1 4.929 4.929"/><path d="M15.892 10.234A14.5 14.5 0 0 0 12 2a10 10 0 0 0-3.643.687"/><path d="M17.656 12H22"/><path d="M19.071 19.071A10 10 0 0 1 12 22 14.5 14.5 0 0 1 8.44 8.45"/><path d="M2 12h10"/><path d="m2 2 20 20"/></svg>
+				<p>Oops... Reddit blocked us. So, reddit, fuck you!</p>
+				{{ end }}
+			</div>
+			{{ else }}
+			<center>No posts were found.</center>
+			{{ end }}
 		{{ end }}
 
 		{{ if .AllPostsFiltered }}
@@ -59,6 +78,57 @@
 		</div>
 		{{ end }}
 
+		{{ if .HomepageSort }}
+		<div id="infinite-loader" data-sort="{{ .HomepageSort }}" data-offset="{{ len .Posts }}">
+			<div id="load-spinner" style="display:none;text-align:center;padding:1em;">
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1.5s linear infinite"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
+			</div>
+			<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">No more posts</div>
+		</div>
+		<script>
+		(function(){
+			var loader = document.getElementById('infinite-loader');
+			var posts = document.getElementById('posts');
+			var spinner = document.getElementById('load-spinner');
+			var endMsg = document.getElementById('load-end');
+			var offset = parseInt(loader.dataset.offset, 10) || 0;
+			var sort = loader.dataset.sort;
+			var loading = false;
+			var done = false;
+
+			function loadMore() {
+				if (loading || done) return;
+				loading = true;
+				spinner.style.display = '';
+				fetch('/?sort=' + sort + '&offset=' + offset + '&partial=1')
+					.then(function(r) { return r.text(); })
+					.then(function(html) {
+						spinner.style.display = 'none';
+						if (!html.trim()) {
+							done = true;
+							endMsg.style.display = '';
+							return;
+						}
+						var tmp = document.createElement('div');
+						tmp.innerHTML = '<hr class="sep" />' + html;
+						while (tmp.firstChild) posts.appendChild(tmp.firstChild);
+						offset += 5;
+						loading = false;
+					})
+					.catch(function() {
+						spinner.style.display = 'none';
+						loading = false;
+					});
+			}
+
+			window.addEventListener('scroll', function() {
+				if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 300) {
+					loadMore();
+				}
+			});
+		})();
+		</script>
+		{{ else }}
 		<footer>
 			{{ if index .Ends 0 }}
 			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&before={{ index .Ends 0 }}" accesskey="P">PREV</a>
@@ -67,6 +137,7 @@
 			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&after={{ index .Ends 1 }}" accesskey="N">NEXT</a>
 			{{ end }}
 		</footer>
+		{{ end }}
 	</div>
 	{{ end }}
 

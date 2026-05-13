@@ -14,10 +14,11 @@ func newTestPool(tokens []*ManagedToken) *Pool {
 }
 
 func TestGetBestToken_HighestRemaining(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
 	tokens := []*ManagedToken{
-		{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50},
-		{StoredToken: store.StoredToken{ID: 2}, RateRemaining: 200},
-		{StoredToken: store.StoredToken{ID: 3}, RateRemaining: 100},
+		{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50, RateResetAt: future},
+		{StoredToken: store.StoredToken{ID: 2}, RateRemaining: 200, RateResetAt: future},
+		{StoredToken: store.StoredToken{ID: 3}, RateRemaining: 100, RateResetAt: future},
 	}
 	p := newTestPool(tokens)
 	best := p.GetBestToken()
@@ -49,8 +50,9 @@ func TestGetBestToken_Empty(t *testing.T) {
 }
 
 func TestGetBestToken_SingleToken(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
 	tokens := []*ManagedToken{
-		{StoredToken: store.StoredToken{ID: 7}, RateRemaining: 42},
+		{StoredToken: store.StoredToken{ID: 7}, RateRemaining: 42, RateResetAt: future},
 	}
 	p := newTestPool(tokens)
 	best := p.GetBestToken()
@@ -126,10 +128,11 @@ func TestOnRequestComplete_NoHeaders(t *testing.T) {
 }
 
 func TestRemainingBudget_SumsAll(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
 	tokens := []*ManagedToken{
-		{RateRemaining: 50},
-		{RateRemaining: 30},
-		{RateRemaining: 20},
+		{RateRemaining: 50, RateResetAt: future},
+		{RateRemaining: 30, RateResetAt: future},
+		{RateRemaining: 20, RateResetAt: future},
 	}
 	p := newTestPool(tokens)
 
@@ -145,7 +148,7 @@ func TestRemainingBudget_SumsAll(t *testing.T) {
 func TestRemainingBudget_SkipsNegative(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 	tokens := []*ManagedToken{
-		{RateRemaining: 50},
+		{RateRemaining: 50, RateResetAt: future},
 		{RateRemaining: -10, RateResetAt: future},
 		{RateRemaining: 0, RateResetAt: future},
 	}

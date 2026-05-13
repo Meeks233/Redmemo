@@ -1,176 +1,555 @@
 {{ define "title" }}{{ .BrandName }} Settings{{ end }}
 
-{{ define "subscriptions" }}{{ template "sub_list" dict "Prefs" .Prefs "Current" "" }}{{ end }}
-
 {{ define "search" }}{{ template "searchbox" dict "Root" "" "Query" "" }}{{ end }}
 
 {{ template "base" . }}
 
 {{ define "content" }}
+<div id="settings-wrapper">
+{{ if eq .Prefs.EnableDebug "on" }}
+<div class="debug-banner">
+	<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+	<span>Warning: Debug page is <a href="/debug">available</a>!</span>
+</div>
+{{ end }}
 <div id="settings">
-	<form action="/settings" method="POST">
-		<div class="prefs">
-			<fieldset>
-				<legend>Appearance</legend>
-				<div class="prefs-group">
-					<label for="theme">Theme:</label>
-					<select name="theme" id="theme">
-						{{ range .Prefs.AvailableThemes }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.Theme }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-			</fieldset>
-			<fieldset>
-				<legend>Interface</legend>
-				<div class="prefs-group">
-					<label for="remove_default_feeds">Remove default feeds</label>
-					<input type="hidden" value="off" name="remove_default_feeds">
-					<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" {{ if eq .Prefs.RemoveDefaultFeeds "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="front_page">Front page:</label>
-					<select name="front_page" id="front_page">
-						{{ $pages := list "default" "popular" "all" }}
-						{{ range $pages }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.FrontPage }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-				<div class="prefs-group">
-					<label for="layout">Layout:</label>
-					<select name="layout" id="layout">
-						{{ $layouts := list "card" "clean" "compact" }}
-						{{ range $layouts }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.Layout }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-				<div class="prefs-group">
-					<label for="wide">Wide UI:</label>
-					<input type="hidden" value="off" name="wide">
-					<input type="checkbox" name="wide" id="wide" {{ if eq .Prefs.Wide "on" }}checked{{ end }}>
-				</div>
-			</fieldset>
-			<fieldset>
-				<legend>Content</legend>
-				<div class="prefs-group">
-					<label for="video_quality">Video quality:</label>
-					<select name="video_quality" id="video_quality">
-						{{ $qualities := list "best" "medium" "worst" }}
-						{{ range $qualities }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-				<div class="prefs-group">
-					<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort:</label>
-					<select name="post_sort">
-						{{ $postSorts := list "hot" "new" "top" "rising" "controversial" }}
-						{{ range $postSorts }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.PostSort }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-				<div class="prefs-group">
-					<label for="comment_sort">Default comment sort:</label>
-					<select name="comment_sort" id="comment_sort">
-						{{ $commentSorts := list "confidence" "top" "new" "controversial" "old" }}
-						{{ range $commentSorts }}
-							<option value="{{ . }}" {{ if eq . $.Prefs.CommentSort }}selected{{ end }}>{{ capitalize . }}</option>
-						{{ end }}
-					</select>
-				</div>
-				<div class="prefs-group">
-					<label for="blur_spoiler">Blur spoiler previews:</label>
-					<input type="hidden" value="off" name="blur_spoiler">
-					<input type="checkbox" name="blur_spoiler" id="blur_spoiler" {{ if eq .Prefs.BlurSpoiler "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="show_nsfw">Show NSFW posts:</label>
-					<input type="hidden" value="off" name="show_nsfw">
-					<input type="checkbox" name="show_nsfw" id="show_nsfw" {{ if eq .Prefs.ShowNSFW "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="blur_nsfw">Blur NSFW previews:</label>
-					<input type="hidden" value="off" name="blur_nsfw">
-					<input type="checkbox" name="blur_nsfw" id="blur_nsfw" {{ if eq .Prefs.BlurNSFW "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="autoplay_videos">Autoplay videos</label>
-					<input type="hidden" value="off" name="autoplay_videos">
-					<input type="checkbox" name="autoplay_videos" id="autoplay_videos" {{ if eq .Prefs.AutoplayVideos "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="fixed_navbar">Keep navbar fixed</label>
-					<input type="hidden" value="off" name="fixed_navbar">
-					<input type="checkbox" name="fixed_navbar" {{ if eq .Prefs.FixedNavbar "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="hide_sidebar_and_summary">Hide the summary and sidebar</label>
-					<input type="hidden" value="off" name="hide_sidebar_and_summary">
-					<input type="checkbox" name="hide_sidebar_and_summary" {{ if eq .Prefs.HideSidebarAndSummary "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="use_hls">Use HLS for videos</label>
-					<input type="hidden" value="off" name="use_hls">
-					<input type="checkbox" name="use_hls" id="use_hls" {{ if eq .Prefs.UseHLS "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="hide_hls_notification">Hide notification about possible HLS usage</label>
-					<input type="hidden" value="off" name="hide_hls_notification">
-					<input type="checkbox" name="hide_hls_notification" id="hide_hls_notification" {{ if eq .Prefs.HideHLSNotification "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="hide_awards">Hide awards</label>
-					<input type="hidden" value="off" name="hide_awards">
-					<input type="checkbox" name="hide_awards" id="hide_awards" {{ if eq .Prefs.HideAwards "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="hide_score">Hide score</label>
-					<input type="hidden" value="off" name="hide_score">
-					<input type="checkbox" name="hide_score" id="hide_score" {{ if eq .Prefs.HideScore "on" }}checked{{ end }}>
-				</div>
-				<div class="prefs-group">
-					<label for="disable_visit_reddit_confirmation">Do not confirm before visiting content on Reddit</label>
-					<input type="hidden" value="off" name="disable_visit_reddit_confirmation">
-					<input type="checkbox" name="disable_visit_reddit_confirmation" {{ if eq .Prefs.DisableVisitRedditConfirmation "on" }}checked{{ end }}>
-				</div>
-			</fieldset>
-			<input id="save" type="submit" value="Save">
-		</div>
-	</form>
-
-	{{ if .Prefs.Subscriptions }}
-	<div class="prefs" id="settings_subs">
-		<legend>Subscribed Feeds</legend>
-		{{ range .Prefs.Subscriptions }}
-		<div>
-			<a href="/{{ feedPath . }}">{{ feedPath . }}</a>
-			<form action="/r/{{ . }}/unsubscribe/?redirect=settings" method="POST">
-				<button class="unsubscribe">Unsubscribe</button>
-			</form>
-		</div>
-		{{ end }}
+	<div class="settings-column">
+		<form action="/settings" method="POST">
+			<div class="prefs">
+				<fieldset>
+					<legend>Appearance</legend>
+					<div class="prefs-group">
+						<label for="theme">Theme:</label>
+						<select name="theme" id="theme">
+							{{ range .Prefs.AvailableThemes }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.Theme }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+				</fieldset>
+				<fieldset>
+					<legend>Interface</legend>
+					<div class="prefs-group">
+						<label for="remove_default_feeds">Remove default feeds</label>
+						<input type="hidden" value="off" name="remove_default_feeds">
+						<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" {{ if eq .Prefs.RemoveDefaultFeeds "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="front_page">Front page:</label>
+						<select name="front_page" id="front_page">
+							{{ $pages := list "default" "popular" "all" }}
+							{{ range $pages }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.FrontPage }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="show_all_subs">Show all subs on homepage</label>
+						<input type="hidden" value="off" name="show_all_subs">
+						<input type="hidden" name="front_page_subs" id="front_page_subs_hidden" value="{{ if or (eq .Prefs.FrontPageSubs "") (eq .Prefs.FrontPageSubs "all") }}all{{ else }}{{ .Prefs.FrontPageSubs }}{{ end }}">
+						<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value="{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}blacklist{{ else }}whitelist{{ end }}">
+						<input type="checkbox" name="show_all_subs" id="show_all_subs" {{ if or (eq .Prefs.FrontPageSubs "all") (eq .Prefs.FrontPageSubs "") }}checked{{ end }} onchange="toggleSubPicker(this)">
+					</div>
+					<div class="prefs-group">
+						<label for="layout">Layout:</label>
+						<select name="layout" id="layout">
+							{{ $layouts := list "card" "clean" "compact" }}
+							{{ range $layouts }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.Layout }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="wide">Wide UI:</label>
+						<input type="hidden" value="off" name="wide">
+						<input type="checkbox" name="wide" id="wide" {{ if eq .Prefs.Wide "on" }}checked{{ end }}>
+					</div>
+				</fieldset>
+				<fieldset>
+					<legend>Content</legend>
+					<div class="prefs-group">
+						<label for="video_quality">Video quality:</label>
+						<select name="video_quality" id="video_quality">
+							{{ $qualities := list "best" "medium" "worst" }}
+							{{ range $qualities }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort:</label>
+						<select name="post_sort">
+							{{ $postSorts := list "hot" "new" "top" "rising" "controversial" }}
+							{{ range $postSorts }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.PostSort }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="comment_sort">Default comment sort:</label>
+						<select name="comment_sort" id="comment_sort">
+							{{ $commentSorts := list "confidence" "top" "new" "controversial" "old" }}
+							{{ range $commentSorts }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.CommentSort }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="blur_spoiler">Blur spoiler previews:</label>
+						<input type="hidden" value="off" name="blur_spoiler">
+						<input type="checkbox" name="blur_spoiler" id="blur_spoiler" {{ if eq .Prefs.BlurSpoiler "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="show_nsfw">Show NSFW posts:</label>
+						<input type="hidden" value="off" name="show_nsfw">
+						<input type="checkbox" name="show_nsfw" id="show_nsfw" {{ if eq .Prefs.ShowNSFW "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="blur_nsfw">Blur NSFW previews:</label>
+						<input type="hidden" value="off" name="blur_nsfw">
+						<input type="checkbox" name="blur_nsfw" id="blur_nsfw" {{ if eq .Prefs.BlurNSFW "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="autoplay_videos">Autoplay videos</label>
+						<input type="hidden" value="off" name="autoplay_videos">
+						<input type="checkbox" name="autoplay_videos" id="autoplay_videos" {{ if eq .Prefs.AutoplayVideos "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="fixed_navbar">Keep navbar fixed</label>
+						<input type="hidden" value="off" name="fixed_navbar">
+						<input type="checkbox" name="fixed_navbar" {{ if eq .Prefs.FixedNavbar "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="hide_sidebar_and_summary">Hide the summary and sidebar</label>
+						<input type="hidden" value="off" name="hide_sidebar_and_summary">
+						<input type="checkbox" name="hide_sidebar_and_summary" {{ if eq .Prefs.HideSidebarAndSummary "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="use_hls">Use HLS for videos</label>
+						<input type="hidden" value="off" name="use_hls">
+						<input type="checkbox" name="use_hls" id="use_hls" {{ if eq .Prefs.UseHLS "on" }}checked{{ end }} onchange="toggleHLS(this)">
+					</div>
+					<div class="prefs-group">
+						<label for="hide_hls_notification">Hide notification about possible HLS usage</label>
+						<input type="hidden" value="off" name="hide_hls_notification">
+						<input type="checkbox" name="hide_hls_notification" id="hide_hls_notification" {{ if eq .Prefs.HideHLSNotification "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="hide_awards">Hide awards</label>
+						<input type="hidden" value="off" name="hide_awards">
+						<input type="checkbox" name="hide_awards" id="hide_awards" {{ if eq .Prefs.HideAwards "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="hide_score">Hide score</label>
+						<input type="hidden" value="off" name="hide_score">
+						<input type="checkbox" name="hide_score" id="hide_score" {{ if eq .Prefs.HideScore "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="disable_visit_reddit_confirmation">Do not confirm before visiting content on Reddit</label>
+						<input type="hidden" value="off" name="disable_visit_reddit_confirmation">
+						<input type="checkbox" name="disable_visit_reddit_confirmation" {{ if eq .Prefs.DisableVisitRedditConfirmation "on" }}checked{{ end }}>
+					</div>
+				</fieldset>
+			</div>
+			<div id="save-bar">
+				<input id="save" type="submit" value="Save">
+			</div>
+		</form>
 	</div>
-	{{ end }}
 
-	{{ if .Prefs.Filters }}
-	<div class="prefs" id="settings_filters">
-		<legend>Filtered Feeds</legend>
-		{{ range .Prefs.Filters }}
-		<div>
-			<a href="/{{ feedPath . }}">{{ feedPath . }}</a>
-			<form action="/r/{{ . }}/unfilter/?redirect=settings" method="POST">
-				<button class="unfilter">Unfilter</button>
-			</form>
+	<div class="settings-column">
+		<div class="prefs" id="sub_picker" style="{{ if or (eq .Prefs.FrontPageSubs "all") (eq .Prefs.FrontPageSubs "") }}display:none{{ end }}">
+			<fieldset>
+				<legend>Homepage Subreddits</legend>
+				<div class="sub-picker-mode">
+					<div class="mode-segmented">
+						<a class="mode-seg{{ if ne .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="whitelist" onclick="setMode('whitelist')">Whitelist</a>
+						<a class="mode-seg{{ if eq .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="blacklist" onclick="setMode('blacklist')">Blacklist</a>
+					</div>
+					<span class="mode-hint" id="mode_hint">{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}Selected subs are hidden{{ else }}Only selected subs are shown{{ end }}</span>
+				</div>
+				<div class="sub-picker-selected" id="sub_selected">
+					{{ if and (ne .Prefs.FrontPageSubs "all") (ne .Prefs.FrontPageSubs "") }}
+						{{ range $i, $s := split .Prefs.FrontPageSubs "+" }}
+						<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove" onclick="removeSub('{{ $s }}')">&times;</button></span>
+						{{ end }}
+					{{ end }}
+				</div>
+				<div class="sub-picker-search">
+					<input type="text" id="sub_search" placeholder="Search subreddits..." autocomplete="off">
+				</div>
+				<div class="sub-picker-list" id="sub_list"></div>
+			</fieldset>
 		</div>
-		{{ end }}
-	</div>
-	{{ end }}
 
-	<div id="settings_note">
-		<p><b>Note:</b> settings and subscriptions are saved in browser cookies. Clearing your cookies will reset them.</p>
+		<div class="prefs" id="prefetch_settings">
+			<fieldset>
+				<legend>Natural Prefetch</legend>
+				<div class="prefs-group">
+					<label for="enable_natural_prefetch">Enable natural prefetch</label>
+					<input type="checkbox" id="enable_natural_prefetch" {{ if eq .Prefs.EnableNaturalPrefetch "on" }}checked{{ end }} onchange="togglePrefetch(this)">
+				</div>
+				<div class="prefetch-picker" id="prefetch_picker" style="{{ if ne .Prefs.EnableNaturalPrefetch "on" }}display:none{{ end }}">
+					<div class="sub-picker-selected" id="prefetch_sub_selected">
+						{{ if ne .Prefs.PrefetchSubs "" }}
+							{{ range $i, $s := split .Prefs.PrefetchSubs "+" }}
+							<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove" onclick="removePrefetchSub('{{ $s }}')">&times;</button></span>
+							{{ end }}
+						{{ end }}
+					</div>
+					<div class="sub-picker-search">
+						<input type="text" id="prefetch_sub_search" placeholder="Add subreddit..." autocomplete="off">
+					</div>
+					<div class="sub-picker-list" id="prefetch_sub_list"></div>
+				</div>
+			</fieldset>
+		</div>
+
+		<div class="prefs" id="instance_info">
+			<fieldset>
+			<legend>Instance Information</legend>
+			<div class="prefs-group">
+				<label for="enable_debug">Enable debug page</label>
+				<input type="checkbox" id="enable_debug" {{ if eq .Prefs.EnableDebug "on" }}checked{{ end }} onchange="toggleDebug(this)">
+			</div>
+			<table>
+				<tbody>
+					<tr>
+						<td>Version</td>
+						<td>{{ .Version }}</td>
+					</tr>
+					<tr>
+						<td>Archived Posts</td>
+						<td>{{ .PostCount }}</td>
+					</tr>
+					<tr>
+						<td>Archived Subreddits</td>
+						<td>{{ .SubredditCount }}</td>
+					</tr>
+					<tr>
+						<td>Cached Media Files</td>
+						<td>{{ .MediaCount }}</td>
+					</tr>
+					<tr>
+						<td>Media Storage Used</td>
+						<td>{{ .MediaSize }}</td>
+					</tr>
+					<tr>
+						<td>OAuth Fallback</td>
+						<td>{{ if .OAuthEnabled }}Enabled{{ else }}Disabled{{ end }}</td>
+					</tr>
+				</tbody>
+			</table>
+			{{ if .SubredditStats }}
+			<table>
+				<thead><tr><th>Archived Subreddit</th><th>Posts</th></tr></thead>
+				<tbody>
+					{{ range .SubredditStats }}
+					<tr>
+						<td><a href="/r/{{ .Name }}">r/{{ .Name }}</a></td>
+						<td>{{ .PostCount }}</td>
+					</tr>
+					{{ end }}
+				</tbody>
+			</table>
+			{{ end }}
+			{{ if .PrefetchSubs }}
+			<table>
+				<thead><tr><th>Prefetch Subreddits</th></tr></thead>
+				<tbody>
+					{{ range .PrefetchSubs }}
+					<tr>
+						<td><a href="/r/{{ . }}">r/{{ . }}</a></td>
+					</tr>
+					{{ end }}
+				</tbody>
+			</table>
+			{{ end }}
+			</fieldset>
+		</div>
+	</div>
+</div>
+</div>
+<script>
+var allSubs = [{{ range $i, $s := .ArchivedSubs }}{{ if $i }},{{ end }}{ name:"{{ $s }}", posts:0 }{{ end }}];
+var topSubs = [{{ range $i, $s := .SubredditStats }}{{ if $i }},{{ end }}{ name:"{{ $s.Name }}", posts:{{ $s.PostCount }} }{{ end }}];
+allSubs.forEach(function(s) {
+	for (var i = 0; i < topSubs.length; i++) {
+		if (topSubs[i].name === s.name) { s.posts = topSubs[i].posts; break; }
+	}
+});
+allSubs.sort(function(a, b) { return b.posts - a.posts; });
+
+function getSelected() {
+	var tags = document.querySelectorAll('#sub_selected .sub-tag');
+	var names = [];
+	tags.forEach(function(t) { names.push(t.dataset.sub); });
+	return names;
+}
+
+function isPickerOpen() {
+	return document.getElementById('sub_picker').style.display !== 'none';
+}
+
+function syncHidden() {
+	var sel = getSelected();
+	var h = document.getElementById('front_page_subs_hidden');
+	h.value = sel.length === 0 ? 'all' : sel.join('+');
+}
+
+function addSub(name) {
+	if (getSelected().indexOf(name) !== -1) return;
+	var span = document.createElement('span');
+	span.className = 'sub-tag';
+	span.dataset.sub = name;
+	span.innerHTML = 'r/' + name + '<button type="button" class="sub-tag-remove" onclick="removeSub(\'' + name + '\')">&times;</button>';
+	document.getElementById('sub_selected').appendChild(span);
+	syncHidden();
+	renderList();
+}
+
+function removeSub(name) {
+	var tags = document.querySelectorAll('#sub_selected .sub-tag');
+	tags.forEach(function(t) { if (t.dataset.sub === name) t.remove(); });
+	syncHidden();
+	renderList();
+}
+
+function renderList() {
+	var q = document.getElementById('sub_search').value.toLowerCase();
+	var sel = getSelected();
+	var source = q ? allSubs.filter(function(s) { return s.name.toLowerCase().indexOf(q) !== -1; }) : topSubs;
+	source = source.filter(function(s) { return sel.indexOf(s.name) === -1; });
+	if (!q) source = source.slice(0, 10);
+	var html = '';
+	source.forEach(function(s) {
+		html += '<div class="sub-picker-item" onclick="addSub(\'' + s.name + '\')">';
+		html += '<span>r/' + s.name + '</span>';
+		if (s.posts > 0) html += '<span class="sub-picker-posts">' + s.posts + ' posts</span>';
+		html += '</div>';
+	});
+	if (source.length === 0 && q) html = '<div class="sub-picker-empty">No matching subreddits</div>';
+	document.getElementById('sub_list').innerHTML = html;
+}
+
+function toggleSubPicker(cb) {
+	var picker = document.getElementById('sub_picker');
+	if (cb.checked) {
+		picker.style.display = 'none';
+		document.getElementById('front_page_subs_hidden').value = 'all';
+		document.getElementById('sub_selected').innerHTML = '';
+	} else {
+		picker.style.display = '';
+		syncHidden();
+		renderList();
+	}
+}
+
+function setMode(mode) {
+	document.getElementById('front_page_subs_mode').value = mode;
+	document.querySelectorAll('.mode-seg').forEach(function(el) {
+		el.classList.toggle('selected', el.dataset.mode === mode);
+	});
+	document.getElementById('mode_hint').textContent =
+		mode === 'blacklist' ? 'Selected subs are hidden' : 'Only selected subs are shown';
+	checkDirty();
+}
+
+document.getElementById('sub_search').addEventListener('input', renderList);
+renderList();
+
+var saveBar = document.getElementById('save-bar');
+var form = document.querySelector('#settings form');
+
+function serializeForm() {
+	var parts = [];
+	new FormData(form).forEach(function(v, k) { parts.push(k + '=' + v); });
+	return parts.join('&');
+}
+
+var initialSerialized = serializeForm();
+
+function checkDirty() {
+	var dirty = serializeForm() !== initialSerialized;
+	if (dirty && isPickerOpen() && getSelected().length === 0) {
+		dirty = false;
+	}
+	saveBar.classList.toggle('visible', dirty);
+}
+
+form.addEventListener('change', checkDirty);
+form.addEventListener('input', checkDirty);
+
+var origSync = syncHidden;
+syncHidden = function() { origSync(); checkDirty(); };
+
+form.addEventListener('submit', function(e) {
+	if (isPickerOpen() && getSelected().length === 0) {
+		e.preventDefault();
+	}
+});
+
+function getPrefetchSelected() {
+	var tags = document.querySelectorAll('#prefetch_sub_selected .sub-tag');
+	var names = [];
+	tags.forEach(function(t) { names.push(t.dataset.sub); });
+	return names;
+}
+
+function addPrefetchSub(name) {
+	if (getPrefetchSelected().indexOf(name) !== -1) return;
+	var span = document.createElement('span');
+	span.className = 'sub-tag';
+	span.dataset.sub = name;
+	span.innerHTML = 'r/' + name + '<button type="button" class="sub-tag-remove" onclick="removePrefetchSub(\'' + name + '\')">&times;</button>';
+	document.getElementById('prefetch_sub_selected').appendChild(span);
+	savePrefetchSubs();
+	renderPrefetchList();
+}
+
+function removePrefetchSub(name) {
+	var tags = document.querySelectorAll('#prefetch_sub_selected .sub-tag');
+	tags.forEach(function(t) { if (t.dataset.sub === name) t.remove(); });
+	savePrefetchSubs();
+	renderPrefetchList();
+}
+
+function renderPrefetchList() {
+	var q = document.getElementById('prefetch_sub_search').value.toLowerCase();
+	var sel = getPrefetchSelected();
+	var source = q ? allSubs.filter(function(s) { return s.name.toLowerCase().indexOf(q) !== -1; }) : topSubs;
+	source = source.filter(function(s) { return sel.indexOf(s.name) === -1; });
+	if (!q) source = source.slice(0, 10);
+	var html = '';
+	source.forEach(function(s) {
+		html += '<div class="sub-picker-item" onclick="addPrefetchSub(\'' + s.name + '\')">';
+		html += '<span>r/' + s.name + '</span>';
+		if (s.posts > 0) html += '<span class="sub-picker-posts">' + s.posts + ' posts</span>';
+		html += '</div>';
+	});
+	if (source.length === 0 && q) html = '<div class="sub-picker-empty">No matching subreddits</div>';
+	document.getElementById('prefetch_sub_list').innerHTML = html;
+}
+
+function savePrefetchSubs() {
+	var fd = new FormData();
+	fd.append('prefetch_subs', getPrefetchSelected().join('+'));
+	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+}
+
+document.getElementById('prefetch_sub_search').addEventListener('input', renderPrefetchList);
+renderPrefetchList();
+
+function togglePrefetch(cb) {
+	if (cb.checked) {
+		cb.checked = false;
+		document.getElementById('prefetch-modal').classList.add('visible');
+	} else {
+		document.getElementById('prefetch_picker').style.display = 'none';
+		submitPrefetchSetting('off');
+	}
+}
+
+function confirmPrefetch() {
+	document.getElementById('prefetch-modal').classList.remove('visible');
+	document.getElementById('enable_natural_prefetch').checked = true;
+	document.getElementById('prefetch_picker').style.display = '';
+	submitPrefetchSetting('on');
+	renderPrefetchList();
+}
+
+function cancelPrefetch() {
+	document.getElementById('prefetch-modal').classList.remove('visible');
+}
+
+function submitPrefetchSetting(val) {
+	var fd = new FormData();
+	fd.append('enable_natural_prefetch', val);
+	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+}
+
+function toggleDebug(cb) {
+	if (cb.checked) {
+		cb.checked = false;
+		document.getElementById('debug-modal').classList.add('visible');
+	} else {
+		submitDebugSetting('off');
+	}
+}
+
+function confirmDebug() {
+	document.getElementById('debug-modal').classList.remove('visible');
+	document.getElementById('enable_debug').checked = true;
+	submitDebugSetting('on');
+}
+
+function cancelDebug() {
+	document.getElementById('debug-modal').classList.remove('visible');
+}
+
+function submitDebugSetting(val) {
+	var fd = new FormData();
+	fd.append('enable_debug', val);
+	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
+		.then(function() { location.reload(); });
+}
+
+function toggleHLS(cb) {
+	if (cb.checked) {
+		cb.checked = false;
+		document.getElementById('hls-modal').classList.add('visible');
+	} else {
+		submitHLSSetting('off');
+	}
+}
+
+function confirmHLS() {
+	document.getElementById('hls-modal').classList.remove('visible');
+	document.getElementById('use_hls').checked = true;
+	submitHLSSetting('on');
+}
+
+function cancelHLS() {
+	document.getElementById('hls-modal').classList.remove('visible');
+}
+
+function submitHLSSetting(val) {
+	var fd = new FormData();
+	fd.append('use_hls', val);
+	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
+		.then(function() { location.reload(); });
+}
+</script>
+<div class="modal-overlay" id="prefetch-modal" onclick="if(event.target===this)cancelPrefetch()">
+	<div class="modal-box">
+		<h2>Enable natural prefetch?</h2>
+		<p>Enabling this may cause your request quota to deplete rapidly. Make sure you know what you are doing.</p>
+		<div class="modal-actions">
+			<button class="modal-cancel" onclick="cancelPrefetch()">Cancel</button>
+			<button class="modal-confirm" onclick="confirmPrefetch()">Accept risk &amp; enable</button>
+		</div>
+	</div>
+</div>
+<div class="modal-overlay" id="debug-modal" onclick="if(event.target===this)cancelDebug()">
+	<div class="modal-box">
+		<h2>Enable debug page?</h2>
+		<p>Enabling this on a public network may expose instance diagnostics and private information.</p>
+		<p>Are you sure you want to continue?</p>
+		<div class="modal-actions">
+			<button class="modal-cancel" onclick="cancelDebug()">Cancel</button>
+			<button class="modal-confirm" onclick="confirmDebug()">Accept risk &amp; enable</button>
+		</div>
+	</div>
+</div>
+<div class="modal-overlay" id="hls-modal" onclick="if(event.target===this)cancelHLS()">
+	<div class="modal-box">
+		<h2>Enable HLS video?</h2>
+		<p>HLS generates dozens of uncacheable segment requests per video, causing your request quota to deplete rapidly and bypassing the media cache layer.</p>
+		<p>Are you sure you want to continue?</p>
+		<div class="modal-actions">
+			<button class="modal-cancel" onclick="cancelHLS()">Cancel</button>
+			<button class="modal-confirm" onclick="confirmHLS()">Accept risk &amp; enable</button>
+		</div>
 	</div>
 </div>
 {{ end }}

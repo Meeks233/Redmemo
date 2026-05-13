@@ -75,104 +75,73 @@ func TestPathNormalize_RootNotRedirected(t *testing.T) {
 	}
 }
 
-func TestReadPreferences_WithCookies(t *testing.T) {
+func testHandler() *Handler {
+	return &Handler{siteDefaults: make(map[string]string)}
+}
+
+func TestReadPreferences_ThemeCookie(t *testing.T) {
+	h := testHandler()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
-	req.AddCookie(&http.Cookie{Name: "layout", Value: "compact"})
-	req.AddCookie(&http.Cookie{Name: "front_page", Value: "all"})
-	req.AddCookie(&http.Cookie{Name: "wide", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "comment_sort", Value: "new"})
-	req.AddCookie(&http.Cookie{Name: "post_sort", Value: "top"})
-	req.AddCookie(&http.Cookie{Name: "show_nsfw", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "blur_nsfw", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "blur_spoiler", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "use_hls", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "hide_awards", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "hide_score", Value: "on"})
-	req.AddCookie(&http.Cookie{Name: "fixed_navbar", Value: "off"})
-	req.AddCookie(&http.Cookie{Name: "video_quality", Value: "worst"})
 
-	prefs := readPreferences(req)
-
-	checks := []struct {
-		name string
-		got  string
-		want string
-	}{
-		{"Theme", prefs.Theme, "dark"},
-		{"Layout", prefs.Layout, "compact"},
-		{"FrontPage", prefs.FrontPage, "all"},
-		{"Wide", prefs.Wide, "on"},
-		{"CommentSort", prefs.CommentSort, "new"},
-		{"PostSort", prefs.PostSort, "top"},
-		{"ShowNSFW", prefs.ShowNSFW, "on"},
-		{"BlurNSFW", prefs.BlurNSFW, "on"},
-		{"BlurSpoiler", prefs.BlurSpoiler, "on"},
-		{"UseHLS", prefs.UseHLS, "on"},
-		{"HideAwards", prefs.HideAwards, "on"},
-		{"HideScore", prefs.HideScore, "on"},
-		{"FixedNavbar", prefs.FixedNavbar, "off"},
-		{"VideoQuality", prefs.VideoQuality, "worst"},
+	prefs := h.readPreferences(req)
+	if prefs.Theme != "dark" {
+		t.Errorf("Theme = %q, want %q", prefs.Theme, "dark")
 	}
-	for _, c := range checks {
-		if c.got != c.want {
-			t.Errorf("prefs.%s = %q, want %q", c.name, c.got, c.want)
-		}
+}
+
+func TestReadPreferences_ThemeFromSiteDefaults(t *testing.T) {
+	h := testHandler()
+	h.siteDefaults["theme"] = "nord"
+	req := httptest.NewRequest("GET", "/", nil)
+
+	prefs := h.readPreferences(req)
+	if prefs.Theme != "nord" {
+		t.Errorf("Theme = %q, want %q", prefs.Theme, "nord")
+	}
+}
+
+func TestReadPreferences_ThemeCookieOverridesSiteDefault(t *testing.T) {
+	h := testHandler()
+	h.siteDefaults["theme"] = "nord"
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: "theme", Value: "dracula"})
+
+	prefs := h.readPreferences(req)
+	if prefs.Theme != "dracula" {
+		t.Errorf("Theme = %q, want %q", prefs.Theme, "dracula")
+	}
+}
+
+func TestReadPreferences_OtherPrefsFromSiteDefaults(t *testing.T) {
+	h := testHandler()
+	h.siteDefaults["layout"] = "compact"
+	h.siteDefaults["wide"] = "on"
+	h.siteDefaults["front_page"] = "all"
+	req := httptest.NewRequest("GET", "/", nil)
+
+	prefs := h.readPreferences(req)
+	if prefs.Layout != "compact" {
+		t.Errorf("Layout = %q, want %q", prefs.Layout, "compact")
+	}
+	if prefs.Wide != "on" {
+		t.Errorf("Wide = %q, want %q", prefs.Wide, "on")
+	}
+	if prefs.FrontPage != "all" {
+		t.Errorf("FrontPage = %q, want %q", prefs.FrontPage, "all")
 	}
 }
 
 func TestReadPreferences_Defaults(t *testing.T) {
+	h := testHandler()
 	req := httptest.NewRequest("GET", "/", nil)
-	prefs := readPreferences(req)
+	prefs := h.readPreferences(req)
 
 	if prefs.FixedNavbar != "on" {
 		t.Errorf("FixedNavbar default = %q, want %q", prefs.FixedNavbar, "on")
 	}
 	if prefs.Theme != "" {
 		t.Errorf("Theme default = %q, want empty", prefs.Theme)
-	}
-	if prefs.Subscriptions != nil {
-		t.Errorf("Subscriptions default = %v, want nil", prefs.Subscriptions)
-	}
-	if prefs.Filters != nil {
-		t.Errorf("Filters default = %v, want nil", prefs.Filters)
-	}
-}
-
-func TestReadPreferences_MultiCookieSubscriptions(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(&http.Cookie{Name: "subscriptions", Value: "golang+rust"})
-	req.AddCookie(&http.Cookie{Name: "subscriptions1", Value: "python+java"})
-	req.AddCookie(&http.Cookie{Name: "subscriptions2", Value: "typescript"})
-
-	prefs := readPreferences(req)
-	want := []string{"golang", "rust", "python", "java", "typescript"}
-
-	if len(prefs.Subscriptions) != len(want) {
-		t.Fatalf("Subscriptions len = %d, want %d: %v", len(prefs.Subscriptions), len(want), prefs.Subscriptions)
-	}
-	for i, s := range prefs.Subscriptions {
-		if s != want[i] {
-			t.Errorf("Subscriptions[%d] = %q, want %q", i, s, want[i])
-		}
-	}
-}
-
-func TestReadPreferences_MultiCookieFilters(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(&http.Cookie{Name: "filters", Value: "memes+pics"})
-	req.AddCookie(&http.Cookie{Name: "filters1", Value: "funny"})
-
-	prefs := readPreferences(req)
-	want := []string{"memes", "pics", "funny"}
-
-	if len(prefs.Filters) != len(want) {
-		t.Fatalf("Filters len = %d, want %d: %v", len(prefs.Filters), len(want), prefs.Filters)
-	}
-	for i, f := range prefs.Filters {
-		if f != want[i] {
-			t.Errorf("Filters[%d] = %q, want %q", i, f, want[i])
-		}
 	}
 }
 
@@ -185,7 +154,6 @@ func TestRecovery_HandlerPanics(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := httptest.NewRecorder()
 
-	// Should not panic
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {

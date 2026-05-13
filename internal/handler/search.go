@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redmemo/redmemo/internal/proxy"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 )
@@ -23,7 +22,7 @@ func (h *Handler) handleSubSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string) {
-	prefs := readPreferences(r)
+	prefs := h.readPreferences(r)
 	query := r.URL.Query().Get("q")
 	sort := r.URL.Query().Get("sort")
 	t := r.URL.Query().Get("t")
@@ -85,40 +84,10 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
-	// Level 3: Redlib proxy
-	if !h.cfg.Redlib.Enabled {
-		diag = append(diag, "L3 Redlib: disabled in config")
-	} else if !h.ratelimit.CanRequestRedlib() {
-		diag = append(diag, "L3 Redlib: rate limited locally")
-	} else {
-		resp, body, err := h.proxy.Forward(r)
-		if err != nil {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: proxy error: %v", err))
-		} else if proxy.IsRateLimited(resp.StatusCode, body) {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: rate limited (HTTP %d)", resp.StatusCode))
-			h.ratelimit.OnRedlibRateLimited()
-			go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-		} else if proxy.IsServerError(resp.StatusCode, body) {
-			diag = append(diag, fmt.Sprintf("L3 Redlib: server error (HTTP %d)", resp.StatusCode))
-		} else {
-			h.ratelimit.Increment()
-			body = h.rewriteMedia(h.rebrand(body))
-			h.cache.PutHTML(r.Context(), cacheKey, body, 3*time.Minute)
-
-			go h.backgroundArchiveSearch(query, sub, sort, t, after)
-
-			w.Header().Set("X-Cache", "MISS")
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(resp.StatusCode)
-			w.Write(body)
-			return
-		}
-	}
-
-	// Level 4: Own OAuth fallback (if not tried above)
+	// Level 3: Own OAuth fallback (if not tried above)
 	if !triedOAuth {
 		if !h.ratelimit.CanRequestFallback(r.Context()) {
-			diag = append(diag, "L4 OAuth fallback: rate limited locally")
+			diag = append(diag, "L3 OAuth fallback: rate limited locally")
 		} else {
 			restrictSR := sub != ""
 			posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 10)
@@ -153,14 +122,14 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				}
 				return
 			}
-			diag = append(diag, fmt.Sprintf("L4 OAuth fallback: %v", err))
+			diag = append(diag, fmt.Sprintf("L3 OAuth fallback: %v", err))
 			log.Printf("handler: fallback search %q: %v", query, err)
 		}
 	} else {
-		diag = append(diag, "L4 OAuth fallback: skipped (already tried at L2)")
+		diag = append(diag, "L3 OAuth fallback: skipped (already tried at L2)")
 	}
 
-	// Level 5: Archive search (offline fallback)
+	// Level 4: Archive search (offline fallback)
 	if query != "" {
 		stored, _ := h.postStore.Search(query, 25)
 		if len(stored) > 0 {
@@ -196,12 +165,12 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			}
 			return
 		}
-		diag = append(diag, fmt.Sprintf("L5 Archive: no results for %q", query))
+		diag = append(diag, fmt.Sprintf("L4 Archive: no results for %q", query))
 	} else {
-		diag = append(diag, "L5 Archive: empty query")
+		diag = append(diag, "L4 Archive: empty query")
 	}
 
-	// Level 6: Error + background spawn
+	// Level 5: Error + background spawn
 	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
 	log.Printf("handler: all levels failed for search %q: %v", query, diag)
 	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)

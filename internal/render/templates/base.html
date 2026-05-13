@@ -17,6 +17,9 @@
 		<link rel="manifest" type="application/json" href="/manifest.json">
 		<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
 		<link rel="stylesheet" type="text/css" href="/style.css?v={{ .Version }}">
+		{{ if and .Prefs.Theme (ne .Prefs.Theme "system") (ne .Prefs.Theme "dark") (ne .Prefs.Theme "tokyoNight") }}
+		<link rel="stylesheet" type="text/css" href="/themes/{{ .Prefs.Theme }}.css?v={{ .Version }}">
+		{{ end }}
 		<div id="video_quality" data-value="{{ .Prefs.VideoQuality }}"></div>
 		{{ block "head_extra" . }}{{ end }}
 	</head>
@@ -28,16 +31,10 @@
 			</div>
 			{{ block "search" . }}{{ end }}
 			<div id="links">
-				<a id="reddit_link" {{ if ne .Prefs.DisableVisitRedditConfirmation "on" }}href="#popup"{{ else }}href="https://www.reddit.com{{ .URL }}" rel="nofollow"{{ end }}>
-					<span>reddit</span>
-					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M22 2L12 22"/>
-						<path d="M2 6.70587C3.33333 8.07884 3.33333 11.5971 3.33333 11.5971M3.33333 19.647V11.5971M3.33333 11.5971C3.33333 11.5971 5.125 7.47817 8 7.47817C10.875 7.47817 12 8.85114 12 8.85114"/>
-					</svg>
+				<a id="status_quota" href="/countdown">
+					<svg class="nav-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" class="nav-ring-track"/><circle id="nav-ring-arc" cx="10" cy="10" r="8" class="nav-ring-arc"/></svg>
+					<span id="nav-quota-text"></span>
 				</a>
-				{{ if ne .Prefs.DisableVisitRedditConfirmation "on" }}
-					{{ template "visit_reddit_confirmation" .URL }}
-				{{ end }}
 				<a id="settings_link" href="/settings">
 					<span>settings</span>
 					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -57,10 +54,34 @@
 		{{ block "footer" . }}
 		<footer>
 			<div class="footer-buttons">
-				<p><span id="version">v{{ .Version }}&emsp;</span><a href="/info" title="View instance information">ⓘ View instance info</a>&emsp;<a href="https://github.com/CanglanXYA/redmemo" title="View code on GitHub">&lt;&gt; Code</a></p>
+				<p><span id="version">v{{ .Version }}&emsp;</span><a href="https://github.com/CanglanXYA/redmemo" title="View code on GitHub">&lt;&gt; Code</a></p>
 			</div>
 		</footer>
 		{{ end }}
+		<script>
+(function(){
+	var circ=2*Math.PI*8;
+	var arc=document.getElementById("nav-ring-arc");
+	var txt=document.getElementById("nav-quota-text");
+	if(!arc||!txt)return;
+	arc.style.strokeDasharray=circ;
+	arc.style.strokeDashoffset=circ;
+	fetch("/api/status").then(function(r){return r.json()}).then(function(d){
+		var rem=d.remaining,left=d.reset||0,total=left;
+		txt.textContent=rem+" left";
+		if(left>0){
+			var frac0=total>0?left/total:0;
+			arc.style.strokeDashoffset=circ*(1-frac0);
+			var iv=setInterval(function(){
+				left--;
+				if(left<=0){clearInterval(iv);arc.style.strokeDashoffset=circ;return}
+				var frac=total>0?left/total:0;
+				arc.style.strokeDashoffset=circ*(1-frac);
+			},1000);
+		}
+	});
+})();
+		</script>
 	</body>
 </html>
 {{- end -}}

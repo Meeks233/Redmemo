@@ -26,6 +26,8 @@ var migrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_posts_post_id ON posts (post_id);
 	CREATE INDEX IF NOT EXISTS idx_posts_created ON posts (created_utc DESC);
 	CREATE INDEX IF NOT EXISTS idx_posts_last_updated ON posts (last_updated DESC);
+	CREATE INDEX IF NOT EXISTS idx_posts_first_seen ON posts (first_seen DESC);
+	CREATE INDEX IF NOT EXISTS idx_posts_score ON posts (score DESC);
 
 	CREATE TABLE IF NOT EXISTS comments (
 		post_url_path   TEXT NOT NULL REFERENCES posts(url_path),
@@ -92,6 +94,15 @@ var migrations = []string{
 	`ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
 	 ALTER TABLE posts ADD CONSTRAINT valid_source
 		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'search', 'user_listing', 'background'));`,
+
+	// v4: site_settings for persistent key-value settings (legacy sync, etc.)
+	`CREATE TABLE IF NOT EXISTS site_settings (
+		name        TEXT PRIMARY KEY,
+		value       TEXT NOT NULL,
+		source      TEXT NOT NULL DEFAULT 'legacy_sync',
+		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
 }
 
 func RunMigrations(db *sql.DB) error {
