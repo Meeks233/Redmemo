@@ -183,6 +183,7 @@ type Preferences struct {
 	EnableDebug                    string
 	EnableNaturalPrefetch          string
 	PrefetchSubs                   string
+	ScrollInterval                 string
 }
 
 // Params holds common query parameters for listing endpoints.

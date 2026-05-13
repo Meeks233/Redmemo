@@ -82,13 +82,18 @@ func (p *Pool) Start(ctx context.Context) error {
 			}
 		} else {
 			mt.RateRemaining = 99
-			mt.RateResetAt = now.Add(10 * time.Minute)
+			if st.RateResetAt != nil && !st.RateResetAt.IsZero() {
+				elapsed := now.Sub(*st.RateResetAt)
+				mt.RateResetAt = st.RateResetAt.Add((elapsed/(10*time.Minute) + 1) * 10 * time.Minute)
+			} else {
+				mt.RateResetAt = now.Add(10 * time.Minute)
+			}
 			remaining := 99
 			resetAt := mt.RateResetAt
 			st.RateRemaining = &remaining
 			st.RateResetAt = &resetAt
 			mt.StoredToken = *st
-			log.Printf("oauth: token %d window expired, reset to 99", st.ID)
+			log.Printf("oauth: token %d window expired, reset to 99 (next reset in %ds)", st.ID, int(time.Until(mt.RateResetAt).Seconds()))
 		}
 		p.tokens = append(p.tokens, mt)
 	}

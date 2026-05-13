@@ -99,6 +99,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /highlighted.js", static)
 	mux.Handle("GET /copy.js", static)
 	mux.Handle("GET /check_update.js", static)
+	mux.Handle("GET /quotaRing.js", static)
+	mux.Handle("GET /infiniteScroll.js", static)
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)

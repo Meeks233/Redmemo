@@ -58,30 +58,7 @@
 			</div>
 		</footer>
 		{{ end }}
-		<script>
-(function(){
-	var circ=2*Math.PI*8;
-	var arc=document.getElementById("nav-ring-arc");
-	var txt=document.getElementById("nav-quota-text");
-	if(!arc||!txt)return;
-	arc.style.strokeDasharray=circ;
-	arc.style.strokeDashoffset=circ;
-	fetch("/api/status").then(function(r){return r.json()}).then(function(d){
-		var rem=d.remaining,left=d.reset||0,total=left;
-		txt.textContent=rem+" left";
-		if(left>0){
-			var frac0=total>0?left/total:0;
-			arc.style.strokeDashoffset=circ*(1-frac0);
-			var iv=setInterval(function(){
-				left--;
-				if(left<=0){clearInterval(iv);arc.style.strokeDashoffset=circ;return}
-				var frac=total>0?left/total:0;
-				arc.style.strokeDashoffset=circ*(1-frac);
-			},1000);
-		}
-	});
-})();
-		</script>
+		<script src="/quotaRing.js"></script>
 	</body>
 </html>
 {{- end -}}

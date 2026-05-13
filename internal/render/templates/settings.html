@@ -120,6 +120,10 @@
 						<input type="checkbox" name="fixed_navbar" {{ if eq .Prefs.FixedNavbar "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
+						<label for="scroll_interval">Infinite scroll interval (seconds)</label>
+						<input type="number" name="scroll_interval" id="scroll_interval" min="1" step="1" value="{{ .Prefs.ScrollInterval }}" style="width:60px">
+					</div>
+					<div class="prefs-group">
 						<label for="hide_sidebar_and_summary">Hide the summary and sidebar</label>
 						<input type="hidden" value="off" name="hide_sidebar_and_summary">
 						<input type="checkbox" name="hide_sidebar_and_summary" {{ if eq .Prefs.HideSidebarAndSummary "on" }}checked{{ end }}>

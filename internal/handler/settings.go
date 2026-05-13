@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/redmemo/redmemo/internal/render"
 )
@@ -20,6 +21,7 @@ var settingsKeys = []string{
 	"comment_sort", "post_sort",
 	"hide_awards", "hide_score", "remove_default_feeds",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
+	"scroll_interval",
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +94,14 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	if mode, ok := updates["front_page_subs_mode"]; ok && mode != "whitelist" && mode != "blacklist" {
 		updates["front_page_subs_mode"] = "whitelist"
+	}
+
+	if v, ok := updates["scroll_interval"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
+			delete(updates, "scroll_interval")
+		} else {
+			updates["scroll_interval"] = strconv.Itoa(n)
+		}
 	}
 
 	if len(updates) > 0 {

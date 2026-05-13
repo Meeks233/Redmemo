@@ -13,10 +13,10 @@
 		<form id="sort">
 			<div id="sort_options">
 				{{ if .HomepageSort }}
-					<a {{ if eq .HomepageSort "new" }}class="selected"{{ end }} href="/?sort=new">New</a>
-					<a {{ if eq .HomepageSort "new_archive" }}class="selected"{{ end }} href="/?sort=new_archive">Archive</a>
-					<a {{ if eq .HomepageSort "top" }}class="selected"{{ end }} href="/?sort=top">Top</a>
-					<a {{ if eq .HomepageSort "notorious" }}class="selected"{{ end }} href="/?sort=notorious">Notorious</a>
+					<a {{ if eq .HomepageSort "new" }}class="selected"{{ end }} href="/?sort=new" onclick="return switchSort(this,'new')">New</a>
+					<a {{ if eq .HomepageSort "new_archive" }}class="selected"{{ end }} href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">Archive</a>
+					<a {{ if eq .HomepageSort "top" }}class="selected"{{ end }} href="/?sort=top" onclick="return switchSort(this,'top')">Top</a>
+					<a {{ if eq .HomepageSort "notorious" }}class="selected"{{ end }} href="/?sort=notorious" onclick="return switchSort(this,'notorious')">Notorious</a>
 				{{ else }}
 					{{ $methods := list "hot" "new" "top" "rising" "controversial" }}
 					{{ if .Sub.Name }}
@@ -79,55 +79,13 @@
 		{{ end }}
 
 		{{ if .HomepageSort }}
-		<div id="infinite-loader" data-sort="{{ .HomepageSort }}" data-offset="{{ len .Posts }}">
+		<div id="infinite-loader" data-sort="{{ .HomepageSort }}" data-offset="{{ len .Posts }}" data-interval="{{ .Prefs.ScrollInterval }}">
 			<div id="load-spinner" style="display:none;text-align:center;padding:1em;">
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1.5s linear infinite"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
 			</div>
 			<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">No more posts</div>
 		</div>
-		<script>
-		(function(){
-			var loader = document.getElementById('infinite-loader');
-			var posts = document.getElementById('posts');
-			var spinner = document.getElementById('load-spinner');
-			var endMsg = document.getElementById('load-end');
-			var offset = parseInt(loader.dataset.offset, 10) || 0;
-			var sort = loader.dataset.sort;
-			var loading = false;
-			var done = false;
-
-			function loadMore() {
-				if (loading || done) return;
-				loading = true;
-				spinner.style.display = '';
-				fetch('/?sort=' + sort + '&offset=' + offset + '&partial=1')
-					.then(function(r) { return r.text(); })
-					.then(function(html) {
-						spinner.style.display = 'none';
-						if (!html.trim()) {
-							done = true;
-							endMsg.style.display = '';
-							return;
-						}
-						var tmp = document.createElement('div');
-						tmp.innerHTML = '<hr class="sep" />' + html;
-						while (tmp.firstChild) posts.appendChild(tmp.firstChild);
-						offset += 5;
-						loading = false;
-					})
-					.catch(function() {
-						spinner.style.display = 'none';
-						loading = false;
-					});
-			}
-
-			window.addEventListener('scroll', function() {
-				if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 300) {
-					loadMore();
-				}
-			});
-		})();
-		</script>
+		<script src="/infiniteScroll.js"></script>
 		{{ else }}
 		<footer>
 			{{ if index .Ends 0 }}

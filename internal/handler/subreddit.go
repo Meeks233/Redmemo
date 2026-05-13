@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
 )
+
+var partialLastReq sync.Map
 
 func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
@@ -54,6 +57,19 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("partial") == "1" {
+		interval := 2
+		if n, err := strconv.Atoi(prefs.ScrollInterval); err == nil && n > 0 {
+			interval = n
+		}
+		ip := r.RemoteAddr
+		now := time.Now()
+		if last, ok := partialLastReq.Load(ip); ok {
+			if now.Sub(last.(time.Time)) < time.Duration(interval)*time.Second {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+		}
+		partialLastReq.Store(ip, now)
 		h.renderHomepagePartial(w, posts, prefs)
 		return
 	}

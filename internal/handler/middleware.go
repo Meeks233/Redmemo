@@ -91,6 +91,7 @@ var prefDefaults = map[string]string{
 	"enable_debug":            "off",
 	"enable_natural_prefetch": "off",
 	"prefetch_subs":           "",
+	"scroll_interval":         "2",
 }
 
 func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
@@ -132,6 +133,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.EnableDebug = pref("enable_debug")
 	p.EnableNaturalPrefetch = pref("enable_natural_prefetch")
 	p.PrefetchSubs = pref("prefetch_subs")
+	p.ScrollInterval = pref("scroll_interval")
 
 	p.AvailableThemes = render.AvailableThemes()
 

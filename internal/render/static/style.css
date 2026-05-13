@@ -215,7 +215,7 @@ nav #links {
     justify-content: flex-end;
 }
 
-nav #links svg {
+nav #links svg:not(.nav-ring) {
     display: none;
 }
 
