@@ -122,10 +122,11 @@ func main() {
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)
+	subStatusStore := store.NewSubStatusStore(db)
 
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
-		redditCli, archiver, mediaProxy,
+		redditCli, publicCli, archiver, mediaProxy, subStatusStore,
 	)
 
 	// 11. Start background tasks
@@ -134,15 +135,13 @@ func main() {
 	}
 	rateLimiter.Start(ctx)
 	evictor.Start(ctx)
-	if cfg.Prefetch.Enabled {
-		prefetcher.Start(ctx)
-	}
+	prefetcher.Start(ctx)
 
 	// 12. Register routes, start HTTP server
 	h := handler.New(
 		rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
-		mediaProxy, archiver, prefetcher, uaPool, cfg,
+		mediaProxy, archiver, prefetcher, subStatusStore, uaPool, cfg,
 	)
 
 	srv := &http.Server{

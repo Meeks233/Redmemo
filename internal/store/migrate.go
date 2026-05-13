@@ -103,6 +103,17 @@ var migrations = []string{
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);`,
+
+	// v5: subreddit liveness tracking
+	`CREATE TABLE IF NOT EXISTS subreddit_status (
+		name            TEXT PRIMARY KEY,
+		status          TEXT NOT NULL DEFAULT 'live',
+		reason          TEXT,
+		last_live       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		fail_count      INTEGER NOT NULL DEFAULT 0,
+		checked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT valid_status CHECK (status IN ('live', 'dead', 'private', 'quarantined', 'unknown'))
+	);`,
 }
 
 func RunMigrations(db *sql.DB) error {

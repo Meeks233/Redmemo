@@ -211,6 +211,7 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("User-Agent", token.UserAgent)
+	req.Header.Set("Cookie", `_options={%22pref_quarantine_optin%22:true}`)
 	for k, v := range token.Headers {
 		req.Header.Set(k, v)
 	}

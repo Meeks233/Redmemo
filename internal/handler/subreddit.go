@@ -200,6 +200,9 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, limit)
 	if err != nil {
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
+		if h.subStatusStore != nil {
+			h.subStatusStore.RecordFailure(sub, err.Error())
+		}
 		return false
 	}
 
@@ -208,6 +211,9 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	go func() {
 		h.archiver.ArchivePosts(posts, sub, "oauth_fallback")
 		h.archiver.ArchiveSubreddit(&subInfo)
+		if h.subStatusStore != nil {
+			h.subStatusStore.MarkLive(sub)
+		}
 	}()
 
 	data := render.SubredditPageData{

@@ -59,6 +59,15 @@ type StoredSubreddit struct {
 	LastUpdated time.Time
 }
 
+type SubredditStatus struct {
+	Name      string
+	Status    string // live, dead, private, quarantined, unknown
+	Reason    string
+	LastLive  time.Time
+	FailCount int
+	CheckedAt time.Time
+}
+
 type StoredPrefetchConfig struct {
 	Subreddit     string
 	SortBy        string

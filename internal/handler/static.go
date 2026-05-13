@@ -1,15 +1,19 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/render"
 )
+
+var validSubName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_]{1,20}$`)
 
 func (h *Handler) staticHandler() http.Handler {
 	return h.renderer.StaticHandler()
@@ -210,6 +214,49 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	h.renderer.RenderDebug(w, "Instance Diagnostics", dd)
+}
+
+func (h *Handler) handleProbeSub(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" || !validSubName.MatchString(name) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"exists": false, "error": "invalid name"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if h.subStatusStore != nil {
+		st, _ := h.subStatusStore.Get(name)
+		if st != nil {
+			if st.Status == "live" {
+				json.NewEncoder(w).Encode(map[string]interface{}{"exists": true, "name": st.Name, "cached": true})
+				return
+			}
+			if st.Status == "dead" || st.Status == "private" || st.Status == "quarantined" {
+				json.NewEncoder(w).Encode(map[string]interface{}{"exists": false, "status": st.Status, "cached": true})
+				return
+			}
+		}
+	}
+
+	sub, err := h.publicCli.FetchSubredditAbout(r.Context(), name)
+	if err != nil {
+		if h.subStatusStore != nil {
+			h.subStatusStore.RecordFailure(name, err.Error())
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"exists": false})
+		return
+	}
+
+	if h.subStatusStore != nil {
+		h.subStatusStore.MarkLive(sub.Name)
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"exists": true,
+		"name":   sub.Name,
+		"title":  sub.Title,
+	})
 }
 
 func formatDuration(d time.Duration) string {

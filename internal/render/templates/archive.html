@@ -1,0 +1,45 @@
+{{ define "title" }}Archive: r/{{ .Sub }}{{ end }}
+
+{{ define "subscriptions" }}{{ end }}
+{{ define "search" }}{{ end }}
+
+{{ template "base" . }}
+
+{{ define "body" }}
+<main>
+<div id="column_one">
+	<div id="sort_options" style="display:flex;align-items:center;gap:0.5em;padding:0.5em 0;">
+		<a href="/settings">&larr; Settings</a>
+		<span style="opacity:0.5;">|</span>
+		<strong>r/{{ .Sub }}</strong>
+		<span style="opacity:0.5;">&mdash; {{ .TotalPosts }} archived posts</span>
+	</div>
+
+	{{ if eq (len .Posts) 0 }}
+	<center style="padding:2em;">No archived posts for this subreddit.</center>
+	{{ else }}
+	<div id="posts">
+	{{ range .Posts }}
+		{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on")) }}
+		<hr class="sep" />
+		{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
+		{{ end }}
+	{{ end }}
+	{{ if eq .Prefs.UseHLS "on" }}
+	<script src="/hls.min.js"></script>
+	<script src="/playHLSVideo.js"></script>
+	{{ end }}
+	</div>
+
+	<footer>
+		{{ if .HasPrev }}
+		<a href="/archive/r/{{ .Sub }}?page={{ sub .Page 1 }}" accesskey="P">PREV</a>
+		{{ end }}
+		{{ if .HasNext }}
+		<a href="/archive/r/{{ .Sub }}?page={{ add .Page 1 }}" accesskey="N">NEXT</a>
+		{{ end }}
+	</footer>
+	{{ end }}
+</div>
+</main>
+{{ end }}

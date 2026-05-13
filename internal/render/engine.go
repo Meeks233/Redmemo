@@ -38,6 +38,7 @@ var pageTemplates = map[string]string{
 	"search.html":    "templates/search.html",
 	"user.html":      "templates/user.html",
 	"settings.html":  "templates/settings.html",
+	"archive.html":   "templates/archive.html",
 	"error.html":     "templates/error.html",
 }
 
@@ -125,6 +126,19 @@ type SettingsPageData struct {
 	PrefetchSubs   []string
 	SubredditStats []SubredditStatView
 	ArchivedSubs   []string
+	LiveSubs       []string
+	SelectedCounts map[string]int
+}
+
+type ArchivePageData struct {
+	BasePage
+	Sub        string
+	Posts      []reddit.Post
+	TotalPosts int64
+	Page       int
+	TotalPages int
+	HasPrev    bool
+	HasNext    bool
 }
 
 type TokenView struct {
@@ -217,6 +231,13 @@ func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 		data.BrandName = e.cfg.BrandName
 	}
 	return e.renderPage(w, "user.html", data)
+}
+
+func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
+	if data.BrandName == "" {
+		data.BrandName = e.cfg.BrandName
+	}
+	return e.renderPage(w, "archive.html", data)
 }
 
 func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {

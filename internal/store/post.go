@@ -236,6 +236,12 @@ func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	return scanPosts(rows)
 }
 
+func (s *PostStore) CountBySubreddit(sub string) (int64, error) {
+	var count int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE subreddit = $1`, sub).Scan(&count)
+	return count, err
+}
+
 func (s *PostStore) Count() (int64, error) {
 	var count int64
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts`).Scan(&count)
@@ -291,6 +297,31 @@ func (s *PostStore) SubredditStats(minPosts, limit int) ([]SubredditStat, error)
 		stats = append(stats, s)
 	}
 	return stats, rows.Err()
+}
+
+func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT subreddit, COUNT(*) AS cnt
+		FROM posts
+		WHERE subreddit = ANY($1)
+		GROUP BY subreddit`, pq.Array(names))
+	if err != nil {
+		return nil, fmt.Errorf("subreddit counts: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]int)
+	for rows.Next() {
+		var name string
+		var cnt int
+		if err := rows.Scan(&name, &cnt); err != nil {
+			return nil, err
+		}
+		result[name] = cnt
+	}
+	return result, rows.Err()
 }
 
 func (s *PostStore) SaveHTML(urlPath string, html []byte) error {

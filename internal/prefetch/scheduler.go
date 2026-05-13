@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -25,13 +26,21 @@ type SettingsProvider interface {
 	Get(key string) string
 }
 
+type SubStatusChecker interface {
+	IsAlive(name string) (bool, error)
+	MarkLive(name string) error
+	RecordFailure(name, reason string) error
+}
+
 type Scheduler struct {
-	cfg      config.PrefetchConfig
-	pool     WindowInfoProvider
-	settings SettingsProvider
-	cli      *reddit.Client
-	archiver *archive.Service
-	media    MediaDownloader
+	cfg       config.PrefetchConfig
+	pool      WindowInfoProvider
+	settings  SettingsProvider
+	cli       *reddit.Client
+	publicCli *reddit.PublicClient
+	archiver  *archive.Service
+	media     MediaDownloader
+	subStatus SubStatusChecker
 
 	lastUserReq atomic.Int64 // unix timestamp of last real user request
 }
@@ -41,16 +50,20 @@ func New(
 	pool WindowInfoProvider,
 	settings SettingsProvider,
 	redditCli *reddit.Client,
+	publicCli *reddit.PublicClient,
 	archiver *archive.Service,
 	media MediaDownloader,
+	subStatus SubStatusChecker,
 ) *Scheduler {
 	return &Scheduler{
-		cfg:      cfg,
-		pool:     pool,
-		settings: settings,
-		cli:      redditCli,
-		archiver: archiver,
-		media:    media,
+		cfg:       cfg,
+		pool:      pool,
+		settings:  settings,
+		cli:       redditCli,
+		publicCli: publicCli,
+		archiver:  archiver,
+		media:     media,
+		subStatus: subStatus,
 	}
 }
 
@@ -66,34 +79,38 @@ func (s *Scheduler) Start(ctx context.Context) {
 func (s *Scheduler) Stop() {}
 
 func (s *Scheduler) isEnabled() bool {
-	if s.settings != nil {
-		if v := s.settings.Get("enable_natural_prefetch"); v == "on" {
-			return true
-		}
+	if s.settings == nil {
+		return false
 	}
-	return s.cfg.Enabled
+	return s.settings.Get("enable_natural_prefetch") == "on"
 }
 
 func (s *Scheduler) activeSubs() []config.PrefetchSubConfig {
-	// Settings-based subs take priority
-	if s.settings != nil {
-		if v := s.settings.Get("prefetch_subs"); v != "" {
-			names := strings.Split(v, "+")
-			subs := make([]config.PrefetchSubConfig, len(names))
-			for i, n := range names {
-				subs[i] = config.PrefetchSubConfig{
-					Name:          n,
-					Sort:          "hot",
-					MaxPages:      1,
-					FetchComments: true,
-					FetchMedia:    true,
-					Priority:      10,
-				}
-			}
-			return subs
-		}
+	if s.settings == nil {
+		return nil
 	}
-	return s.cfg.Subreddits
+	v := s.settings.Get("prefetch_subs")
+	if v == "" {
+		return nil
+	}
+	names := strings.Split(v, "+")
+	subs := make([]config.PrefetchSubConfig, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		// User explicitly added this sub — never skip it
+		subs = append(subs, config.PrefetchSubConfig{
+			Name:          n,
+			Sort:          "hot",
+			MaxPages:      1,
+			FetchComments: true,
+			FetchMedia:    true,
+			Priority:      10,
+		})
+	}
+	return subs
 }
 
 func (s *Scheduler) userRequestedRecently() bool {
@@ -133,11 +150,20 @@ func (s *Scheduler) runWindow(ctx context.Context) error {
 		return sleep(ctx, 5*time.Second)
 	}
 
-	// Phase 1: idle for the first half
-	halfWindow := windowLeft / 2
-	if halfWindow > 0 {
-		log.Printf("natural prefetch: idling %.0fs (half window), reset in %.0fs", halfWindow.Seconds(), windowLeft.Seconds())
-		if err := sleep(ctx, halfWindow); err != nil {
+	threshold := 50
+	if s.settings != nil {
+		if v := s.settings.Get("prefetch_threshold"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 99 {
+				threshold = n
+			}
+		}
+	}
+
+	const windowTotal = 10 * time.Minute
+	startAt := resetAt.Add(-windowTotal * time.Duration(100-threshold) / 100)
+	if wait := time.Until(startAt); wait > 0 {
+		log.Printf("natural prefetch: idling %.0fs (start at %d%% of window), reset in %.0fs", wait.Seconds(), threshold, windowLeft.Seconds())
+		if err := sleep(ctx, wait); err != nil {
 			return err
 		}
 	}
@@ -154,21 +180,21 @@ func (s *Scheduler) runWindow(ctx context.Context) error {
 
 	// Reserve 10% for real user requests
 	reserved := capacity / 10
+	if reserved < 5 {
+		reserved = 5
+	}
 	usable := remaining - reserved
 
-	threshold := capacity / 2
-	if usable < threshold {
+	if usable < 5 {
 		log.Printf("natural prefetch: budget too low (usable %d, remaining %d, reserved %d), skipping", usable, remaining, reserved)
 		return sleep(ctx, time.Until(resetAt))
 	}
 
-	// Consume 30-50% of total capacity, but never exceed usable
-	pct := 30 + rand.Intn(21)
-	requestBudget := capacity * pct / 100
-	if requestBudget > usable {
-		requestBudget = usable
+	requestBudget := usable
+	if requestBudget > capacity/2 {
+		requestBudget = capacity/2 + rand.Intn(capacity/10+1)
 	}
-	log.Printf("natural prefetch: planning %d requests (%d%% of %d, usable %d, reserved %d)", requestBudget, pct, capacity, usable, reserved)
+	log.Printf("natural prefetch: planning %d requests (usable %d, remaining %d, reserved %d, capacity %d)", requestBudget, usable, remaining, reserved, capacity)
 
 	tasks := s.buildTasks(ctx, subs, requestBudget)
 	if len(tasks) == 0 {
@@ -238,8 +264,20 @@ func (s *Scheduler) buildTasks(ctx context.Context, subs []config.PrefetchSubCon
 		tasks = append(tasks, func() {
 			posts, _, after, err := s.cli.FetchSubreddit(ctx, subName, sortBy, "", 25)
 			if err != nil {
-				log.Printf("natural prefetch: %s listing: %v", subName, err)
-				return
+				log.Printf("natural prefetch: %s oauth failed: %v, trying public", subName, err)
+				if s.publicCli != nil {
+					posts, _, after, err = s.publicCli.FetchSubreddit(ctx, subName, sortBy, "", 25)
+				}
+				if err != nil {
+					log.Printf("natural prefetch: %s listing failed: %v", subName, err)
+					if s.subStatus != nil {
+						s.subStatus.RecordFailure(subName, err.Error())
+					}
+					return
+				}
+			}
+			if s.subStatus != nil {
+				s.subStatus.MarkLive(subName)
 			}
 			firstPagePosts = posts
 			afterCursor = after
@@ -258,6 +296,9 @@ func (s *Scheduler) buildTasks(ctx context.Context, subs []config.PrefetchSubCon
 
 		tasks = append(tasks, func() {
 			subInfo, err := s.cli.FetchSubredditAbout(ctx, subName)
+			if err != nil && s.publicCli != nil {
+				subInfo, err = s.publicCli.FetchSubredditAbout(ctx, subName)
+			}
 			if err != nil {
 				log.Printf("natural prefetch: %s about: %v", subName, err)
 				return
@@ -278,6 +319,9 @@ func (s *Scheduler) buildTasks(ctx context.Context, subs []config.PrefetchSubCon
 					}
 					p := firstPagePosts[idx]
 					_, comments, err := s.cli.FetchPost(ctx, subName, p.ID, "confidence")
+					if err != nil && s.publicCli != nil {
+						_, comments, err = s.publicCli.FetchPost(ctx, subName, p.ID, "confidence")
+					}
 					if err != nil {
 						log.Printf("natural prefetch: %s comment %s: %v", subName, p.ID, err)
 						return
@@ -298,6 +342,9 @@ func (s *Scheduler) buildTasks(ctx context.Context, subs []config.PrefetchSubCon
 					return
 				}
 				posts, _, after, err := s.cli.FetchSubreddit(ctx, subName, sortBy, afterCursor, 25)
+				if err != nil && s.publicCli != nil {
+					posts, _, after, err = s.publicCli.FetchSubreddit(ctx, subName, sortBy, afterCursor, 25)
+				}
 				if err != nil {
 					log.Printf("natural prefetch: %s page %d: %v", subName, pg+1, err)
 					return

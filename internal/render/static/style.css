@@ -262,6 +262,20 @@ figcaption {
     transition: stroke-dashoffset 0.8s ease;
 }
 
+#nav-quota-text {
+    display: inline-block;
+}
+
+@keyframes quota-flip {
+    0%   { transform: perspective(200px) rotateX(0); }
+    50%  { transform: perspective(200px) rotateX(90deg); }
+    100% { transform: perspective(200px) rotateX(0); }
+}
+
+#nav-quota-text.flip {
+    animation: quota-flip 0.4s ease-in-out;
+}
+
 #settings_link {
     opacity: 0.8;
     margin-left: 10px;
@@ -1883,6 +1897,11 @@ summary.comment_data {
     opacity: 1;
 }
 
+.sub-tag-count {
+    font-size: 0.75em;
+    margin-left: 2px;
+}
+
 .sub-picker-search input {
     width: 100%;
     padding: 6px 10px;
@@ -1924,6 +1943,28 @@ summary.comment_data {
     text-align: center;
     color: var(--foreground-alt);
     font-size: 0.9em;
+}
+
+.sub-probe-btn {
+    display: block;
+    margin: 8px auto;
+    padding: 8px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--foreground);
+    background-color: var(--accent);
+    border: none;
+    font-size: 0.9em;
+    font-weight: normal;
+}
+
+.sub-probe-btn:hover {
+    opacity: 0.85;
+}
+
+.sub-probe-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
 }
 
 .prefs select {

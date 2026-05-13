@@ -79,19 +79,19 @@
 					<div class="prefs-group">
 						<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort:</label>
 						<select name="post_sort">
-							{{ $postSorts := list "hot" "new" "top" "rising" "controversial" }}
-							{{ range $postSorts }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.PostSort }}selected{{ end }}>{{ capitalize . }}</option>
-							{{ end }}
+							<option value="new" {{ if eq "new" $.Prefs.PostSort }}selected{{ end }}>New</option>
+							<option value="new_archive" {{ if eq "new_archive" $.Prefs.PostSort }}selected{{ end }}>Archive</option>
+							<option value="top" {{ if eq "top" $.Prefs.PostSort }}selected{{ end }}>Top</option>
+							<option value="notorious" {{ if eq "notorious" $.Prefs.PostSort }}selected{{ end }}>Notorious</option>
 						</select>
 					</div>
 					<div class="prefs-group">
 						<label for="comment_sort">Default comment sort:</label>
 						<select name="comment_sort" id="comment_sort">
-							{{ $commentSorts := list "confidence" "top" "new" "controversial" "old" }}
-							{{ range $commentSorts }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.CommentSort }}selected{{ end }}>{{ capitalize . }}</option>
-							{{ end }}
+							<option value="new" {{ if eq "new" $.Prefs.CommentSort }}selected{{ end }}>New</option>
+							<option value="new_archive" {{ if eq "new_archive" $.Prefs.CommentSort }}selected{{ end }}>Archive</option>
+							<option value="top" {{ if eq "top" $.Prefs.CommentSort }}selected{{ end }}>Top</option>
+							<option value="notorious" {{ if eq "notorious" $.Prefs.CommentSort }}selected{{ end }}>Notorious</option>
 						</select>
 					</div>
 					<div class="prefs-group">
@@ -175,7 +175,7 @@
 				<div class="sub-picker-selected" id="sub_selected">
 					{{ if and (ne .Prefs.FrontPageSubs "all") (ne .Prefs.FrontPageSubs "") }}
 						{{ range $i, $s := split .Prefs.FrontPageSubs "+" }}
-						<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove" onclick="removeSub('{{ $s }}')">&times;</button></span>
+						<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove">&times;</button></span>
 						{{ end }}
 					{{ end }}
 				</div>
@@ -194,10 +194,14 @@
 					<input type="checkbox" id="enable_natural_prefetch" {{ if eq .Prefs.EnableNaturalPrefetch "on" }}checked{{ end }} onchange="togglePrefetch(this)">
 				</div>
 				<div class="prefetch-picker" id="prefetch_picker" style="{{ if ne .Prefs.EnableNaturalPrefetch "on" }}display:none{{ end }}">
+					<div class="prefs-group">
+						<label for="prefetch_threshold">Start after % of window elapsed</label>
+						<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value="{{ .Prefs.PrefetchThreshold }}" style="width:60px" onchange="savePrefetchThreshold(this.value)">
+					</div>
 					<div class="sub-picker-selected" id="prefetch_sub_selected">
 						{{ if ne .Prefs.PrefetchSubs "" }}
 							{{ range $i, $s := split .Prefs.PrefetchSubs "+" }}
-							<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove" onclick="removePrefetchSub('{{ $s }}')">&times;</button></span>
+							<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove">&times;</button></span>
 							{{ end }}
 						{{ end }}
 					</div>
@@ -250,20 +254,8 @@
 				<tbody>
 					{{ range .SubredditStats }}
 					<tr>
-						<td><a href="/r/{{ .Name }}">r/{{ .Name }}</a></td>
+						<td><a href="/archive/r/{{ .Name }}">r/{{ .Name }}</a></td>
 						<td>{{ .PostCount }}</td>
-					</tr>
-					{{ end }}
-				</tbody>
-			</table>
-			{{ end }}
-			{{ if .PrefetchSubs }}
-			<table>
-				<thead><tr><th>Prefetch Subreddits</th></tr></thead>
-				<tbody>
-					{{ range .PrefetchSubs }}
-					<tr>
-						<td><a href="/r/{{ . }}">r/{{ . }}</a></td>
 					</tr>
 					{{ end }}
 				</tbody>
@@ -274,66 +266,59 @@
 	</div>
 </div>
 </div>
+<script src="/subPicker.js"></script>
 <script>
-var allSubs = [{{ range $i, $s := .ArchivedSubs }}{{ if $i }},{{ end }}{ name:"{{ $s }}", posts:0 }{{ end }}];
-var topSubs = [{{ range $i, $s := .SubredditStats }}{{ if $i }},{{ end }}{ name:"{{ $s.Name }}", posts:{{ $s.PostCount }} }{{ end }}];
-allSubs.forEach(function(s) {
-	for (var i = 0; i < topSubs.length; i++) {
-		if (topSubs[i].name === s.name) { s.posts = topSubs[i].posts; break; }
+window._allSubs = [{{ range $i, $s := .ArchivedSubs }}{{ if $i }},{{ end }}{ name:"{{ $s }}", posts:0 }{{ end }}];
+window._topSubs = [{{ range $i, $s := .SubredditStats }}{{ if $i }},{{ end }}{ name:"{{ $s.Name }}", posts:{{ $s.PostCount }} }{{ end }}];
+(function() {
+	var seen = {};
+	window._allSubs.forEach(function(s) { seen[s.name] = true; });
+	[{{ range $i, $s := .LiveSubs }}{{ if $i }},{{ end }}"{{ $s }}"{{ end }}].forEach(function(n) {
+		if (!seen[n]) { window._allSubs.push({ name: n, posts: 0 }); seen[n] = true; }
+	});
+	window._allSubs.forEach(function(s) {
+		for (var i = 0; i < window._topSubs.length; i++) {
+			if (window._topSubs[i].name === s.name) { s.posts = window._topSubs[i].posts; break; }
+		}
+	});
+	var _selCounts = { {{ range $k, $v := .SelectedCounts }}"{{ $k }}":{{ $v }},{{ end }} };
+	for (var _sc in _selCounts) {
+		var _found = false;
+		for (var _i = 0; _i < window._allSubs.length; _i++) {
+			if (window._allSubs[_i].name === _sc) {
+				if (_selCounts[_sc] > window._allSubs[_i].posts) window._allSubs[_i].posts = _selCounts[_sc];
+				_found = true; break;
+			}
+		}
+		if (!_found) window._allSubs.push({ name: _sc, posts: _selCounts[_sc] });
+	}
+	window._allSubs.sort(function(a, b) { return b.posts - a.posts; });
+})();
+
+var homePicker = SubPicker({
+	selectedId: 'sub_selected',
+	searchId: 'sub_search',
+	listId: 'sub_list',
+	onChange: function(sel) {
+		var h = document.getElementById('front_page_subs_hidden');
+		h.value = sel.length === 0 ? 'all' : sel.join('+');
+		checkDirty();
 	}
 });
-allSubs.sort(function(a, b) { return b.posts - a.posts; });
 
-function getSelected() {
-	var tags = document.querySelectorAll('#sub_selected .sub-tag');
-	var names = [];
-	tags.forEach(function(t) { names.push(t.dataset.sub); });
-	return names;
-}
+var prefetchPicker = SubPicker({
+	selectedId: 'prefetch_sub_selected',
+	searchId: 'prefetch_sub_search',
+	listId: 'prefetch_sub_list',
+	onChange: function(sel) {
+		var fd = new FormData();
+		fd.append('prefetch_subs', sel.join('+'));
+		fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+	}
+});
 
 function isPickerOpen() {
 	return document.getElementById('sub_picker').style.display !== 'none';
-}
-
-function syncHidden() {
-	var sel = getSelected();
-	var h = document.getElementById('front_page_subs_hidden');
-	h.value = sel.length === 0 ? 'all' : sel.join('+');
-}
-
-function addSub(name) {
-	if (getSelected().indexOf(name) !== -1) return;
-	var span = document.createElement('span');
-	span.className = 'sub-tag';
-	span.dataset.sub = name;
-	span.innerHTML = 'r/' + name + '<button type="button" class="sub-tag-remove" onclick="removeSub(\'' + name + '\')">&times;</button>';
-	document.getElementById('sub_selected').appendChild(span);
-	syncHidden();
-	renderList();
-}
-
-function removeSub(name) {
-	var tags = document.querySelectorAll('#sub_selected .sub-tag');
-	tags.forEach(function(t) { if (t.dataset.sub === name) t.remove(); });
-	syncHidden();
-	renderList();
-}
-
-function renderList() {
-	var q = document.getElementById('sub_search').value.toLowerCase();
-	var sel = getSelected();
-	var source = q ? allSubs.filter(function(s) { return s.name.toLowerCase().indexOf(q) !== -1; }) : topSubs;
-	source = source.filter(function(s) { return sel.indexOf(s.name) === -1; });
-	if (!q) source = source.slice(0, 10);
-	var html = '';
-	source.forEach(function(s) {
-		html += '<div class="sub-picker-item" onclick="addSub(\'' + s.name + '\')">';
-		html += '<span>r/' + s.name + '</span>';
-		if (s.posts > 0) html += '<span class="sub-picker-posts">' + s.posts + ' posts</span>';
-		html += '</div>';
-	});
-	if (source.length === 0 && q) html = '<div class="sub-picker-empty">No matching subreddits</div>';
-	document.getElementById('sub_list').innerHTML = html;
 }
 
 function toggleSubPicker(cb) {
@@ -344,8 +329,11 @@ function toggleSubPicker(cb) {
 		document.getElementById('sub_selected').innerHTML = '';
 	} else {
 		picker.style.display = '';
-		syncHidden();
-		renderList();
+		if (homePicker) {
+			var h = document.getElementById('front_page_subs_hidden');
+			h.value = homePicker.getSelected().length === 0 ? 'all' : homePicker.getSelected().join('+');
+			homePicker.render();
+		}
 	}
 }
 
@@ -358,9 +346,6 @@ function setMode(mode) {
 		mode === 'blacklist' ? 'Selected subs are hidden' : 'Only selected subs are shown';
 	checkDirty();
 }
-
-document.getElementById('sub_search').addEventListener('input', renderList);
-renderList();
 
 var saveBar = document.getElementById('save-bar');
 var form = document.querySelector('#settings form');
@@ -375,7 +360,7 @@ var initialSerialized = serializeForm();
 
 function checkDirty() {
 	var dirty = serializeForm() !== initialSerialized;
-	if (dirty && isPickerOpen() && getSelected().length === 0) {
+	if (dirty && isPickerOpen() && homePicker && homePicker.getSelected().length === 0) {
 		dirty = false;
 	}
 	saveBar.classList.toggle('visible', dirty);
@@ -384,65 +369,11 @@ function checkDirty() {
 form.addEventListener('change', checkDirty);
 form.addEventListener('input', checkDirty);
 
-var origSync = syncHidden;
-syncHidden = function() { origSync(); checkDirty(); };
-
 form.addEventListener('submit', function(e) {
-	if (isPickerOpen() && getSelected().length === 0) {
+	if (isPickerOpen() && homePicker && homePicker.getSelected().length === 0) {
 		e.preventDefault();
 	}
 });
-
-function getPrefetchSelected() {
-	var tags = document.querySelectorAll('#prefetch_sub_selected .sub-tag');
-	var names = [];
-	tags.forEach(function(t) { names.push(t.dataset.sub); });
-	return names;
-}
-
-function addPrefetchSub(name) {
-	if (getPrefetchSelected().indexOf(name) !== -1) return;
-	var span = document.createElement('span');
-	span.className = 'sub-tag';
-	span.dataset.sub = name;
-	span.innerHTML = 'r/' + name + '<button type="button" class="sub-tag-remove" onclick="removePrefetchSub(\'' + name + '\')">&times;</button>';
-	document.getElementById('prefetch_sub_selected').appendChild(span);
-	savePrefetchSubs();
-	renderPrefetchList();
-}
-
-function removePrefetchSub(name) {
-	var tags = document.querySelectorAll('#prefetch_sub_selected .sub-tag');
-	tags.forEach(function(t) { if (t.dataset.sub === name) t.remove(); });
-	savePrefetchSubs();
-	renderPrefetchList();
-}
-
-function renderPrefetchList() {
-	var q = document.getElementById('prefetch_sub_search').value.toLowerCase();
-	var sel = getPrefetchSelected();
-	var source = q ? allSubs.filter(function(s) { return s.name.toLowerCase().indexOf(q) !== -1; }) : topSubs;
-	source = source.filter(function(s) { return sel.indexOf(s.name) === -1; });
-	if (!q) source = source.slice(0, 10);
-	var html = '';
-	source.forEach(function(s) {
-		html += '<div class="sub-picker-item" onclick="addPrefetchSub(\'' + s.name + '\')">';
-		html += '<span>r/' + s.name + '</span>';
-		if (s.posts > 0) html += '<span class="sub-picker-posts">' + s.posts + ' posts</span>';
-		html += '</div>';
-	});
-	if (source.length === 0 && q) html = '<div class="sub-picker-empty">No matching subreddits</div>';
-	document.getElementById('prefetch_sub_list').innerHTML = html;
-}
-
-function savePrefetchSubs() {
-	var fd = new FormData();
-	fd.append('prefetch_subs', getPrefetchSelected().join('+'));
-	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
-}
-
-document.getElementById('prefetch_sub_search').addEventListener('input', renderPrefetchList);
-renderPrefetchList();
 
 function togglePrefetch(cb) {
 	if (cb.checked) {
@@ -459,7 +390,7 @@ function confirmPrefetch() {
 	document.getElementById('enable_natural_prefetch').checked = true;
 	document.getElementById('prefetch_picker').style.display = '';
 	submitPrefetchSetting('on');
-	renderPrefetchList();
+	if (prefetchPicker) prefetchPicker.render();
 }
 
 function cancelPrefetch() {
@@ -469,6 +400,14 @@ function cancelPrefetch() {
 function submitPrefetchSetting(val) {
 	var fd = new FormData();
 	fd.append('enable_natural_prefetch', val);
+	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+}
+
+function savePrefetchThreshold(val) {
+	var n = parseInt(val, 10);
+	if (isNaN(n) || n < 1 || n > 99) return;
+	var fd = new FormData();
+	fd.append('prefetch_threshold', String(n));
 	fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
 }
 

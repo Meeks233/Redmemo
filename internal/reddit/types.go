@@ -183,6 +183,7 @@ type Preferences struct {
 	EnableDebug                    string
 	EnableNaturalPrefetch          string
 	PrefetchSubs                   string
+	PrefetchThreshold              string
 	ScrollInterval                 string
 }
 

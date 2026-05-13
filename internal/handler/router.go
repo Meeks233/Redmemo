@@ -28,12 +28,13 @@ type Handler struct {
 	subStore      *store.SubredditStore
 	mediaStore    *store.MediaIndexStore
 	settingsStore *store.SettingsStore
-	mediaProxy    *media.Proxy
-	archiver      *archive.Service
-	prefetcher    *prefetch.Scheduler
-	uaPool        *useragent.Pool
-	cfg           *config.Config
-	siteDefaults  map[string]string
+	mediaProxy     *media.Proxy
+	archiver       *archive.Service
+	prefetcher     *prefetch.Scheduler
+	subStatusStore *store.SubStatusStore
+	uaPool         *useragent.Pool
+	cfg            *config.Config
+	siteDefaults   map[string]string
 }
 
 func New(
@@ -51,6 +52,7 @@ func New(
 	mp *media.Proxy,
 	arc *archive.Service,
 	pf *prefetch.Scheduler,
+	sss *store.SubStatusStore,
 	uap *useragent.Pool,
 	cfg *config.Config,
 ) *Handler {
@@ -71,9 +73,10 @@ func New(
 		mediaStore:    ms,
 		settingsStore: sts,
 		mediaProxy:    mp,
-		archiver:      arc,
-		prefetcher:    pf,
-		uaPool:        uap,
+		archiver:       arc,
+		prefetcher:     pf,
+		subStatusStore: sss,
+		uaPool:         uap,
 		cfg:           cfg,
 		siteDefaults:  defaults,
 	}
@@ -101,6 +104,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /check_update.js", static)
 	mux.Handle("GET /quotaRing.js", static)
 	mux.Handle("GET /infiniteScroll.js", static)
+	mux.Handle("GET /subPicker.js", static)
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)
@@ -126,6 +130,9 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /search", h.handleSearch)
 	mux.HandleFunc("GET /r/{sub}/search", h.handleSubSearch)
 
+	// Archive browser
+	mux.HandleFunc("GET /archive/r/{sub}", h.handleArchiveSub)
+
 	// Settings
 	mux.HandleFunc("GET /settings", h.handleSettings)
 	mux.HandleFunc("POST /settings", h.handleSettingsSave)
@@ -135,6 +142,7 @@ func (h *Handler) Routes() http.Handler {
 
 	// Lightweight status check
 	mux.HandleFunc("GET /api/status", h.handleStatus)
+	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)
 
 	// Countdown / rate-limit status
 	mux.HandleFunc("GET /countdown", h.handleCountdown)

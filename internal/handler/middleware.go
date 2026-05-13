@@ -86,11 +86,12 @@ var prefDefaults = map[string]string{
 	"hide_score":                      "off",
 	"remove_default_feeds":            "off",
 	"disable_visit_reddit_confirmation": "off",
-	"comment_sort": "confidence",
-	"post_sort":    "hot",
+	"comment_sort": "new",
+	"post_sort":    "new",
 	"enable_debug":            "off",
 	"enable_natural_prefetch": "off",
 	"prefetch_subs":           "",
+	"prefetch_threshold":      "50",
 	"scroll_interval":         "2",
 }
 
@@ -133,6 +134,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.EnableDebug = pref("enable_debug")
 	p.EnableNaturalPrefetch = pref("enable_natural_prefetch")
 	p.PrefetchSubs = pref("prefetch_subs")
+	p.PrefetchThreshold = pref("prefetch_threshold")
 	p.ScrollInterval = pref("scroll_interval")
 
 	p.AvailableThemes = render.AvailableThemes()

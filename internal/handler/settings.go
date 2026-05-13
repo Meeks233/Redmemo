@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/redmemo/redmemo/internal/render"
 )
@@ -21,7 +22,7 @@ var settingsKeys = []string{
 	"comment_sort", "post_sort",
 	"hide_awards", "hide_score", "remove_default_feeds",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
-	"scroll_interval",
+	"prefetch_threshold", "scroll_interval",
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -48,13 +49,62 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var prefetchSubs []string
-	for _, ps := range h.cfg.Prefetch.Subreddits {
-		prefetchSubs = append(prefetchSubs, ps.Name)
+	if h.settingsStore != nil {
+		if v, ok, _ := h.settingsStore.Get("prefetch_subs"); ok && v != "" {
+			for _, s := range strings.Split(v, "+") {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					prefetchSubs = append(prefetchSubs, s)
+				}
+			}
+		}
+	}
+
+	if h.postStore != nil && len(prefetchSubs) > 0 {
+		statSet := make(map[string]bool, len(subStats))
+		for _, s := range subStats {
+			statSet[s.Name] = true
+		}
+		for _, name := range prefetchSubs {
+			if !statSet[name] {
+				cnt, _ := h.postStore.CountBySubreddit(name)
+				subStats = append(subStats, render.SubredditStatView{
+					Name:      name,
+					PostCount: cnt,
+				})
+			}
+		}
 	}
 
 	var archivedSubs []string
 	if h.postStore != nil {
 		archivedSubs, _ = h.postStore.DistinctSubreddits()
+	}
+
+	var liveSubs []string
+	if h.subStatusStore != nil {
+		liveSubs, _ = h.subStatusStore.ListLive()
+	}
+
+	selectedCounts := make(map[string]int)
+	var selectedNames []string
+	if prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
+		for _, s := range strings.Split(prefs.FrontPageSubs, "+") {
+			if s = strings.TrimSpace(s); s != "" {
+				selectedNames = append(selectedNames, s)
+			}
+		}
+	}
+	selectedNames = append(selectedNames, prefetchSubs...)
+	for _, n := range selectedNames {
+		selectedCounts[n] = 0
+	}
+	if h.postStore != nil && len(selectedNames) > 0 {
+		if counts, err := h.postStore.SubredditCounts(selectedNames); err == nil {
+			for k, v := range counts {
+				selectedCounts[k] = v
+			}
+		}
 	}
 
 	data := render.SettingsPageData{
@@ -72,6 +122,8 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		PrefetchSubs:   prefetchSubs,
 		SubredditStats: subStats,
 		ArchivedSubs:   archivedSubs,
+		LiveSubs:       liveSubs,
+		SelectedCounts: selectedCounts,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	h.renderer.RenderSettings(w, data)
@@ -94,6 +146,14 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	if mode, ok := updates["front_page_subs_mode"]; ok && mode != "whitelist" && mode != "blacklist" {
 		updates["front_page_subs_mode"] = "whitelist"
+	}
+
+	if v, ok := updates["prefetch_threshold"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 99 {
+			delete(updates, "prefetch_threshold")
+		} else {
+			updates["prefetch_threshold"] = strconv.Itoa(n)
+		}
 	}
 
 	if v, ok := updates["scroll_interval"]; ok {

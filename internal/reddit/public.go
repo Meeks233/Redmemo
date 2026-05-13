@@ -66,6 +66,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", c.uaPool.Get())
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Cookie", `_options={%22pref_quarantine_optin%22:true}`)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
