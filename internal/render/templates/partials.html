@@ -120,14 +120,14 @@
 		{{ else if or (eq $post.PostType "gif") (eq $post.PostType "video") }}
 			{{ if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 			<div class="post_media_content">
-				<video class="post_media_video short{{ if eq $prefs.AutoplayVideos "on" }} hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" controls preload="none">
+				<video class="post_media_video short{{ if eq $prefs.AutoplayVideos "on" }} hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" controls preload="metadata">
 					<source src="{{ $post.Media.AltURL }}" type="application/vnd.apple.mpegurl" />
 					<source src="{{ $post.Media.URL }}" type="video/mp4" />
 				</video>
 			</div>
 			{{ else }}
 			<div class="post_media_content">
-				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="none" controls {{ if eq $prefs.AutoplayVideos "on" }}autoplay{{ end }}><a href="{{ $post.Media.URL }}">Video</a></video>
+				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls {{ if eq $prefs.AutoplayVideos "on" }}autoplay{{ end }}><a href="{{ $post.Media.URL }}">Video</a></video>
 			</div>
 			{{ end }}
 		{{ end }}
@@ -222,7 +222,7 @@
 		{{ if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 		<script src="/hls.min.js"></script>
 		<div class="post_media_content">
-			<video class="post_media_video short {{ if eq $prefs.AutoplayVideos "on" }}hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="none" controls>
+			<video class="post_media_video short {{ if eq $prefs.AutoplayVideos "on" }}hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls>
 				<source src="{{ $post.Media.AltURL }}" type="application/vnd.apple.mpegurl" />
 				<source src="{{ $post.Media.URL }}" type="video/mp4" />
 			</video>

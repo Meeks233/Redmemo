@@ -9,6 +9,14 @@ function Log($msg)  { Write-Host "[deploy] $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "[deploy] $msg" -ForegroundColor Yellow }
 function Err($msg)  { Write-Host "[deploy] $msg" -ForegroundColor Red }
 
+# --- 0. Clear old portproxy rules to free ports before Docker binds them ---
+Log "Clearing old port forwarding rules..."
+$clearCmds = ($Ports | ForEach-Object {
+    "netsh interface portproxy delete v4tov4 listenport=$_ listenaddress=127.0.0.1 2>`$null"
+}) -join "; "
+Start-Process powershell -Verb RunAs -ArgumentList "-Command", $clearCmds -Wait
+Log "Old port forwarding rules cleared"
+
 # --- 1. Convert Windows path to WSL mount path ---
 $drive = $WinDir.Substring(0, 1).ToLower()
 $rest  = $WinDir.Substring(2) -replace '\\', '/'
@@ -97,10 +105,8 @@ Log "Done. Access http://127.0.0.1:8080"
 # --- 7. Keep WSL alive in background ---
 $wslKeepAlive = Start-Process -FilePath "wsl" -ArgumentList "-d", $WslDist, "--", "bash", "-c", "trap 'exit 0' TERM INT; while true; do sleep 3600; done" -PassThru -WindowStyle Hidden
 
-# --- 8. Watch mode: auto-deploy on new commits, Ctrl+R manual, Ctrl+C exit ---
-$lastCommit = (git -C $WinDir rev-parse HEAD 2>$null)
-Log "Watch mode active (commit: $($lastCommit.Substring(0,8)))"
-Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
+# --- 8. Watch mode: Ctrl+R manual redeploy, Ctrl+C exit ---
+Log "Watch mode active | Ctrl+R to redeploy | Ctrl+C to exit"
 
 function Invoke-Redeploy {
     param([string]$Reason)
@@ -135,46 +141,20 @@ function Invoke-Redeploy {
     Warn "Health check pending after redeploy"
 }
 
-# Ctrl+C handling: we intercept it so we can clean up gracefully
 [Console]::TreatControlCAsInput = $true
 
-$pollInterval = 2
-$tickCount = 0
 try {
     while ($true) {
-        # Check for keypresses
         if ([Console]::KeyAvailable) {
             $key = [Console]::ReadKey($true)
-            # Ctrl+C to exit
             if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'C') {
                 break
             }
-            # Ctrl+R to redeploy
             if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'R') {
                 Invoke-Redeploy -Reason "manual Ctrl+R"
-                $lastCommit = (git -C $WinDir rev-parse HEAD 2>$null)
-                Log "Watch mode active (commit: $($lastCommit.Substring(0,8)))"
-                Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
+                Log "Watch mode active | Ctrl+R to redeploy | Ctrl+C to exit"
             }
         }
-
-        # Poll for new commits every 2 seconds
-        $tickCount++
-        if ($tickCount -ge ($pollInterval * 10)) {
-            $tickCount = 0
-            $currentCommit = (git -C $WinDir rev-parse HEAD 2>$null)
-            if ($currentCommit -and $lastCommit -and $currentCommit -ne $lastCommit) {
-                $shortOld = $lastCommit.Substring(0, 8)
-                $shortNew = $currentCommit.Substring(0, 8)
-                $commitMsg = (git -C $WinDir log -1 --format="%s" 2>$null)
-                Log "New commit detected: $shortOld -> $shortNew ($commitMsg)"
-                $lastCommit = $currentCommit
-                Invoke-Redeploy -Reason "new commit $shortNew"
-                Log "Watch mode active (commit: $shortNew)"
-                Log "  Auto-deploy on new commits | Ctrl+R to force redeploy | Ctrl+C to exit"
-            }
-        }
-
         Start-Sleep -Milliseconds 100
     }
 } finally {

@@ -186,10 +186,26 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	// Total token budget
 	budget, _ := h.oauthPool.RemainingBudget(r.Context())
 
+	var prefetchEvents []render.PrefetchEventView
+	if h.prefetcher != nil {
+		events := h.prefetcher.Events.Snapshot()
+		for i := len(events) - 1; i >= 0; i-- {
+			e := events[i]
+			prefetchEvents = append(prefetchEvents, render.PrefetchEventView{
+				Time:         e.TimeStr(),
+				RelativeTime: e.RelativeTime(),
+				Level:        string(e.Level),
+				Phase:        e.Phase,
+				Message:      e.Message,
+			})
+		}
+	}
+
 	dd := render.DebugData{
-		Details:     details,
-		TokenBudget: budget,
-		Tokens:      tokenViews,
+		Details:        details,
+		TokenBudget:    budget,
+		Tokens:         tokenViews,
+		PrefetchEvents: prefetchEvents,
 	}
 
 	if h.uaPool != nil {

@@ -114,6 +114,13 @@ var migrations = []string{
 		checked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		CONSTRAINT valid_status CHECK (status IN ('live', 'dead', 'private', 'quarantined', 'unknown'))
 	);`,
+
+	// v6: L1/L2 prefetch media tracking + natural_prefetch source
+	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS media_done BOOLEAN NOT NULL DEFAULT false;
+	 UPDATE posts SET media_done = true;
+	 ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
+	 ALTER TABLE posts ADD CONSTRAINT valid_source
+		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'natural_prefetch', 'search', 'user_listing', 'background'));`,
 }
 
 func RunMigrations(db *sql.DB) error {

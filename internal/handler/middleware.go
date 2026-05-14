@@ -78,7 +78,7 @@ var prefDefaults = map[string]string{
 	"blur_nsfw":     "on",
 	"video_quality": "best",
 	"use_hls":       "off",
-	"autoplay_videos":                 "off",
+	"autoplay_videos":                 "on",
 	"fixed_navbar":                    "on",
 	"hide_hls_notification":           "off",
 	"hide_sidebar_and_summary":        "off",

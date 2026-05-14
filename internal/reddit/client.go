@@ -198,6 +198,9 @@ func (c *Client) Probe(ctx context.Context) (*RateLimitInfo, error) {
 	return info, nil
 }
 
+// Matches redlib: opts in to quarantined and gated subreddits via cookie.
+const quarantineCookie = `_options=%7B%22pref_quarantine_optin%22%3A%20true%2C%20%22pref_gated_sr_optin%22%3A%20true%7D`
+
 func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Response, error) {
 	token := c.pool.GetBestToken()
 	if token == nil {
@@ -209,9 +212,10 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 		return nil, nil, fmt.Errorf("build request: %w", err)
 	}
 
+	req.Header.Set("Host", "oauth.reddit.com")
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("User-Agent", token.UserAgent)
-	req.Header.Set("Cookie", `_options={%22pref_quarantine_optin%22:true}`)
+	req.Header.Set("Cookie", quarantineCookie)
 	for k, v := range token.Headers {
 		req.Header.Set(k, v)
 	}

@@ -137,6 +137,11 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	return meta, nil
 }
 
+func (p *Proxy) DownloadMedia(ctx context.Context, originalURL string) error {
+	_, err := p.Download(ctx, originalURL)
+	return err
+}
+
 func (p *Proxy) DownloadAsync(originalURL string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

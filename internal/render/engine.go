@@ -150,6 +150,14 @@ type TokenView struct {
 	HasBudget     bool
 }
 
+type PrefetchEventView struct {
+	Time         string
+	RelativeTime string
+	Level        string
+	Phase        string
+	Message      string
+}
+
 type ErrorPageData struct {
 	BasePage
 	Message        string
@@ -164,6 +172,7 @@ type ErrorPageData struct {
 	UAList         []string
 	UACurrentIndex int
 	UAFetchedAt    string
+	PrefetchEvents []PrefetchEventView
 }
 
 type SubredditStatView struct {
@@ -254,6 +263,7 @@ type DebugData struct {
 	UAList         []string
 	UACurrentIndex int
 	UAFetchedAt    string
+	PrefetchEvents []PrefetchEventView
 }
 
 func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
@@ -268,6 +278,7 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
 		UAList:         d.UAList,
 		UACurrentIndex: d.UACurrentIndex,
 		UAFetchedAt:    d.UAFetchedAt,
+		PrefetchEvents: d.PrefetchEvents,
 	}
 	e.renderPage(w, "error.html", data)
 }

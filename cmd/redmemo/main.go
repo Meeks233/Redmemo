@@ -126,7 +126,7 @@ func main() {
 
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
-		redditCli, publicCli, archiver, mediaProxy, subStatusStore,
+		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,
 	)
 
 	// 11. Start background tasks
@@ -208,4 +208,8 @@ func (a *settingsAdapter) Get(key string) string {
 		return ""
 	}
 	return v
+}
+
+func (a *settingsAdapter) Set(key, value string) error {
+	return a.store.SetBatch(map[string]string{key: value}, "prefetch")
 }

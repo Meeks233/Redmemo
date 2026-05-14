@@ -14,7 +14,8 @@ type StoredPost struct {
 	CreatedUTC   time.Time
 	FirstSeen    time.Time
 	LastUpdated  time.Time
-	Source       string // "redlib_proxy" | "oauth_fallback" | "prefetch"
+	Source       string // "redlib_proxy" | "oauth_fallback" | "prefetch" | "natural_prefetch"
+	MediaDone    bool
 }
 
 type StoredComments struct {

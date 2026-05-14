@@ -337,16 +337,20 @@ func (p *Pool) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	const window = 10 * time.Minute
 	now := time.Now()
 	for _, mt := range p.tokens {
 		capacity += 99
-		if now.After(mt.RateResetAt) {
+		tokenReset := mt.RateResetAt
+		if now.After(tokenReset) {
 			remaining += 99
+			elapsed := now.Sub(tokenReset)
+			tokenReset = tokenReset.Add((elapsed/window + 1) * window)
 		} else if mt.RateRemaining > 0 {
 			remaining += mt.RateRemaining
 		}
-		if mt.RateResetAt.After(resetAt) {
-			resetAt = mt.RateResetAt
+		if tokenReset.After(resetAt) {
+			resetAt = tokenReset
 		}
 	}
 	return

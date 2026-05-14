@@ -94,6 +94,42 @@ var (
 	vRedditHLS  = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/(HLSPlaylist\.m3u8.*)$`)
 )
 
+// UnformatURL reverses FormatURL: converts a local proxy path back to the
+// original CDN URL. Returns the input unchanged if it is already absolute or
+// does not match a known prefix.
+func UnformatURL(localPath string) string {
+	if localPath == "" {
+		return ""
+	}
+	if strings.HasPrefix(localPath, "http://") || strings.HasPrefix(localPath, "https://") {
+		return localPath
+	}
+
+	prefixes := []struct {
+		local  string
+		remote string
+	}{
+		{"/img/", "https://i.redd.it/"},
+		{"/preview/external-pre/", "https://external-preview.redd.it/"},
+		{"/preview/pre/", "https://preview.redd.it/"},
+		{"/thumb/a/", "https://a.thumbs.redditmedia.com/"},
+		{"/thumb/b/", "https://b.thumbs.redditmedia.com/"},
+		{"/vid/", "https://v.redd.it/"},
+		{"/hls/", "https://v.redd.it/"},
+		{"/emoji/", "https://reddit-econ-prod-assets-permanent.s3.amazonaws.com/asset-manager/"},
+		{"/static/", "https://www.redditstatic.com/"},
+		{"/style/", "https://styles.redditmedia.com/"},
+	}
+
+	for _, p := range prefixes {
+		if strings.HasPrefix(localPath, p.local) {
+			return p.remote + strings.TrimPrefix(localPath, p.local)
+		}
+	}
+
+	return localPath
+}
+
 // redditLinkRe matches href/src attributes pointing to reddit domains.
 var redditLinkRe = regexp.MustCompile(`(href|src)="https?://(?:www\.|old\.|np\.|amp\.|new\.)?(?:reddit\.com|redd\.it)/`)
 

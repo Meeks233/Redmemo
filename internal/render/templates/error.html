@@ -112,6 +112,54 @@
 				</ul>
 			</div>
 			{{ end }}
+			{{ if .PrefetchEvents }}
+			<div class="error-diagnostics prefetch-log-section">
+				<div class="prefetch-log-header">
+					<h4>Prefetch Event Log ({{ len .PrefetchEvents }} entries, newest first)</h4>
+					<button class="prefetch-copy-btn" onclick="copyPrefetchLog()" title="Copy to clipboard">
+						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+					</button>
+				</div>
+				<div class="prefetch-log-scroll" id="prefetch-log">
+					<table class="prefetch-log-table">
+						<thead>
+							<tr>
+								<th class="pl-time">Time</th>
+								<th class="pl-level">Level</th>
+								<th class="pl-phase">Phase</th>
+								<th class="pl-msg">Message</th>
+							</tr>
+						</thead>
+						<tbody>
+						{{ range .PrefetchEvents }}
+							<tr class="pl-row pl-{{ .Level }}">
+								<td class="pl-time" title="{{ .RelativeTime }}">{{ .Time }}</td>
+								<td class="pl-level"><span class="pl-badge pl-badge-{{ .Level }}">{{ .Level }}</span></td>
+								<td class="pl-phase">{{ .Phase }}</td>
+								<td class="pl-msg">{{ .Message }}</td>
+							</tr>
+						{{ end }}
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<script>
+			function copyPrefetchLog() {
+				var rows = document.querySelectorAll('#prefetch-log .pl-row');
+				var lines = [];
+				rows.forEach(function(r) {
+					var cells = r.querySelectorAll('td');
+					lines.push([cells[0].textContent, cells[1].textContent, cells[2].textContent, cells[3].textContent].join('\t'));
+				});
+				var text = lines.join('\n');
+				navigator.clipboard.writeText(text).then(function() {
+					var btn = document.querySelector('.prefetch-copy-btn');
+					btn.textContent = 'Copied!';
+					setTimeout(function() { btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'; }, 1500);
+				});
+			}
+			</script>
+			{{ end }}
 			<div class="error-links">
 				<a href="https://www.redditstatus.com/">Reddit Status</a>
 				<span class="dot">&bull;</span>

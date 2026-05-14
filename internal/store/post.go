@@ -19,11 +19,11 @@ func (s *PostStore) Get(urlPath string) (*StoredPost, error) {
 	p := &StoredPost{}
 	err := s.db.QueryRow(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts WHERE url_path = $1`, urlPath,
 	).Scan(
 		&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
-		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source,
+		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -61,9 +61,9 @@ func (s *PostStore) Save(post *StoredPost) error {
 func (s *PostStore) ListBySubreddit(sub string, limit, offset int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
-		WHERE subreddit = $1
+		WHERE LOWER(subreddit) = LOWER($1)
 		ORDER BY created_utc DESC
 		LIMIT $2 OFFSET $3`, sub, limit, offset,
 	)
@@ -77,7 +77,7 @@ func (s *PostStore) ListBySubreddit(sub string, limit, offset int) ([]*StoredPos
 func (s *PostStore) ListRecent(limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		ORDER BY created_utc DESC
 		LIMIT $1`, limit,
@@ -95,7 +95,7 @@ func (s *PostStore) ListRecentBySubs(subs []string, limit int) ([]*StoredPost, e
 	}
 	query := `
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE subreddit = ANY($1)
 		ORDER BY created_utc DESC
@@ -114,7 +114,7 @@ func (s *PostStore) ListRecentExcludingSubs(subs []string, limit int) ([]*Stored
 	}
 	query := `
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE subreddit != ALL($1)
 		ORDER BY created_utc DESC
@@ -130,7 +130,7 @@ func (s *PostStore) ListRecentExcludingSubs(subs []string, limit int) ([]*Stored
 func (s *PostStore) ListNewlyArchived(limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE first_seen >= NOW() - INTERVAL '30 days'
 		ORDER BY first_seen DESC
@@ -145,7 +145,7 @@ func (s *PostStore) ListNewlyArchived(limit int) ([]*StoredPost, error) {
 func (s *PostStore) ListTopScored(limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE first_seen >= NOW() - INTERVAL '30 days'
 		ORDER BY score DESC
@@ -160,7 +160,7 @@ func (s *PostStore) ListTopScored(limit int) ([]*StoredPost, error) {
 func (s *PostStore) ListNotorious(limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE first_seen >= NOW() - INTERVAL '30 days'
 		  AND score < 0
@@ -209,7 +209,7 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 	argN++
 	args = append(args, offset)
 	q := fmt.Sprintf(`SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d`, where, orderBy, limitN, argN)
 
 	rows, err := s.db.Query(q, args...)
@@ -223,7 +223,7 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source
+		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
 		WHERE title ILIKE '%' || $1 || '%'
 		ORDER BY created_utc DESC
@@ -238,7 +238,7 @@ func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 
 func (s *PostStore) CountBySubreddit(sub string) (int64, error) {
 	var count int64
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE subreddit = $1`, sub).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE LOWER(subreddit) = LOWER($1)`, sub).Scan(&count)
 	return count, err
 }
 
@@ -306,7 +306,9 @@ func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
 	rows, err := s.db.Query(`
 		SELECT subreddit, COUNT(*) AS cnt
 		FROM posts
-		WHERE subreddit = ANY($1)
+		WHERE LOWER(subreddit) = ANY(
+			SELECT LOWER(unnest) FROM unnest($1::text[])
+		)
 		GROUP BY subreddit`, pq.Array(names))
 	if err != nil {
 		return nil, fmt.Errorf("subreddit counts: %w", err)
@@ -324,6 +326,30 @@ func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
 	return result, rows.Err()
 }
 
+func (s *PostStore) SetMediaDone(urlPath string) error {
+	_, err := s.db.Exec(`UPDATE posts SET media_done = true WHERE url_path = $1`, urlPath)
+	if err != nil {
+		return fmt.Errorf("set media done: %w", err)
+	}
+	return nil
+}
+
+func (s *PostStore) ListNeedingMedia(sub string, limit int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source, media_done
+		FROM posts
+		WHERE LOWER(subreddit) = LOWER($1) AND media_done = false
+		ORDER BY created_utc DESC
+		LIMIT $2`, sub, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list needing media: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
 func (s *PostStore) SaveHTML(urlPath string, html []byte) error {
 	htmlStr := string(html)
 	_, err := s.db.Exec(`
@@ -339,7 +365,7 @@ func scanPosts(rows *sql.Rows) ([]*StoredPost, error) {
 		p := &StoredPost{}
 		if err := rows.Scan(
 			&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
-			&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source,
+			&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
 		); err != nil {
 			return nil, fmt.Errorf("scan post: %w", err)
 		}

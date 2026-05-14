@@ -2,9 +2,10 @@ package prefetch
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -12,10 +13,11 @@ import (
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/reddit"
+	"github.com/redmemo/redmemo/internal/store"
 )
 
 type MediaDownloader interface {
-	DownloadAsync(originalURL string)
+	DownloadMedia(ctx context.Context, url string) error
 }
 
 type WindowInfoProvider interface {
@@ -24,6 +26,7 @@ type WindowInfoProvider interface {
 
 type SettingsProvider interface {
 	Get(key string) string
+	Set(key, value string) error
 }
 
 type SubStatusChecker interface {
@@ -31,6 +34,23 @@ type SubStatusChecker interface {
 	MarkLive(name string) error
 	RecordFailure(name, reason string) error
 }
+
+// workItem is a single request submitted by L1/L2 to the NP dispatch queue.
+type workItem struct {
+	label       string
+	fn          func(ctx context.Context)
+	done        chan struct{}
+	needsBudget bool
+}
+
+// cycleState is persisted to DB so the scheduler can resume after container restart.
+type cycleState struct {
+	NextCycleAt time.Time         `json:"next_cycle_at"`
+	Round       int               `json:"round"`
+	Cursors     map[string]string `json:"cursors"`
+}
+
+const cycleStateKey = "_prefetch_cycle_state"
 
 type Scheduler struct {
 	cfg       config.PrefetchConfig
@@ -41,9 +61,17 @@ type Scheduler struct {
 	archiver  *archive.Service
 	media     MediaDownloader
 	subStatus SubStatusChecker
+	postStore *store.PostStore
+	Events    *EventLog
 
-	lastUserReq atomic.Int64 // unix timestamp of last real user request
+	queue       chan *workItem
+	lastUserReq atomic.Int64
 }
+
+const (
+	maxRoundsPerCycle = 8
+	pageSize          = 25
+)
 
 func New(
 	cfg config.PrefetchConfig,
@@ -54,6 +82,7 @@ func New(
 	archiver *archive.Service,
 	media MediaDownloader,
 	subStatus SubStatusChecker,
+	postStore *store.PostStore,
 ) *Scheduler {
 	return &Scheduler{
 		cfg:       cfg,
@@ -64,19 +93,170 @@ func New(
 		archiver:  archiver,
 		media:     media,
 		subStatus: subStatus,
+		postStore: postStore,
+		Events:    NewEventLog(200),
+		queue:     make(chan *workItem, 1),
 	}
 }
 
-// NotifyUserRequest is called by HTTP handlers when a real user request consumes an OAuth token.
 func (s *Scheduler) NotifyUserRequest() {
 	s.lastUserReq.Store(time.Now().Unix())
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	go s.run(ctx)
+	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L3 + NP dispatch)")
+	go s.dispatchLoop(ctx)
+	go s.producerLoop(ctx)
 }
 
 func (s *Scheduler) Stop() {}
+
+// ---------------------------------------------------------------------------
+// Cycle state persistence
+// ---------------------------------------------------------------------------
+
+func (s *Scheduler) loadCycleState() *cycleState {
+	if s.settings == nil {
+		return nil
+	}
+	raw := s.settings.Get(cycleStateKey)
+	if raw == "" {
+		return nil
+	}
+	var st cycleState
+	if err := json.Unmarshal([]byte(raw), &st); err != nil {
+		log.Printf("prefetch: failed to parse cycle state: %v", err)
+		return nil
+	}
+	return &st
+}
+
+func (s *Scheduler) saveCycleState(st *cycleState) {
+	if s.settings == nil {
+		return
+	}
+	data, err := json.Marshal(st)
+	if err != nil {
+		return
+	}
+	if err := s.settings.Set(cycleStateKey, string(data)); err != nil {
+		log.Printf("prefetch: failed to save cycle state: %v", err)
+	}
+}
+
+func (s *Scheduler) clearCycleState() {
+	if s.settings == nil {
+		return
+	}
+	s.settings.Set(cycleStateKey, "")
+}
+
+// ---------------------------------------------------------------------------
+// NP Dispatch Loop — the single gateway for all outgoing requests (FIFO)
+// ---------------------------------------------------------------------------
+
+func (s *Scheduler) dispatchLoop(ctx context.Context) {
+	for {
+		var item *workItem
+		select {
+		case item = <-s.queue:
+		case <-ctx.Done():
+			return
+		}
+
+		if item.needsBudget {
+			if err := s.waitForBudget(ctx); err != nil {
+				close(item.done)
+				return
+			}
+		}
+
+		if s.userRequestedRecently() {
+			s.Events.Addf(LevelInfo, "NP", "user active, pausing 30s before: %s", item.label)
+			if err := sleep(ctx, 30*time.Second); err != nil {
+				close(item.done)
+				return
+			}
+		}
+
+		s.Events.Addf(LevelInfo, "NP", "dispatching: %s", item.label)
+		item.fn(ctx)
+		close(item.done)
+
+		delay := time.Duration(1000+rand.Intn(2000)) * time.Millisecond
+		if err := sleep(ctx, delay); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Scheduler) waitForBudget(ctx context.Context) error {
+	for {
+		resetAt, capacity, remaining := s.pool.WindowInfo()
+		if capacity == 0 {
+			s.Events.Add(LevelSkip, "NP", "no token capacity, waiting 30s")
+			if err := sleep(ctx, 30*time.Second); err != nil {
+				return err
+			}
+			continue
+		}
+
+		reserved := capacity / 10
+		if reserved < 5 {
+			reserved = 5
+		}
+		if remaining > reserved {
+			return nil
+		}
+
+		wait := time.Until(resetAt)
+		if wait <= 0 {
+			wait = 5 * time.Second
+		}
+		s.Events.Addf(LevelSkip, "NP", "budget low (remaining=%d, reserved=%d), waiting %s for window reset",
+			remaining, reserved, formatDur(wait))
+		if err := sleep(ctx, wait); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *Scheduler) submit(ctx context.Context, label string, needsBudget bool, fn func(ctx context.Context)) error {
+	item := &workItem{
+		label:       label,
+		fn:          fn,
+		done:        make(chan struct{}),
+		needsBudget: needsBudget,
+	}
+	select {
+	case s.queue <- item:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-item.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Producer Loop — L1/L2 generate work items and feed them to the NP queue
+// ---------------------------------------------------------------------------
+
+func (s *Scheduler) producerLoop(ctx context.Context) {
+	for {
+		if err := s.waitUntilEnabled(ctx); err != nil {
+			s.Events.Addf(LevelError, "L1", "exiting: %v", err)
+			return
+		}
+		if err := s.runBigCycle(ctx); err != nil {
+			s.Events.Addf(LevelError, "L1", "exiting: %v", err)
+			return
+		}
+	}
+}
 
 func (s *Scheduler) isEnabled() bool {
 	if s.settings == nil {
@@ -85,7 +265,7 @@ func (s *Scheduler) isEnabled() bool {
 	return s.settings.Get("enable_natural_prefetch") == "on"
 }
 
-func (s *Scheduler) activeSubs() []config.PrefetchSubConfig {
+func (s *Scheduler) activeSubs() []string {
 	if s.settings == nil {
 		return nil
 	}
@@ -94,21 +274,12 @@ func (s *Scheduler) activeSubs() []config.PrefetchSubConfig {
 		return nil
 	}
 	names := strings.Split(v, "+")
-	subs := make([]config.PrefetchSubConfig, 0, len(names))
+	var subs []string
 	for _, n := range names {
 		n = strings.TrimSpace(n)
-		if n == "" {
-			continue
+		if n != "" {
+			subs = append(subs, n)
 		}
-		// User explicitly added this sub — never skip it
-		subs = append(subs, config.PrefetchSubConfig{
-			Name:          n,
-			Sort:          "hot",
-			MaxPages:      1,
-			FetchComments: true,
-			FetchMedia:    true,
-			Priority:      10,
-		})
 	}
 	return subs
 }
@@ -121,267 +292,339 @@ func (s *Scheduler) userRequestedRecently() bool {
 	return time.Since(time.Unix(last, 0)) < 30*time.Second
 }
 
-func (s *Scheduler) run(ctx context.Context) {
+func (s *Scheduler) waitUntilEnabled(ctx context.Context) error {
 	for {
-		if err := s.runWindow(ctx); err != nil {
-			return
+		if s.isEnabled() {
+			if subs := s.activeSubs(); len(subs) > 0 {
+				return nil
+			}
+			v := ""
+			if s.settings != nil {
+				v = s.settings.Get("prefetch_subs")
+			}
+			s.Events.Addf(LevelSkip, "L1", "no subs configured (prefetch_subs=%q), sleeping 30s", v)
+		} else {
+			v := ""
+			if s.settings != nil {
+				v = s.settings.Get("enable_natural_prefetch")
+			}
+			s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q), sleeping 30s", v)
+		}
+		if err := sleep(ctx, 30*time.Second); err != nil {
+			return err
 		}
 	}
 }
 
-func (s *Scheduler) runWindow(ctx context.Context) error {
-	if !s.isEnabled() {
-		return sleep(ctx, 30*time.Second)
-	}
-
+// runBigCycle executes one full L1 cycle, resuming from persisted state if available.
+func (s *Scheduler) runBigCycle(ctx context.Context) error {
 	subs := s.activeSubs()
 	if len(subs) == 0 {
-		return sleep(ctx, 30*time.Second)
+		return nil
 	}
 
-	resetAt, capacity, _ := s.pool.WindowInfo()
+	// Try to restore state from a previous run
+	var startRound int
+	cursors := make(map[string]string)
+	var cycleWait time.Duration
 
-	if capacity == 0 {
-		return sleep(ctx, 30*time.Second)
-	}
-
-	windowLeft := time.Until(resetAt)
-	if windowLeft <= 0 {
-		return sleep(ctx, 5*time.Second)
-	}
-
-	threshold := 50
-	if s.settings != nil {
-		if v := s.settings.Get("prefetch_threshold"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 99 {
-				threshold = n
+	if saved := s.loadCycleState(); saved != nil && !saved.NextCycleAt.IsZero() {
+		if wait := time.Until(saved.NextCycleAt); wait > 0 && saved.Round >= maxRoundsPerCycle {
+			// Previous cycle completed, still in sleep phase
+			s.Events.Addf(LevelInfo, "L1", "resuming inter-cycle sleep -- next cycle in %s", formatDur(wait))
+			log.Printf("natural prefetch L1: resuming inter-cycle sleep, next in %s", formatDur(wait))
+			return sleep(ctx, wait)
+		}
+		if saved.Round > 0 && saved.Round < maxRoundsPerCycle {
+			startRound = saved.Round
+			if saved.Cursors != nil {
+				cursors = saved.Cursors
 			}
+			cycleWait = time.Until(saved.NextCycleAt)
+			if cycleWait <= 0 {
+				cycleWait = 12*time.Hour + time.Duration(rand.Int63n(int64(12*time.Hour)))
+			}
+			s.Events.Addf(LevelInfo, "L1", "resuming cycle at round %d/%d for [%s] (restored from DB)",
+				startRound+1, maxRoundsPerCycle, strings.Join(subs, ", "))
+			log.Printf("natural prefetch L1: resuming at round %d/%d", startRound+1, maxRoundsPerCycle)
 		}
 	}
 
-	const windowTotal = 10 * time.Minute
-	startAt := resetAt.Add(-windowTotal * time.Duration(100-threshold) / 100)
-	if wait := time.Until(startAt); wait > 0 {
-		log.Printf("natural prefetch: idling %.0fs (start at %d%% of window), reset in %.0fs", wait.Seconds(), threshold, windowLeft.Seconds())
-		if err := sleep(ctx, wait); err != nil {
-			return err
-		}
+	if cycleWait <= 0 {
+		cycleWait = 12*time.Hour + time.Duration(rand.Int63n(int64(12*time.Hour)))
+	}
+	nextCycleAt := time.Now().Add(cycleWait)
+
+	if startRound == 0 {
+		s.Events.Addf(LevelInfo, "L1", "big cycle started for [%s] -- next cycle in %s",
+			strings.Join(subs, ", "), formatDur(cycleWait))
+		log.Printf("natural prefetch L1: big cycle started for [%s], next in %s",
+			strings.Join(subs, ", "), formatDur(cycleWait))
 	}
 
-	// Re-check
-	if !s.isEnabled() {
-		return sleep(ctx, time.Until(resetAt))
-	}
-
-	_, capacity, remaining := s.pool.WindowInfo()
-	if capacity == 0 {
-		return sleep(ctx, 10*time.Second)
-	}
-
-	// Reserve 10% for real user requests
-	reserved := capacity / 10
-	if reserved < 5 {
-		reserved = 5
-	}
-	usable := remaining - reserved
-
-	if usable < 5 {
-		log.Printf("natural prefetch: budget too low (usable %d, remaining %d, reserved %d), skipping", usable, remaining, reserved)
-		return sleep(ctx, time.Until(resetAt))
-	}
-
-	requestBudget := usable
-	if requestBudget > capacity/2 {
-		requestBudget = capacity/2 + rand.Intn(capacity/10+1)
-	}
-	log.Printf("natural prefetch: planning %d requests (usable %d, remaining %d, reserved %d, capacity %d)", requestBudget, usable, remaining, reserved, capacity)
-
-	tasks := s.buildTasks(ctx, subs, requestBudget)
-	if len(tasks) == 0 {
-		return sleep(ctx, time.Until(resetAt))
-	}
-
-	// Phase 2: execute with random 1-4s intervals, pause on user activity
-	for i, task := range tasks {
+	for round := startRound; round < maxRoundsPerCycle; round++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		if time.Now().After(resetAt) {
-			log.Printf("natural prefetch: window expired after %d/%d tasks", i, len(tasks))
+		if !s.isEnabled() {
+			s.Events.Add(LevelSkip, "L1", "disabled mid-cycle, stopping")
+			s.clearCycleState()
 			break
 		}
 
-		// Pause if a real user requested recently
-		if s.userRequestedRecently() {
-			log.Printf("natural prefetch: user active, pausing 30s (at task %d/%d)", i, len(tasks))
-			if err := sleep(ctx, 30*time.Second); err != nil {
+		activeSubs := 0
+		for _, sub := range subs {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if time.Now().After(resetAt) {
-				break
+
+			if round > 0 {
+				if _, hasCursor := cursors[sub]; !hasCursor {
+					continue
+				}
+			}
+
+			cursor := cursors[sub]
+			var posts []reddit.Post
+			var after string
+			var fetchErr error
+
+			label := fmt.Sprintf("L1 r/%s round %d/%d listing (after=%q)", sub, round+1, maxRoundsPerCycle, cursor)
+			err := s.submit(ctx, label, true, func(ctx context.Context) {
+				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+				if fetchErr != nil {
+					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: oauth failed: %v, trying public", sub, round+1, fetchErr)
+					if s.publicCli != nil {
+						posts, _, after, fetchErr = s.publicCli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+					}
+				}
+				if fetchErr != nil {
+					s.Events.Addf(LevelError, "L1", "r/%s round %d: fetch failed (both): %v", sub, round+1, fetchErr)
+					if s.subStatus != nil {
+						s.subStatus.RecordFailure(sub, fetchErr.Error())
+					}
+					return
+				}
+				s.Events.Addf(LevelOK, "L1", "r/%s round %d/%d: %d posts fetched (after=%q)",
+					sub, round+1, maxRoundsPerCycle, len(posts), after)
+				if s.subStatus != nil {
+					s.subStatus.MarkLive(sub)
+				}
+				s.archiver.ArchivePosts(posts, sub, "natural_prefetch")
+			})
+			if err != nil {
+				return err
+			}
+
+			if fetchErr != nil {
+				continue
+			}
+
+			if after != "" {
+				cursors[sub] = after
+				activeSubs++
+			} else {
+				delete(cursors, sub)
+				s.Events.Addf(LevelInfo, "L1", "r/%s: no more pages after round %d", sub, round+1)
+			}
+
+			if err := s.submitL2(ctx, sub); err != nil {
+				return err
 			}
 		}
 
-		task()
+		if round > 0 && activeSubs == 0 {
+			s.Events.Add(LevelInfo, "L1", "all subs exhausted pages, ending cycle early")
+			break
+		}
 
-		if i < len(tasks)-1 {
-			delay := time.Duration(1000+rand.Intn(3000)) * time.Millisecond
-			if err := sleep(ctx, delay); err != nil {
+		// Persist state after each round so we can resume on restart
+		s.saveCycleState(&cycleState{
+			NextCycleAt: nextCycleAt,
+			Round:       round + 1,
+			Cursors:     cursors,
+		})
+
+		if round < maxRoundsPerCycle-1 {
+			roundWait := 15*time.Minute + time.Duration(rand.Int63n(int64(15*time.Minute)))
+			s.Events.Addf(LevelInfo, "L1", "round %d/%d complete -- next round in %s",
+				round+1, maxRoundsPerCycle, formatDur(roundWait))
+			log.Printf("natural prefetch L1: round %d/%d complete, next in %s",
+				round+1, maxRoundsPerCycle, formatDur(roundWait))
+			if err := sleep(ctx, roundWait); err != nil {
 				return err
 			}
 		}
 	}
 
-	if wait := time.Until(resetAt); wait > 0 {
-		return sleep(ctx, wait)
+	// Mark cycle complete: persist next cycle time so restart sleeps correctly
+	s.saveCycleState(&cycleState{
+		NextCycleAt: nextCycleAt,
+		Round:       maxRoundsPerCycle,
+		Cursors:     nil,
+	})
+
+	remaining := time.Until(nextCycleAt)
+	if remaining <= 0 {
+		remaining = 1 * time.Minute
+	}
+	s.Events.Addf(LevelOK, "L1", "big cycle complete -- sleeping %s until next cycle", formatDur(remaining))
+	log.Printf("natural prefetch L1: big cycle complete, sleeping %s", formatDur(remaining))
+	return sleep(ctx, remaining)
+}
+
+// ---------------------------------------------------------------------------
+// L2: Media download — submits CDN download tasks through the NP queue
+// ---------------------------------------------------------------------------
+
+func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
+	if s.postStore == nil || s.media == nil {
+		return nil
+	}
+
+	pending, err := s.postStore.ListNeedingMedia(sub, pageSize)
+	if err != nil {
+		s.Events.Addf(LevelError, "L2", "r/%s: query pending media: %v", sub, err)
+		return nil
+	}
+
+	if len(pending) == 0 {
+		return nil
+	}
+
+	s.Events.Addf(LevelInfo, "L2", "r/%s: %d posts need media -- submitting to NP queue", sub, len(pending))
+
+	completed := 0
+	for _, sp := range pending {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		var p reddit.Post
+		if err := json.Unmarshal(sp.JSONData, &p); err != nil {
+			s.Events.Addf(LevelError, "L2", "r/%s post %s: unmarshal failed: %v", sub, sp.PostID, err)
+			continue
+		}
+
+		mediaItems := ExtractMediaItems(&p)
+		if len(mediaItems) == 0 {
+			s.postStore.SetMediaDone(sp.URLPath)
+			continue
+		}
+
+		urlPath := sp.URLPath
+		postID := sp.PostID
+		allOK := true
+
+		for _, item := range mediaItems {
+			mi := item
+			var dlErr error
+			label := fmt.Sprintf("L2 r/%s post %s %s", sub, postID, mi.Kind)
+			err := s.submit(ctx, label, false, func(ctx context.Context) {
+				dlErr = s.media.DownloadMedia(ctx, mi.URL)
+				if dlErr != nil {
+					s.Events.Addf(LevelWarn, "L2", "r/%s post %s: %s download failed: %v", sub, postID, mi.Kind, dlErr)
+				}
+			})
+			if err != nil {
+				return err
+			}
+			if dlErr != nil {
+				allOK = false
+			}
+		}
+
+		if allOK {
+			s.postStore.SetMediaDone(urlPath)
+			completed++
+			kinds := mediaKindSummary(mediaItems)
+			s.Events.Addf(LevelOK, "L2", "r/%s post %s: %d media done (%s)", sub, postID, len(mediaItems), kinds)
+		}
+	}
+
+	if completed > 0 {
+		s.Events.Addf(LevelOK, "L2", "r/%s: media complete for %d/%d posts", sub, completed, len(pending))
 	}
 	return nil
 }
 
-func (s *Scheduler) buildTasks(ctx context.Context, subs []config.PrefetchSubConfig, budget int) []func() {
-	var tasks []func()
+// ---------------------------------------------------------------------------
+// Shared utilities
+// ---------------------------------------------------------------------------
 
-	for _, sub := range subs {
-		if len(tasks) >= budget {
-			break
-		}
-
-		subName := sub.Name
-		sortBy := sub.Sort
-		if sortBy == "" {
-			sortBy = "hot"
-		}
-		fetchComments := sub.FetchComments
-		fetchMedia := sub.FetchMedia
-		maxPages := sub.MaxPages
-		if maxPages <= 0 {
-			maxPages = 1
-		}
-
-		var firstPagePosts []reddit.Post
-		var afterCursor string
-		tasks = append(tasks, func() {
-			posts, _, after, err := s.cli.FetchSubreddit(ctx, subName, sortBy, "", 25)
-			if err != nil {
-				log.Printf("natural prefetch: %s oauth failed: %v, trying public", subName, err)
-				if s.publicCli != nil {
-					posts, _, after, err = s.publicCli.FetchSubreddit(ctx, subName, sortBy, "", 25)
-				}
-				if err != nil {
-					log.Printf("natural prefetch: %s listing failed: %v", subName, err)
-					if s.subStatus != nil {
-						s.subStatus.RecordFailure(subName, err.Error())
-					}
-					return
-				}
-			}
-			if s.subStatus != nil {
-				s.subStatus.MarkLive(subName)
-			}
-			firstPagePosts = posts
-			afterCursor = after
-			s.archiver.ArchivePosts(posts, subName, "natural_prefetch")
-			if fetchMedia && s.media != nil {
-				for i := range posts {
-					s.downloadPostMedia(&posts[i])
-				}
-			}
-			log.Printf("natural prefetch: %s page 1, %d posts", subName, len(posts))
-		})
-
-		if len(tasks) >= budget {
-			break
-		}
-
-		tasks = append(tasks, func() {
-			subInfo, err := s.cli.FetchSubredditAbout(ctx, subName)
-			if err != nil && s.publicCli != nil {
-				subInfo, err = s.publicCli.FetchSubredditAbout(ctx, subName)
-			}
-			if err != nil {
-				log.Printf("natural prefetch: %s about: %v", subName, err)
-				return
-			}
-			s.archiver.ArchiveSubreddit(&subInfo)
-		})
-
-		if len(tasks) >= budget {
-			break
-		}
-
-		if fetchComments {
-			for postIdx := 0; postIdx < 25 && len(tasks) < budget; postIdx++ {
-				idx := postIdx
-				tasks = append(tasks, func() {
-					if idx >= len(firstPagePosts) {
-						return
-					}
-					p := firstPagePosts[idx]
-					_, comments, err := s.cli.FetchPost(ctx, subName, p.ID, "confidence")
-					if err != nil && s.publicCli != nil {
-						_, comments, err = s.publicCli.FetchPost(ctx, subName, p.ID, "confidence")
-					}
-					if err != nil {
-						log.Printf("natural prefetch: %s comment %s: %v", subName, p.ID, err)
-						return
-					}
-					permalink := p.Permalink
-					if permalink == "" {
-						permalink = "/r/" + subName + "/comments/" + p.ID
-					}
-					s.archiver.ArchiveComments(permalink, comments)
-				})
-			}
-		}
-
-		for page := 1; page < maxPages && len(tasks) < budget; page++ {
-			pg := page
-			tasks = append(tasks, func() {
-				if afterCursor == "" {
-					return
-				}
-				posts, _, after, err := s.cli.FetchSubreddit(ctx, subName, sortBy, afterCursor, 25)
-				if err != nil && s.publicCli != nil {
-					posts, _, after, err = s.publicCli.FetchSubreddit(ctx, subName, sortBy, afterCursor, 25)
-				}
-				if err != nil {
-					log.Printf("natural prefetch: %s page %d: %v", subName, pg+1, err)
-					return
-				}
-				afterCursor = after
-				s.archiver.ArchivePosts(posts, subName, "natural_prefetch")
-				if fetchMedia && s.media != nil {
-					for i := range posts {
-						s.downloadPostMedia(&posts[i])
-					}
-				}
-				log.Printf("natural prefetch: %s page %d, %d posts", subName, pg+1, len(posts))
-			})
-		}
-	}
-
-	if len(tasks) > 1 {
-		rand.Shuffle(len(tasks)-1, func(i, j int) {
-			tasks[i+1], tasks[j+1] = tasks[j+1], tasks[i+1]
-		})
-	}
-
-	return tasks
+type mediaItem struct {
+	URL  string
+	Kind string // "image", "video", "gif", "thumbnail", "poster", "gallery"
 }
 
-func (s *Scheduler) downloadPostMedia(p *reddit.Post) {
+func ExtractMediaItems(p *reddit.Post) []mediaItem {
+	var items []mediaItem
+
 	if p.Media.URL != "" {
-		s.media.DownloadAsync(p.Media.URL)
+		kind := "image"
+		switch p.PostType {
+		case "video":
+			kind = "video"
+		case "gif":
+			kind = "gif"
+		}
+		items = append(items, mediaItem{URL: reddit.UnformatURL(p.Media.URL), Kind: kind})
+	}
+	if p.Media.Poster != "" {
+		items = append(items, mediaItem{URL: reddit.UnformatURL(p.Media.Poster), Kind: "poster"})
 	}
 	if p.Thumbnail.URL != "" {
-		s.media.DownloadAsync(p.Thumbnail.URL)
+		items = append(items, mediaItem{URL: reddit.UnformatURL(p.Thumbnail.URL), Kind: "thumbnail"})
 	}
 	for i := range p.Gallery {
 		if p.Gallery[i].URL != "" {
-			s.media.DownloadAsync(p.Gallery[i].URL)
+			items = append(items, mediaItem{URL: reddit.UnformatURL(p.Gallery[i].URL), Kind: "gallery"})
 		}
 	}
+	return items
+}
+
+// ExtractMediaURLs returns just the URLs for backward compatibility / tests.
+func ExtractMediaURLs(p *reddit.Post) []string {
+	items := ExtractMediaItems(p)
+	urls := make([]string, len(items))
+	for i, it := range items {
+		urls[i] = it.URL
+	}
+	return urls
+}
+
+func mediaKindSummary(items []mediaItem) string {
+	counts := map[string]int{}
+	for _, it := range items {
+		counts[it.Kind]++
+	}
+	var parts []string
+	for _, k := range []string{"video", "gif", "image", "poster", "thumbnail", "gallery"} {
+		if n, ok := counts[k]; ok {
+			if n == 1 {
+				parts = append(parts, k)
+			} else {
+				parts = append(parts, fmt.Sprintf("%d %ss", n, k))
+			}
+		}
+	}
+	return strings.Join(parts, " + ")
+}
+
+func formatDur(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	sec := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm%ds", h, m, sec)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, sec)
+	}
+	return fmt.Sprintf("%ds", sec)
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
