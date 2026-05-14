@@ -136,6 +136,7 @@ type Subreddit struct {
 	Description string    // public_description
 	Info        template.HTML // description_html after rewrite_urls()
 	Icon        string    // community_icon, fallback icon_img, after format_url()
+	RawIcon     string    // original icon URL before format_url()
 	Members     [2]string // FormatNum(subscribers)
 	Active      [2]string // FormatNum(accounts_active)
 	Wiki        bool      // wiki_enabled

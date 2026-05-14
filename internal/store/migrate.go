@@ -121,6 +121,20 @@ var migrations = []string{
 	 ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
 	 ALTER TABLE posts ADD CONSTRAINT valid_source
 		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'natural_prefetch', 'search', 'user_listing', 'background'));`,
+
+	// v7: subreddit icon cache with expiry tracking
+	`CREATE TABLE IF NOT EXISTS sub_icons (
+		name            TEXT PRIMARY KEY,
+		icon_url        TEXT NOT NULL DEFAULT '',
+		local_path      TEXT,
+		hash            TEXT,
+		fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		expires_at      TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days'
+	);`,
+
+	// v8: re-fetch icons that were stored as local proxy paths instead of raw CDN URLs
+	`UPDATE sub_icons SET expires_at = NOW() - INTERVAL '1 second'
+	 WHERE icon_url NOT LIKE 'http%' AND icon_url != '';`,
 }
 
 func RunMigrations(db *sql.DB) error {

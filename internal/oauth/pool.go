@@ -69,9 +69,13 @@ func (p *Pool) Start(ctx context.Context) error {
 	now := time.Now()
 	p.mu.Lock()
 	for _, st := range stored {
+		identity := GenerateIdentity()
+		if st.Backend != "" && st.Backend != "mobile_spoof" {
+			identity = GenerateWebIdentity(st.ClientID)
+		}
 		mt := &ManagedToken{
 			StoredToken: *st,
-			Identity:    GenerateIdentity(),
+			Identity:    identity,
 		}
 		if st.RateResetAt != nil && st.RateResetAt.After(now) {
 			mt.RateResetAt = *st.RateResetAt
@@ -128,7 +132,7 @@ func (p *Pool) Start(ctx context.Context) error {
 			p.mu.Lock()
 			p.tokens = append(p.tokens, &ManagedToken{
 				StoredToken:   *st,
-				Identity:      GenerateIdentity(),
+				Identity:      result.Identity,
 				RateRemaining: 99,
 				RateResetAt:   now.Add(10 * time.Minute),
 			})
@@ -200,7 +204,7 @@ func (p *Pool) refreshLoop(ctx context.Context, mt *ManagedToken) {
 		mt.StoredToken.ExpiresAt = &expiresAtNew
 		mt.StoredToken.RateRemaining = &remaining
 		mt.StoredToken.LastUsed = &now
-		mt.Identity = GenerateIdentity()
+		mt.Identity = result.Identity
 		mt.RateRemaining = 99
 		mt.RateResetAt = now.Add(10 * time.Minute)
 		p.mu.Unlock()
@@ -315,6 +319,7 @@ type TokenStatusInfo struct {
 	RateRemaining int
 	RateResetAt   time.Time
 	Dynamic       bool
+	UserAgent     string
 }
 
 func (p *Pool) TokenStatuses() []TokenStatusInfo {
@@ -327,6 +332,7 @@ func (p *Pool) TokenStatuses() []TokenStatusInfo {
 			RateRemaining: mt.RateRemaining,
 			RateResetAt:   mt.RateResetAt,
 			Dynamic:       mt.StoredToken.Backend == dynamicSpoofBackend,
+			UserAgent:     mt.Identity.UserAgent,
 		}
 	}
 	return out
@@ -469,7 +475,7 @@ func (p *Pool) spawnOne(ctx context.Context) error {
 
 	mt := &ManagedToken{
 		StoredToken:   *st,
-		Identity:      GenerateIdentity(),
+		Identity:      result.Identity,
 		RateRemaining: 99,
 		RateResetAt:   now.Add(10 * time.Minute),
 	}

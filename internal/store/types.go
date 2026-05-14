@@ -69,6 +69,15 @@ type SubredditStatus struct {
 	CheckedAt time.Time
 }
 
+type SubIcon struct {
+	Name      string
+	IconURL   string
+	LocalPath *string
+	Hash      *string
+	FetchedAt time.Time
+	ExpiresAt time.Time
+}
+
 type StoredPrefetchConfig struct {
 	Subreddit     string
 	SortBy        string

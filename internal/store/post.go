@@ -326,6 +326,33 @@ func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
 	return result, rows.Err()
 }
 
+type RecentArchivedSub struct {
+	Name      string
+	PostCount int64
+}
+
+func (s *PostStore) RecentlyArchivedSubs(limit, offset int) ([]RecentArchivedSub, error) {
+	rows, err := s.db.Query(`
+		SELECT subreddit, COUNT(*) AS cnt
+		FROM posts
+		GROUP BY subreddit
+		ORDER BY MAX(last_updated) DESC
+		LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("recently archived subs: %w", err)
+	}
+	defer rows.Close()
+	var subs []RecentArchivedSub
+	for rows.Next() {
+		var s RecentArchivedSub
+		if err := rows.Scan(&s.Name, &s.PostCount); err != nil {
+			return nil, fmt.Errorf("scan recently archived sub: %w", err)
+		}
+		subs = append(subs, s)
+	}
+	return subs, rows.Err()
+}
+
 func (s *PostStore) SetMediaDone(urlPath string) error {
 	_, err := s.db.Exec(`UPDATE posts SET media_done = true WHERE url_path = $1`, urlPath)
 	if err != nil {

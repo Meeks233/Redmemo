@@ -33,6 +33,7 @@ type SubStatusChecker interface {
 	IsAlive(name string) (bool, error)
 	MarkLive(name string) error
 	RecordFailure(name, reason string) error
+	ListAllAlive() ([]string, error)
 }
 
 // workItem is a single request submitted by L1/L2 to the NP dispatch queue.
@@ -52,6 +53,14 @@ type cycleState struct {
 
 const cycleStateKey = "_prefetch_cycle_state"
 
+type SubIconProvider interface {
+	Get(name string) (*store.SubIcon, error)
+	Save(icon *store.SubIcon) error
+	ListExpired() ([]*store.SubIcon, error)
+	ListAll() ([]*store.SubIcon, error)
+	IconTTL() time.Duration
+}
+
 type Scheduler struct {
 	cfg       config.PrefetchConfig
 	pool      WindowInfoProvider
@@ -62,6 +71,7 @@ type Scheduler struct {
 	media     MediaDownloader
 	subStatus SubStatusChecker
 	postStore *store.PostStore
+	iconStore SubIconProvider
 	Events    *EventLog
 
 	queue       chan *workItem
@@ -83,6 +93,7 @@ func New(
 	media MediaDownloader,
 	subStatus SubStatusChecker,
 	postStore *store.PostStore,
+	iconStore SubIconProvider,
 ) *Scheduler {
 	return &Scheduler{
 		cfg:       cfg,
@@ -94,6 +105,7 @@ func New(
 		media:     media,
 		subStatus: subStatus,
 		postStore: postStore,
+		iconStore: iconStore,
 		Events:    NewEventLog(200),
 		queue:     make(chan *workItem, 1),
 	}
@@ -104,9 +116,10 @@ func (s *Scheduler) NotifyUserRequest() {
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L3 + NP dispatch)")
+	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L3/L4 + NP dispatch)")
 	go s.dispatchLoop(ctx)
 	go s.producerLoop(ctx)
+	go s.iconLoop(ctx)
 }
 
 func (s *Scheduler) Stop() {}

@@ -686,6 +686,7 @@ func ParseSubredditAbout(data []byte) (Subreddit, error) {
 	if icon == "" {
 		icon = getString(d, "icon_img")
 	}
+	sub.RawIcon = icon
 	sub.Icon = FormatURL(icon)
 
 	// Members

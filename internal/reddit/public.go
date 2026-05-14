@@ -15,6 +15,7 @@ import (
 type PublicClient struct {
 	httpClient *http.Client
 	uaPool     *useragent.Pool
+	pinnedUA   string
 
 	mu         sync.Mutex
 	tokens     int
@@ -27,6 +28,7 @@ func NewPublicClient(uaPool *useragent.Pool) *PublicClient {
 	return &PublicClient{
 		httpClient: transport.NewSpoofedClient(15 * time.Second),
 		uaPool:     uaPool,
+		pinnedUA:   uaPool.Get(),
 		tokens:     8,
 		maxTokens:  8,
 		lastRefill: time.Now(),
@@ -64,7 +66,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", c.uaPool.Get())
+	req.Header.Set("User-Agent", c.pinnedUA)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Cookie", quarantineCookie)
 

@@ -134,12 +134,16 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 
 	updates := make(map[string]string)
 	for _, key := range settingsKeys {
-		if r.Form.Has(key) {
-			updates[key] = r.FormValue(key)
+		if vals, ok := r.Form[key]; ok && len(vals) > 0 {
+			updates[key] = vals[len(vals)-1]
 		}
 	}
 
-	if cb := r.FormValue("show_all_subs"); cb == "on" {
+	cb := "off"
+	if vals, ok := r.Form["show_all_subs"]; ok && len(vals) > 0 {
+		cb = vals[len(vals)-1]
+	}
+	if cb == "on" {
 		updates["front_page_subs"] = "all"
 		updates["front_page_subs_mode"] = "whitelist"
 	}

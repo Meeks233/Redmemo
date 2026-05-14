@@ -32,6 +32,7 @@ type Handler struct {
 	archiver       *archive.Service
 	prefetcher     *prefetch.Scheduler
 	subStatusStore *store.SubStatusStore
+	subIconStore   *store.SubIconStore
 	uaPool         *useragent.Pool
 	cfg            *config.Config
 	siteDefaults   map[string]string
@@ -53,6 +54,7 @@ func New(
 	arc *archive.Service,
 	pf *prefetch.Scheduler,
 	sss *store.SubStatusStore,
+	sis *store.SubIconStore,
 	uap *useragent.Pool,
 	cfg *config.Config,
 ) *Handler {
@@ -76,6 +78,7 @@ func New(
 		archiver:       arc,
 		prefetcher:     pf,
 		subStatusStore: sss,
+		subIconStore:   sis,
 		uaPool:         uap,
 		cfg:           cfg,
 		siteDefaults:  defaults,
@@ -131,6 +134,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /r/{sub}/search", h.handleSubSearch)
 
 	// Archive browser
+	mux.HandleFunc("GET /archive", h.handleArchiveHub)
 	mux.HandleFunc("GET /archive/r/{sub}", h.handleArchiveSub)
 
 	// Settings
@@ -144,8 +148,15 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)
 
-	// Countdown / rate-limit status
-	mux.HandleFunc("GET /countdown", h.handleCountdown)
+	// Legacy countdown redirect
+	mux.HandleFunc("GET /countdown", func(w http.ResponseWriter, r *http.Request) {
+		prefs := h.readPreferences(r)
+		if prefs.EnableDebug == "on" {
+			http.Redirect(w, r, "/debug", http.StatusSeeOther)
+		} else {
+			http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		}
+	})
 
 	// Debug error page preview
 	mux.HandleFunc("GET /debug", h.handleDebug)

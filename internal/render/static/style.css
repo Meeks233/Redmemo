@@ -2242,106 +2242,6 @@ th {
     opacity: 0.6;
 }
 
-#countdown-page {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 3em 1em;
-    min-height: 60vh;
-}
-
-.countdown-ring-wrap {
-    position: relative;
-    width: 220px;
-    height: 220px;
-}
-
-.countdown-ring {
-    width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
-}
-
-.countdown-track {
-    fill: none;
-    stroke: var(--highlighted);
-    stroke-width: 8;
-}
-
-.countdown-arc {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 8;
-    stroke-linecap: round;
-    transition: stroke-dashoffset 0.4s ease;
-}
-
-.countdown-timer {
-    font-family: monospace;
-    font-size: 6em;
-    font-weight: bold;
-    color: var(--accent);
-    line-height: 1;
-    margin-top: 0.4em;
-    letter-spacing: 0.05em;
-    text-align: center;
-}
-
-.countdown-msg {
-    font-size: 1.2em;
-    margin: 1.5em 0 0.3em;
-    text-align: center;
-}
-
-.countdown-sub {
-    font-size: 0.9em;
-    opacity: 0.6;
-    margin: 0;
-    text-align: center;
-}
-
-.countdown-details {
-    margin-top: 2em;
-    max-width: 500px;
-    width: 100%;
-    background: var(--outside);
-    border-radius: 5px;
-    padding: 12px 16px;
-    font-size: 0.85em;
-}
-
-.countdown-details summary {
-    cursor: pointer;
-    opacity: 0.7;
-    font-weight: bold;
-}
-
-.countdown-details ul {
-    list-style: none;
-    padding: 0;
-    margin: 8px 0 0;
-}
-
-.countdown-details li {
-    padding: 4px 0;
-    border-bottom: 1px solid var(--highlighted);
-}
-
-.countdown-details li:last-child {
-    border-bottom: none;
-}
-
-.countdown-links {
-    margin-top: 1.5em;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-
-.countdown-links a {
-    color: var(--accent);
-}
 
 #error .error-diagnostics {
     margin: 1em 0;
@@ -2373,10 +2273,13 @@ th {
 }
 
 #error .token-list li {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     font-size: 0.9em;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--highlighted);
+}
+
+#error .token-list li:last-child {
+    border-bottom: none;
 }
 
 #error .token-list li.token-ok {
@@ -2385,6 +2288,12 @@ th {
 
 #error .token-list li.token-empty {
     opacity: 0.5;
+}
+
+#error .token-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #error .token-index {
@@ -2411,19 +2320,13 @@ th {
     opacity: 0.7;
 }
 
-#error .ua-list li {
+#error .token-ua {
     font-family: monospace;
-    font-size: 0.85em;
+    font-size: 0.8em;
+    opacity: 0.6;
     word-break: break-all;
-}
-
-#error .ua-list li.ua-current {
-    color: var(--accent);
-    font-weight: bold;
-}
-
-#error .ua-arrow {
-    margin-right: 4px;
+    padding-left: 2em;
+    margin-top: 2px;
 }
 
 /* Prefetch Event Log */
@@ -2995,4 +2898,129 @@ th {
 
 .modal-confirm:hover {
     opacity: 0.85;
+}
+
+/* Archive hub */
+#archive-hub {
+    max-width: 960px;
+    margin: 1em auto;
+    padding: 0 1em;
+}
+
+#archive-hub h1 {
+    font-size: 1.2em;
+    margin-bottom: 0.8em;
+    opacity: 0.8;
+}
+
+.archive-empty {
+    text-align: center;
+    opacity: 0.5;
+    padding: 2em;
+}
+
+#archive-sub-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+@media screen and (max-width: 800px) {
+    #archive-sub-list {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media screen and (max-width: 500px) {
+    #archive-sub-list {
+        grid-template-columns: 1fr;
+    }
+}
+
+.archive-sub-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--highlighted);
+    border-radius: 6px;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+}
+
+.archive-sub-card:hover {
+    background: var(--highlighted);
+}
+
+.archive-sub-icon img,
+.archive-sub-icon svg {
+    border-radius: 50%;
+    display: block;
+    object-fit: cover;
+}
+
+.archive-sub-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.archive-sub-name {
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+.archive-sub-count {
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+#archive-load-more {
+    text-align: center;
+    padding: 1em;
+}
+
+#archive-load-more button {
+    padding: 0.5em 1.5em;
+    cursor: pointer;
+    background: var(--highlighted);
+    border: 1px solid var(--shadow);
+    color: inherit;
+    border-radius: 4px;
+}
+
+/* Archive NSFW notice */
+.archive-nsfw-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4em 2em;
+    opacity: 0.7;
+}
+
+.archive-nsfw-notice .nsfw-notice-title {
+    font-size: 1.4em;
+    font-weight: 700;
+    margin-bottom: 0.5em;
+}
+
+.archive-nsfw-notice p {
+    margin: 0.3em 0;
+}
+
+.archive-nsfw-notice a {
+    font-weight: 600;
+}
+
+/* Navbar archive link — matches #settings_link */
+#archive_link {
+    opacity: 0.8;
+    margin-left: 10px;
+}
+
+#archive_link svg {
+    display: block;
 }

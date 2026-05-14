@@ -10,6 +10,7 @@ import (
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/store"
 )
 
 func (h *Handler) notifyUserRequest() {
@@ -40,7 +41,103 @@ func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (r
 	return h.publicCli.FetchPost(ctx, sub, id, commentSort)
 }
 
+const archiveHubPageSize = 5
 const archivePageSize = 25
+
+func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
+	prefs := h.readPreferences(r)
+
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+
+	var subs []render.ArchiveHubEntry
+	if h.postStore != nil {
+		recent, err := h.postStore.RecentlyArchivedSubs(archiveHubPageSize+1, offset)
+		if err != nil {
+			log.Printf("handler: archive hub: %v", err)
+		}
+
+		var names []string
+		for _, rs := range recent {
+			names = append(names, rs.Name)
+		}
+
+		var iconMap map[string]*store.SubIcon
+		if h.subIconStore != nil && len(names) > 0 {
+			iconMap, _ = h.subIconStore.GetIconMap(names)
+		}
+
+		for _, rs := range recent {
+			entry := render.ArchiveHubEntry{
+				Name:      rs.Name,
+				PostCount: rs.PostCount,
+			}
+			if icon, ok := iconMap[rs.Name]; ok {
+				entry.IconURL = icon.IconURL
+			}
+			subs = append(subs, entry)
+		}
+	}
+
+	hasMore := len(subs) > archiveHubPageSize
+	if hasMore {
+		subs = subs[:archiveHubPageSize]
+	}
+
+	if r.URL.Query().Get("format") == "json" {
+		type jsonEntry struct {
+			Name      string `json:"name"`
+			PostCount int64  `json:"post_count"`
+			IconURL   string `json:"icon_url,omitempty"`
+		}
+		type jsonResp struct {
+			Subs    []jsonEntry `json:"subs"`
+			Offset  int         `json:"offset"`
+			HasMore bool        `json:"has_more"`
+		}
+		entries := make([]jsonEntry, len(subs))
+		for i, s := range subs {
+			entries[i] = jsonEntry{
+				Name:      s.Name,
+				PostCount: s.PostCount,
+				IconURL:   s.IconURL,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(jsonResp{
+			Subs:    entries,
+			Offset:  offset + len(subs),
+			HasMore: hasMore,
+		})
+		return
+	}
+
+	// Trigger passive L4 icon check
+	if h.prefetcher != nil {
+		go h.prefetcher.CheckIconsPassive()
+	}
+
+	data := render.ArchiveHubPageData{
+		BasePage: render.BasePage{
+			URL:       r.URL.Path,
+			Prefs:     prefs,
+			BrandName: h.cfg.Render.BrandName,
+			Version:   "0.1.0",
+		},
+		Subs:    subs,
+		Offset:  offset + len(subs),
+		HasMore: hasMore,
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := h.renderer.RenderArchiveHub(w, data); err != nil {
+		log.Printf("handler: render archive hub: %v", err)
+	}
+}
 
 func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
@@ -93,13 +190,14 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 			BrandName: h.cfg.Render.BrandName,
 			Version:   "0.1.0",
 		},
-		Sub:        sub,
-		Posts:      posts,
-		TotalPosts: total,
-		Page:       page,
-		TotalPages: totalPages,
-		HasPrev:    page > 1,
-		HasNext:    page < totalPages,
+		Sub:                sub,
+		Posts:              posts,
+		TotalPosts:         total,
+		Page:               page,
+		TotalPages:         totalPages,
+		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
+		HasPrev:            page > 1,
+		HasNext:            page < totalPages,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

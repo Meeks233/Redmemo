@@ -1,63 +1,8 @@
-{{ define "title" }}{{ if or .IsCountdown .ResetSeconds }}Countdown{{ else if and (ge .StatusCode 200) (lt .StatusCode 300) }}{{ .Message }}{{ else }}Error: {{ .Message }}{{ end }}{{ end }}
+{{ define "title" }}{{ if .ResetSeconds }}Rate Limited{{ else if and (ge .StatusCode 200) (lt .StatusCode 300) }}{{ .Message }}{{ else }}Error: {{ .Message }}{{ end }}{{ end }}
 
 {{ template "base" . }}
 
 {{ define "content" }}
-{{ if or .IsCountdown .ResetSeconds }}
-<div id="countdown-page" data-total="{{ .ResetSeconds }}" data-remaining="{{ .TokenBudget }}" data-window="{{ .WindowSeconds }}">
-	<div class="countdown-ring-wrap">
-		<svg class="countdown-ring" viewBox="0 0 200 200">
-			<circle class="countdown-track" cx="100" cy="100" r="90" />
-			<circle class="countdown-arc" id="cd-arc" cx="100" cy="100" r="90" />
-		</svg>
-	</div>
-	<div class="countdown-timer" id="cd-time"></div>
-</div>
-<script>
-(function() {
-	var el = document.getElementById('countdown-page');
-	var total = parseInt(el.dataset.total, 10) || 0;
-	var remaining = parseInt(el.dataset.remaining, 10) || 0;
-	var window_s = parseInt(el.dataset.window, 10) || 600;
-	var circ = 2 * Math.PI * 90;
-	var arc = document.getElementById('cd-arc');
-	var timeEl = document.getElementById('cd-time');
-
-	arc.style.strokeDasharray = circ;
-
-	function fmt(sec) {
-		if (sec <= 0) return '0:00';
-		var m = Math.floor(sec / 60), s = sec % 60;
-		return m + ':' + (s < 10 ? '0' : '') + s;
-	}
-
-	function run(secs, win) {
-		var t = secs;
-		function tick() {
-			timeEl.textContent = fmt(t);
-			arc.style.strokeDashoffset = circ * (1 - t / win);
-			if (t <= 0) {
-				fetch('/api/status').then(function(r){return r.json()}).then(function(d) {
-					if (d.reset > 0) run(d.reset, d.window || 600);
-					else location.reload();
-				}).catch(function(){ location.reload(); });
-				return;
-			}
-			t--;
-			setTimeout(tick, 1000);
-		}
-		tick();
-	}
-
-	if (total > 0) {
-		run(total, window_s);
-	} else {
-		timeEl.textContent = remaining + '';
-		arc.style.strokeDashoffset = 0;
-	}
-})();
-</script>
-{{ else }}
 <div id="error"{{ if .IsDebug }} data-token-budget="{{ .TokenBudget }}"{{ end }}>
 	<div class="prefs">
 		<fieldset>
@@ -92,22 +37,15 @@
 				<ul class="token-list">
 				{{ range .Tokens }}
 					<li class="{{ if .HasBudget }}token-ok{{ else }}token-empty{{ end }}">
-						<span class="token-index">#{{ .Index }}</span>
-						<span class="token-backend">{{ .Backend }}</span>
-						<span class="token-kind">{{ .Kind }}</span>
-						<span class="token-remaining">{{ .RateRemaining }} left</span>
-						<span class="token-reset">{{ .RateReset }}</span>
+						<div class="token-header">
+							<span class="token-index">#{{ .Index }}</span>
+							<span class="token-backend">{{ .Backend }}</span>
+							<span class="token-kind">{{ .Kind }}</span>
+							<span class="token-remaining">{{ .RateRemaining }} left</span>
+							<span class="token-reset">{{ .RateReset }}</span>
+						</div>
+						{{ if .UserAgent }}<div class="token-ua">{{ .UserAgent }}</div>{{ end }}
 					</li>
-				{{ end }}
-				</ul>
-			</div>
-			{{ end }}
-			{{ if .UAList }}
-			<div class="error-diagnostics">
-				<h4>User-Agent Pool ({{ len .UAList }} entries{{ if .UAFetchedAt }}, fetched {{ .UAFetchedAt }}{{ end }})</h4>
-				<ul class="ua-list">
-				{{ range $i, $ua := .UAList }}
-					<li{{ if eq $i $.UACurrentIndex }} class="ua-current"{{ end }}>{{ if eq $i $.UACurrentIndex }}<span class="ua-arrow">&#9654;</span> {{ end }}{{ $ua }}</li>
 				{{ end }}
 				</ul>
 			</div>
@@ -183,6 +121,5 @@
 	}
 })();
 </script>
-{{ end }}
 {{ end }}
 {{ end }}

@@ -1,0 +1,74 @@
+{{ define "title" }}{{ .BrandName }} Archive{{ end }}
+
+{{ define "subscriptions" }}{{ end }}
+{{ define "search" }}{{ template "searchbox" dict "Root" "" "Query" "" }}{{ end }}
+
+{{ template "base" . }}
+
+{{ define "content" }}
+<div id="archive-hub">
+	<h1>Archived Subreddits</h1>
+	<div id="archive-sub-list">
+	{{ if eq (len .Subs) 0 }}
+		<p class="archive-empty">No archived subreddits yet.</p>
+	{{ else }}
+		{{ range .Subs }}
+		<a class="archive-sub-card" href="/archive/r/{{ .Name }}">
+			<div class="archive-sub-icon">
+				{{ if .IconURL }}
+				<img src="/proxy/media?url={{ .IconURL }}" alt="r/{{ .Name }}" width="40" height="40" loading="lazy">
+				{{ else }}
+				<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>
+				{{ end }}
+			</div>
+			<div class="archive-sub-info">
+				<span class="archive-sub-name">r/{{ .Name }}</span>
+				<span class="archive-sub-count">{{ .PostCount }} posts</span>
+			</div>
+		</a>
+		{{ end }}
+	{{ end }}
+	</div>
+	{{ if .HasMore }}
+	<div id="archive-load-more" data-offset="{{ .Offset }}">
+		<button onclick="loadMoreArchiveSubs()">Load more</button>
+	</div>
+	{{ end }}
+</div>
+<script>
+var archiveOffset = {{ .Offset }};
+function loadMoreArchiveSubs() {
+	var btn = document.querySelector('#archive-load-more button');
+	btn.textContent = 'Loading...';
+	btn.disabled = true;
+	fetch('/archive?offset=' + archiveOffset + '&format=json')
+		.then(function(r) { return r.json(); })
+		.then(function(data) {
+			var list = document.getElementById('archive-sub-list');
+			data.subs.forEach(function(s) {
+				var a = document.createElement('a');
+				a.className = 'archive-sub-card';
+				a.href = '/archive/r/' + s.name;
+				var iconHTML;
+				if (s.icon_url) {
+					iconHTML = '<img src="/proxy/media?url=' + encodeURIComponent(s.icon_url) + '" alt="r/' + s.name + '" width="40" height="40" loading="lazy">';
+				} else {
+					iconHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>';
+				}
+				a.innerHTML = '<div class="archive-sub-icon">' + iconHTML + '</div>' +
+					'<div class="archive-sub-info"><span class="archive-sub-name">r/' + s.name + '</span>' +
+					'<span class="archive-sub-count">' + s.post_count + ' posts</span></div>';
+				list.appendChild(a);
+			});
+			archiveOffset = data.offset;
+			if (!data.has_more) {
+				document.getElementById('archive-load-more').remove();
+			} else {
+				btn.textContent = 'Load more';
+				btn.disabled = false;
+				document.getElementById('archive-load-more').dataset.offset = data.offset;
+			}
+		});
+}
+</script>
+{{ end }}

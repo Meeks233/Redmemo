@@ -28,6 +28,7 @@ type TokenResult struct {
 	AccessToken string
 	ExpiresIn   int64
 	Headers     map[string]string
+	Identity    SpoofIdentity
 }
 
 type Client struct {
@@ -137,6 +138,7 @@ func (c *Client) mobileSpoofAuth() (*TokenResult, error) {
 		AccessToken: parsed.AccessToken,
 		ExpiresIn:   parsed.ExpiresIn,
 		Headers:     headers,
+		Identity:    identity,
 	}, nil
 }
 
@@ -193,10 +195,13 @@ func (c *Client) genericWebAuth() (*TokenResult, error) {
 		headers["x-reddit-session"] = v
 	}
 
+	identity := GenerateWebIdentity(deviceID)
+
 	return &TokenResult{
 		AccessToken: parsed.AccessToken,
 		ExpiresIn:   parsed.ExpiresIn,
 		Headers:     headers,
+		Identity:    identity,
 	}, nil
 }
 
@@ -243,11 +248,17 @@ func (c *Client) passwordAuth(cfg config.OAuthTokenConfig) (*TokenResult, error)
 		return nil, fmt.Errorf("password auth: empty access_token in response: %s", truncate(data, 200))
 	}
 
+	ua := fmt.Sprintf("RedMemo:redmemo:v1.0.0 (by /u/%s)", cfg.Username)
 	return &TokenResult{
 		AccessToken: parsed.AccessToken,
 		ExpiresIn:   parsed.ExpiresIn,
 		Headers: map[string]string{
-			"User-Agent": fmt.Sprintf("RedMemo:redmemo:v1.0.0 (by /u/%s)", cfg.Username),
+			"User-Agent": ua,
+		},
+		Identity: SpoofIdentity{
+			UserAgent: ua,
+			DeviceID:  "",
+			Headers:   map[string]string{"User-Agent": ua},
 		},
 	}, nil
 }

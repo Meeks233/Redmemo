@@ -38,7 +38,8 @@ var pageTemplates = map[string]string{
 	"search.html":    "templates/search.html",
 	"user.html":      "templates/user.html",
 	"settings.html":  "templates/settings.html",
-	"archive.html":   "templates/archive.html",
+	"archive.html":      "templates/archive.html",
+	"archive_hub.html": "templates/archive_hub.html",
 	"error.html":     "templates/error.html",
 }
 
@@ -130,14 +131,28 @@ type SettingsPageData struct {
 	SelectedCounts map[string]int
 }
 
+type ArchiveHubEntry struct {
+	Name      string
+	PostCount int64
+	IconURL   string
+}
+
+type ArchiveHubPageData struct {
+	BasePage
+	Subs    []ArchiveHubEntry
+	Offset  int
+	HasMore bool
+}
+
 type ArchivePageData struct {
 	BasePage
-	Sub        string
-	Posts      []reddit.Post
-	TotalPosts int64
-	Page       int
-	TotalPages int
-	HasPrev    bool
+	Sub                string
+	Posts              []reddit.Post
+	TotalPosts         int64
+	Page               int
+	TotalPages         int
+	AllPostsHiddenNSFW bool
+	HasPrev            bool
 	HasNext    bool
 }
 
@@ -148,6 +163,7 @@ type TokenView struct {
 	RateRemaining int
 	RateReset     string // relative: "in 5m30s" or "expired"
 	HasBudget     bool
+	UserAgent     string
 }
 
 type PrefetchEventView struct {
@@ -166,12 +182,8 @@ type ErrorPageData struct {
 	TokenBudget    int
 	ResetSeconds   int
 	WindowSeconds  int
-	IsCountdown    bool
 	IsDebug        bool
 	Tokens         []TokenView
-	UAList         []string
-	UACurrentIndex int
-	UAFetchedAt    string
 	PrefetchEvents []PrefetchEventView
 }
 
@@ -242,6 +254,13 @@ func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 	return e.renderPage(w, "user.html", data)
 }
 
+func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
+	if data.BrandName == "" {
+		data.BrandName = e.cfg.BrandName
+	}
+	return e.renderPage(w, "archive_hub.html", data)
+}
+
 func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
@@ -260,9 +279,6 @@ type DebugData struct {
 	Details        []string
 	TokenBudget    int
 	Tokens         []TokenView
-	UAList         []string
-	UACurrentIndex int
-	UAFetchedAt    string
 	PrefetchEvents []PrefetchEventView
 }
 
@@ -275,22 +291,7 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
 		TokenBudget:    d.TokenBudget,
 		IsDebug:        true,
 		Tokens:         d.Tokens,
-		UAList:         d.UAList,
-		UACurrentIndex: d.UACurrentIndex,
-		UAFetchedAt:    d.UAFetchedAt,
 		PrefetchEvents: d.PrefetchEvents,
-	}
-	e.renderPage(w, "error.html", data)
-}
-
-func (e *Engine) RenderCountdown(w io.Writer, prefs reddit.Preferences, remaining int, resetSeconds int, windowSeconds int) {
-	data := ErrorPageData{
-		BasePage:      e.basePage("", prefs),
-		StatusCode:    200,
-		TokenBudget:   remaining,
-		ResetSeconds:  resetSeconds,
-		WindowSeconds: windowSeconds,
-		IsCountdown:   true,
 	}
 	e.renderPage(w, "error.html", data)
 }

@@ -121,14 +121,6 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"remaining":%d,"reset":%d,"window":%d}`, budget, reset, window)
 }
 
-func (h *Handler) handleCountdown(w http.ResponseWriter, r *http.Request) {
-	prefs := h.readPreferences(r)
-	budget, _ := h.oauthPool.RemainingBudget(r.Context())
-	reset, window := h.oauthPool.EarliestReset()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	h.renderer.RenderCountdown(w, prefs, budget, reset, window)
-}
-
 func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 	if prefs.EnableDebug != "on" {
@@ -161,6 +153,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			RateRemaining: ts.RateRemaining,
 			RateReset:     resetStr,
 			HasBudget:     ts.RateRemaining > 0,
+			UserAgent:     ts.UserAgent,
 		}
 	}
 
@@ -206,26 +199,6 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		TokenBudget:    budget,
 		Tokens:         tokenViews,
 		PrefetchEvents: prefetchEvents,
-	}
-
-	if h.uaPool != nil {
-		dd.UAList = h.uaPool.List()
-		currentUA := h.uaPool.Get()
-		for i, ua := range dd.UAList {
-			if ua == currentUA {
-				dd.UACurrentIndex = i
-				break
-			}
-		}
-		if h.settingsStore != nil {
-			if ts, ok, _ := h.settingsStore.Get("_ua_pool_fetched_at"); ok && ts != "" {
-				if t, err := time.Parse(time.RFC3339, ts); err == nil {
-					dd.UAFetchedAt = formatDuration(time.Since(t)) + " ago"
-				} else {
-					dd.UAFetchedAt = ts
-				}
-			}
-		}
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

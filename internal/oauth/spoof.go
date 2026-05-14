@@ -44,6 +44,28 @@ func GenerateIdentity() SpoofIdentity {
 	}
 }
 
+var webUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0",
+	"Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+}
+
+func GenerateWebIdentity(deviceID string) SpoofIdentity {
+	ua := webUserAgents[rand.IntN(len(webUserAgents))]
+	return SpoofIdentity{
+		UserAgent: ua,
+		DeviceID:  deviceID,
+		Headers: map[string]string{
+			"User-Agent": ua,
+		},
+	}
+}
+
 var androidAppVersions = []string{
 	"Version 2024.22.1/Build 1652272",
 	"Version 2024.23.1/Build 1665606",

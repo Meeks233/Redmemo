@@ -9,7 +9,7 @@
 <main>
 <div id="column_one">
 	<div id="sort_options" style="display:flex;align-items:center;gap:0.5em;padding:0.5em 0;">
-		<a href="/settings">&larr; Settings</a>
+		<a href="/archive">&larr; Archive</a>
 		<span style="opacity:0.5;">|</span>
 		<strong>r/{{ .Sub }}</strong>
 		<span style="opacity:0.5;">&mdash; {{ .TotalPosts }} archived posts</span>
@@ -19,11 +19,19 @@
 	<center style="padding:2em;">No archived posts for this subreddit.</center>
 	{{ else }}
 	<div id="posts">
+	{{ if .AllPostsHiddenNSFW }}
+	<div class="archive-nsfw-notice">
+		<p class="nsfw-notice-title">NSFW filter is on</p>
+		<p>There are posts here, but they are all hidden by your NSFW filter.</p>
+		<p>Go to <a href="/settings">Settings</a> and enable "Show NSFW posts" to view them.</p>
+	</div>
+	{{ else }}
 	{{ range .Posts }}
 		{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on")) }}
 		<hr class="sep" />
 		{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
 		{{ end }}
+	{{ end }}
 	{{ end }}
 	{{ if eq .Prefs.UseHLS "on" }}
 	<script src="/hls.min.js"></script>

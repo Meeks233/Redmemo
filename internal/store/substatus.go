@@ -110,6 +110,37 @@ func (s *SubStatusStore) ListLive() ([]string, error) {
 	return names, rows.Err()
 }
 
+// ListAllAlive returns all locally known subs that are not dead/private/quarantined,
+// by unioning subreddit_status (live/unknown), posts (distinct), and prefetch_config,
+// then excluding dead entries from subreddit_status.
+func (s *SubStatusStore) ListAllAlive() ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT name FROM (
+			SELECT name FROM subreddit_status WHERE status IN ('live', 'quarantined')
+			UNION
+			SELECT DISTINCT subreddit AS name FROM posts
+			UNION
+			SELECT subreddit AS name FROM prefetch_config WHERE enabled = true
+		) AS all_subs
+		WHERE name NOT IN (
+			SELECT name FROM subreddit_status WHERE status IN ('dead', 'private', 'unknown')
+		)
+		ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list all alive subs: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
 func (s *SubStatusStore) ShouldRecheck(name string, interval time.Duration) (bool, error) {
 	st, err := s.Get(name)
 	if err != nil {

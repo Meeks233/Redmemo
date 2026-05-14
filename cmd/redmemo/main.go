@@ -58,6 +58,7 @@ func main() {
 	mediaIndexStore := store.NewMediaIndexStore(db)
 	tokenStore := store.NewTokenStore(db)
 	subStore := store.NewSubredditStore(db)
+	subIconStore := store.NewSubIconStore(db)
 	settingsStore := store.NewSettingsStore(db)
 
 	// 5. Rebuild site_settings on every startup
@@ -127,6 +128,7 @@ func main() {
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
 		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,
+		subIconStore,
 	)
 
 	// 11. Start background tasks
@@ -141,7 +143,7 @@ func main() {
 	h := handler.New(
 		rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
-		mediaProxy, archiver, prefetcher, subStatusStore, uaPool, cfg,
+		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, uaPool, cfg,
 	)
 
 	srv := &http.Server{
