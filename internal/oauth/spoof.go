@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 
 	"github.com/google/uuid"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type SpoofIdentity struct {
@@ -55,8 +56,14 @@ var webUserAgents = []string{
 	"Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
 }
 
-func GenerateWebIdentity(deviceID string) SpoofIdentity {
-	ua := webUserAgents[rand.IntN(len(webUserAgents))]
+func GenerateWebIdentity(uaPool *useragent.Pool) SpoofIdentity {
+	deviceID := uuid.New().String()
+	var ua string
+	if uaPool != nil && uaPool.Size() > 0 {
+		ua = uaPool.Get()
+	} else {
+		ua = webUserAgents[rand.IntN(len(webUserAgents))]
+	}
 	return SpoofIdentity{
 		UserAgent: ua,
 		DeviceID:  deviceID,

@@ -43,11 +43,70 @@
 							<span class="token-kind">{{ .Kind }}</span>
 							<span class="token-remaining">{{ .RateRemaining }} left</span>
 							<span class="token-reset">{{ .RateReset }}</span>
+							{{ if .ExpiresIn }}<span class="token-expires">expires {{ .ExpiresIn }}</span>{{ end }}
 						</div>
-						{{ if .UserAgent }}<div class="token-ua">{{ .UserAgent }}</div>{{ end }}
+						{{ if .UserAgent }}<div class="token-ua">UA: {{ .UserAgent }}</div>{{ end }}
+						{{ if .DeviceID }}<div class="token-ua">Device: {{ .DeviceID }}</div>{{ end }}
+						{{ if .Loid }}<div class="token-ua">LOID: {{ .Loid }}</div>{{ end }}
+						{{ if .Session }}<div class="token-ua">Session: {{ .Session }}</div>{{ end }}
 					</li>
 				{{ end }}
 				</ul>
+			</div>
+			{{ end }}
+			{{ if .IsDebug }}
+			<div class="error-diagnostics prefetch-status-section">
+				<h4>Prefetch Status</h4>
+				<table class="prefetch-status-table">
+					<tr>
+						<td class="ps-label">NP Enabled</td>
+						<td>{{ if .PrefetchStatus.Enabled }}<span class="ps-on">ON</span>{{ else }}<span class="ps-off">OFF</span>{{ end }}</td>
+					</tr>
+					{{ if .PrefetchStatus.ActiveSubs }}
+					<tr>
+						<td class="ps-label">Active Subs</td>
+						<td>{{ .PrefetchStatus.ActiveSubs }}</td>
+					</tr>
+					{{ end }}
+					<tr>
+						<td class="ps-label">NP Dispatch</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.NPPhase "—" }}</span>{{ if .PrefetchStatus.NPCurrent }} · {{ .PrefetchStatus.NPCurrent }}{{ end }} {{ if .PrefetchStatus.QueueLen }}({{ .PrefetchStatus.QueueLen }} queued){{ end }}</td>
+					</tr>
+					<tr><td colspan="2" class="ps-divider">L1 — Listing Fetch</td></tr>
+					<tr>
+						<td class="ps-label">Phase</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.L1Phase "—" }}</span></td>
+					</tr>
+					{{ if .PrefetchStatus.L1Progress }}
+					<tr>
+						<td class="ps-label">Round</td>
+						<td>{{ .PrefetchStatus.L1Progress }}</td>
+					</tr>
+					{{ end }}
+					{{ if .PrefetchStatus.L1Subs }}
+					<tr>
+						<td class="ps-label">Subs</td>
+						<td>{{ .PrefetchStatus.L1Subs }}</td>
+					</tr>
+					{{ end }}
+					{{ if .PrefetchStatus.L1Cursors }}
+					<tr>
+						<td class="ps-label">Cursors</td>
+						<td>{{ range .PrefetchStatus.L1Cursors }}<span class="ps-cursor">r/{{ .Sub }}: <code>{{ .Cursor }}</code></span> {{ end }}</td>
+					</tr>
+					{{ end }}
+					{{ if .PrefetchStatus.L1NextCycle }}
+					<tr>
+						<td class="ps-label">Next Cycle</td>
+						<td>{{ .PrefetchStatus.L1NextCycle }}</td>
+					</tr>
+					{{ end }}
+					<tr><td colspan="2" class="ps-divider">L2 — Media Download</td></tr>
+					<tr>
+						<td class="ps-label">Phase</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.L2Phase "—" }}</span>{{ if .PrefetchStatus.L2Sub }} · r/{{ .PrefetchStatus.L2Sub }}{{ end }}{{ if .PrefetchStatus.L2Pending }} ({{ .PrefetchStatus.L2Pending }} pending){{ end }}</td>
+					</tr>
+				</table>
 			</div>
 			{{ end }}
 			{{ if .PrefetchEvents }}

@@ -113,6 +113,12 @@ func (h *Handler) handleWiki(w http.ResponseWriter, r *http.Request) {
 	h.renderer.RenderError(w, "Wiki page is currently unavailable", http.StatusServiceUnavailable)
 }
 
+func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
+	prefs := h.readPreferences(r)
+	reset, _ := h.oauthPool.EarliestReset()
+	h.renderer.RenderFuckReddit(w, prefs, reset)
+}
+
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	budget, _ := h.oauthPool.RemainingBudget(r.Context())
 	reset, window := h.oauthPool.EarliestReset()
@@ -146,6 +152,14 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		} else {
 			resetStr = "available"
 		}
+		var expiresIn string
+		if ts.ExpiresAt != nil {
+			if d := time.Until(*ts.ExpiresAt); d > 0 {
+				expiresIn = "in " + formatDuration(d)
+			} else {
+				expiresIn = "expired"
+			}
+		}
 		tokenViews[i] = render.TokenView{
 			Index:         i,
 			Backend:       ts.Backend,
@@ -154,6 +168,10 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			RateReset:     resetStr,
 			HasBudget:     ts.RateRemaining > 0,
 			UserAgent:     ts.UserAgent,
+			DeviceID:      ts.DeviceID,
+			Loid:          ts.Loid,
+			Session:       ts.Session,
+			ExpiresIn:     expiresIn,
 		}
 	}
 
@@ -170,7 +188,11 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	// Config
 	details = append(details, fmt.Sprintf("Listen: %s", h.cfg.Server.Listen))
 	details = append(details, fmt.Sprintf("Brand: %s", h.cfg.Render.BrandName))
-	details = append(details, fmt.Sprintf("Prefetch enabled: %v (%d subs)", h.cfg.Prefetch.Enabled, len(h.cfg.Prefetch.Subreddits)))
+	var subNames []string
+	for _, s := range h.cfg.Prefetch.Subreddits {
+		subNames = append(subNames, s.Name)
+	}
+	details = append(details, fmt.Sprintf("Prefetch enabled: %v (%d subs: %s)", h.cfg.Prefetch.Enabled, len(h.cfg.Prefetch.Subreddits), strings.Join(subNames, ", ")))
 	details = append(details, fmt.Sprintf("Media cap: %d GB", h.cfg.Media.MaxSizeGB))
 
 	// Redis
@@ -180,6 +202,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	budget, _ := h.oauthPool.RemainingBudget(r.Context())
 
 	var prefetchEvents []render.PrefetchEventView
+	var prefetchStatus render.PrefetchStatusView
 	if h.prefetcher != nil {
 		events := h.prefetcher.Events.Snapshot()
 		for i := len(events) - 1; i >= 0; i-- {
@@ -192,12 +215,38 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 				Message:      e.Message,
 			})
 		}
+
+		ps := h.prefetcher.Status()
+		var cursors []render.PrefetchCursorView
+		for sub, cursor := range ps.L1Cursors {
+			cursors = append(cursors, render.PrefetchCursorView{Sub: sub, Cursor: cursor})
+		}
+		var l1Progress string
+		if ps.L1MaxRounds > 0 {
+			l1Progress = fmt.Sprintf("%d / %d", ps.L1Round, ps.L1MaxRounds)
+		}
+		prefetchStatus = render.PrefetchStatusView{
+			Enabled:     ps.Enabled,
+			ActiveSubs:  strings.Join(ps.ActiveSubs, ", "),
+			L1Phase:     ps.L1Phase,
+			L1Progress:  l1Progress,
+			L1Subs:      strings.Join(ps.L1Subs, ", "),
+			L1Cursors:   cursors,
+			L1NextCycle: ps.L1NextCycle,
+			L2Phase:     ps.L2Phase,
+			L2Sub:       ps.L2Sub,
+			L2Pending:   ps.L2Pending,
+			NPPhase:     ps.NPPhase,
+			NPCurrent:   ps.NPCurrent,
+			QueueLen:    ps.QueueLen,
+		}
 	}
 
 	dd := render.DebugData{
 		Details:        details,
 		TokenBudget:    budget,
 		Tokens:         tokenViews,
+		PrefetchStatus: prefetchStatus,
 		PrefetchEvents: prefetchEvents,
 	}
 

@@ -31,6 +31,7 @@
 {{ template "base" . }}
 
 {{ define "content" }}
+	{{ template "offline_banner" . }}
 	<div id="column_one">
 		<div id="post_actions">
 			{{ if .HasOAuth }}

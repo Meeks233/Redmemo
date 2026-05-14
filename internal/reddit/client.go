@@ -31,6 +31,7 @@ var (
 type TokenProvider interface {
 	GetBestToken() *TokenInfo
 	OnRequestComplete(tokenID int, resp *http.Response)
+	NotifyUnauthorized()
 }
 
 // TokenInfo holds the info needed to make an authenticated request.
@@ -264,6 +265,11 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 	}
 
 	// Handle errors
+	if resp.StatusCode == 401 {
+		c.pool.NotifyUnauthorized()
+		return nil, resp, ErrUnauthorized
+	}
+
 	if resp.StatusCode == 429 || (resp.StatusCode == 403 && resp.Header.Get("Retry-After") != "") {
 		return nil, resp, ErrRateLimited
 	}

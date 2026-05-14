@@ -1,3 +1,13 @@
+{{/* Offline archive banner */}}
+{{ define "offline_banner" }}
+{{ if .IsOffline }}
+<div class="offline-banner">
+	<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+	<span>You are viewing a local offline backup. Live data is currently unavailable.</span>
+</div>
+{{ end }}
+{{ end }}
+
 {{/* Visit Reddit confirmation modal overlay */}}
 {{ define "visit_reddit_confirmation" }}
 <div class="modal-overlay" id="reddit-modal" onclick="if(event.target===this)this.classList.remove('visible')">
@@ -120,14 +130,14 @@
 		{{ else if or (eq $post.PostType "gif") (eq $post.PostType "video") }}
 			{{ if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 			<div class="post_media_content">
-				<video class="post_media_video short{{ if eq $prefs.AutoplayVideos "on" }} hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" controls preload="metadata">
+				<video class="post_media_video short" {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" controls preload="metadata">
 					<source src="{{ $post.Media.AltURL }}" type="application/vnd.apple.mpegurl" />
 					<source src="{{ $post.Media.URL }}" type="video/mp4" />
 				</video>
 			</div>
 			{{ else }}
 			<div class="post_media_content">
-				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls {{ if eq $prefs.AutoplayVideos "on" }}autoplay{{ end }}><a href="{{ $post.Media.URL }}">Video</a></video>
+				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }}><a href="{{ $post.Media.URL }}">Video</a></video>
 			</div>
 			{{ end }}
 		{{ end }}
@@ -222,7 +232,7 @@
 		{{ if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 		<script src="/hls.min.js"></script>
 		<div class="post_media_content">
-			<video class="post_media_video short {{ if eq $prefs.AutoplayVideos "on" }}hls_autoplay{{ end }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls>
+			<video class="post_media_video short" {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls>
 				<source src="{{ $post.Media.AltURL }}" type="application/vnd.apple.mpegurl" />
 				<source src="{{ $post.Media.URL }}" type="video/mp4" />
 			</video>
@@ -230,7 +240,7 @@
 		<script src="/playHLSVideo.js"></script>
 		{{ else }}
 		<div class="post_media_content">
-			<video class="post_media_video" src="{{ $post.Media.URL }}" controls {{ if eq $prefs.AutoplayVideos "on" }}autoplay{{ end }} loop><a href="{{ $post.Media.URL }}">Video</a></video>
+			<video class="post_media_video" src="{{ $post.Media.URL }}" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} loop><a href="{{ $post.Media.URL }}">Video</a></video>
 		</div>
 		{{ end }}
 	{{ else if eq $post.PostType "gallery" }}

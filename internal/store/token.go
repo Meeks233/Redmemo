@@ -17,14 +17,14 @@ func (s *TokenStore) GetBestToken() (*StoredToken, error) {
 	t := &StoredToken{}
 	err := s.db.QueryRow(`
 		SELECT id, client_id, client_secret, access_token, expires_at,
-		       rate_remaining, rate_reset_at, backend, enabled, last_used, created_at
+		       rate_remaining, rate_reset_at, backend, enabled, last_used, created_at, headers_json
 		FROM oauth_tokens
 		WHERE enabled = TRUE
 		ORDER BY rate_remaining DESC NULLS LAST
 		LIMIT 1`,
 	).Scan(
 		&t.ID, &t.ClientID, &t.ClientSecret, &t.AccessToken, &t.ExpiresAt,
-		&t.RateRemaining, &t.RateResetAt, &t.Backend, &t.Enabled, &t.LastUsed, &t.CreatedAt,
+		&t.RateRemaining, &t.RateResetAt, &t.Backend, &t.Enabled, &t.LastUsed, &t.CreatedAt, &t.HeadersJSON,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -42,10 +42,11 @@ func (s *TokenStore) UpdateToken(token *StoredToken) error {
 			expires_at     = $3,
 			rate_remaining = $4,
 			rate_reset_at  = $5,
-			last_used      = $6
+			last_used      = $6,
+			headers_json   = $7
 		WHERE id = $1`,
 		token.ID, token.AccessToken, token.ExpiresAt,
-		token.RateRemaining, token.RateResetAt, token.LastUsed,
+		token.RateRemaining, token.RateResetAt, token.LastUsed, token.HeadersJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("update token: %w", err)
@@ -56,7 +57,7 @@ func (s *TokenStore) UpdateToken(token *StoredToken) error {
 func (s *TokenStore) ListEnabled() ([]*StoredToken, error) {
 	rows, err := s.db.Query(`
 		SELECT id, client_id, client_secret, access_token, expires_at,
-		       rate_remaining, rate_reset_at, backend, enabled, last_used, created_at
+		       rate_remaining, rate_reset_at, backend, enabled, last_used, created_at, headers_json
 		FROM oauth_tokens
 		WHERE enabled = TRUE
 		ORDER BY rate_remaining DESC NULLS LAST`)
@@ -70,8 +71,8 @@ func (s *TokenStore) ListEnabled() ([]*StoredToken, error) {
 func (s *TokenStore) Upsert(token *StoredToken) error {
 	_, err := s.db.Exec(`
 		INSERT INTO oauth_tokens (client_id, client_secret, access_token, expires_at,
-		                          rate_remaining, rate_reset_at, backend, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		                          rate_remaining, rate_reset_at, backend, enabled, headers_json)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO UPDATE SET
 			client_id      = EXCLUDED.client_id,
 			client_secret  = EXCLUDED.client_secret,
@@ -80,9 +81,10 @@ func (s *TokenStore) Upsert(token *StoredToken) error {
 			rate_remaining = EXCLUDED.rate_remaining,
 			rate_reset_at  = EXCLUDED.rate_reset_at,
 			backend        = EXCLUDED.backend,
-			enabled        = EXCLUDED.enabled`,
+			enabled        = EXCLUDED.enabled,
+			headers_json   = EXCLUDED.headers_json`,
 		token.ClientID, token.ClientSecret, token.AccessToken, token.ExpiresAt,
-		token.RateRemaining, token.RateResetAt, token.Backend, token.Enabled,
+		token.RateRemaining, token.RateResetAt, token.Backend, token.Enabled, token.HeadersJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert token: %w", err)
@@ -121,7 +123,7 @@ func scanTokens(rows *sql.Rows) ([]*StoredToken, error) {
 		t := &StoredToken{}
 		if err := rows.Scan(
 			&t.ID, &t.ClientID, &t.ClientSecret, &t.AccessToken, &t.ExpiresAt,
-			&t.RateRemaining, &t.RateResetAt, &t.Backend, &t.Enabled, &t.LastUsed, &t.CreatedAt,
+			&t.RateRemaining, &t.RateResetAt, &t.Backend, &t.Enabled, &t.LastUsed, &t.CreatedAt, &t.HeadersJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan token: %w", err)
 		}

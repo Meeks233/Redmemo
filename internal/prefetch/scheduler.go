@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -76,6 +77,20 @@ type Scheduler struct {
 
 	queue       chan *workItem
 	lastUserReq atomic.Int64
+
+	// Observable state for debug page
+	statusMu    sync.RWMutex
+	l1Phase     string
+	l1Round     int
+	l1MaxRounds int
+	l1Subs      []string
+	l1Cursors   map[string]string
+	l1NextCycle time.Time
+	l2Phase     string
+	l2Sub       string
+	l2Pending   int
+	npPhase     string
+	npCurrent   string
 }
 
 const (
@@ -170,6 +185,7 @@ func (s *Scheduler) clearCycleState() {
 
 func (s *Scheduler) dispatchLoop(ctx context.Context) {
 	for {
+		s.setNPStatus("idle", "")
 		var item *workItem
 		select {
 		case item = <-s.queue:
@@ -178,6 +194,7 @@ func (s *Scheduler) dispatchLoop(ctx context.Context) {
 		}
 
 		if item.needsBudget {
+			s.setNPStatus("waiting for budget", item.label)
 			if err := s.waitForBudget(ctx); err != nil {
 				close(item.done)
 				return
@@ -185,18 +202,22 @@ func (s *Scheduler) dispatchLoop(ctx context.Context) {
 		}
 
 		if s.userRequestedRecently() {
-			s.Events.Addf(LevelInfo, "NP", "user active, pausing 30s before: %s", item.label)
-			if err := sleep(ctx, 30*time.Second); err != nil {
+			pause := time.Duration(25+rand.Intn(15)) * time.Second
+			s.setNPStatus("paused (user active)", item.label)
+			s.Events.Addf(LevelInfo, "NP", "user active, pausing %s before: %s", formatDur(pause), item.label)
+			if err := sleep(ctx, pause); err != nil {
 				close(item.done)
 				return
 			}
 		}
 
+		s.setNPStatus("dispatching", item.label)
 		s.Events.Addf(LevelInfo, "NP", "dispatching: %s", item.label)
 		item.fn(ctx)
 		close(item.done)
 
-		delay := time.Duration(1000+rand.Intn(2000)) * time.Millisecond
+		s.setNPStatus("cooldown", "")
+		delay := time.Duration(4000+rand.Intn(4000)) * time.Millisecond
 		if err := sleep(ctx, delay); err != nil {
 			return
 		}
@@ -207,8 +228,9 @@ func (s *Scheduler) waitForBudget(ctx context.Context) error {
 	for {
 		resetAt, capacity, remaining := s.pool.WindowInfo()
 		if capacity == 0 {
-			s.Events.Add(LevelSkip, "NP", "no token capacity, waiting 30s")
-			if err := sleep(ctx, 30*time.Second); err != nil {
+			wait := time.Duration(25+rand.Intn(15)) * time.Second
+			s.Events.Addf(LevelSkip, "NP", "no token capacity, waiting %s", formatDur(wait))
+			if err := sleep(ctx, wait); err != nil {
 				return err
 			}
 			continue
@@ -309,6 +331,7 @@ func (s *Scheduler) waitUntilEnabled(ctx context.Context) error {
 	for {
 		if s.isEnabled() {
 			if subs := s.activeSubs(); len(subs) > 0 {
+				s.setL1Status("ready", 0, 0, subs, nil, time.Time{})
 				return nil
 			}
 			v := ""
@@ -321,6 +344,7 @@ func (s *Scheduler) waitUntilEnabled(ctx context.Context) error {
 			if s.settings != nil {
 				v = s.settings.Get("enable_natural_prefetch")
 			}
+			s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
 			s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q), sleeping 30s", v)
 		}
 		if err := sleep(ctx, 30*time.Second); err != nil {
@@ -374,6 +398,7 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 		log.Printf("natural prefetch L1: big cycle started for [%s], next in %s",
 			strings.Join(subs, ", "), formatDur(cycleWait))
 	}
+	s.setL1Status("running", startRound, maxRoundsPerCycle, subs, cursors, nextCycleAt)
 
 	for round := startRound; round < maxRoundsPerCycle; round++ {
 		if err := ctx.Err(); err != nil {
@@ -458,9 +483,11 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			Round:       round + 1,
 			Cursors:     cursors,
 		})
+		s.setL1Status("running", round+1, maxRoundsPerCycle, subs, cursors, nextCycleAt)
 
 		if round < maxRoundsPerCycle-1 {
 			roundWait := 15*time.Minute + time.Duration(rand.Int63n(int64(15*time.Minute)))
+			s.setL1Status("sleeping between rounds", round+1, maxRoundsPerCycle, subs, cursors, nextCycleAt)
 			s.Events.Addf(LevelInfo, "L1", "round %d/%d complete -- next round in %s",
 				round+1, maxRoundsPerCycle, formatDur(roundWait))
 			log.Printf("natural prefetch L1: round %d/%d complete, next in %s",
@@ -482,6 +509,7 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 	if remaining <= 0 {
 		remaining = 1 * time.Minute
 	}
+	s.setL1Status("sleeping between cycles", maxRoundsPerCycle, maxRoundsPerCycle, subs, nil, nextCycleAt)
 	s.Events.Addf(LevelOK, "L1", "big cycle complete -- sleeping %s until next cycle", formatDur(remaining))
 	log.Printf("natural prefetch L1: big cycle complete, sleeping %s", formatDur(remaining))
 	return sleep(ctx, remaining)
@@ -503,9 +531,11 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 	}
 
 	if len(pending) == 0 {
+		s.setL2Status("idle", sub, 0)
 		return nil
 	}
 
+	s.setL2Status("downloading", sub, len(pending))
 	s.Events.Addf(LevelInfo, "L2", "r/%s: %d posts need media -- submitting to NP queue", sub, len(pending))
 
 	completed := 0
@@ -559,6 +589,7 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 	if completed > 0 {
 		s.Events.Addf(LevelOK, "L2", "r/%s: media complete for %d/%d posts", sub, completed, len(pending))
 	}
+	s.setL2Status("idle", "", 0)
 	return nil
 }
 
@@ -638,6 +669,98 @@ func formatDur(d time.Duration) string {
 		return fmt.Sprintf("%dm%ds", m, sec)
 	}
 	return fmt.Sprintf("%ds", sec)
+}
+
+// ---------------------------------------------------------------------------
+// Observable status for debug page
+// ---------------------------------------------------------------------------
+
+type PrefetchStatus struct {
+	L1Phase     string
+	L1Round     int
+	L1MaxRounds int
+	L1Subs      []string
+	L1Cursors   map[string]string
+	L1NextCycle string
+	L2Phase     string
+	L2Sub       string
+	L2Pending   int
+	NPPhase     string
+	NPCurrent   string
+	QueueLen    int
+	Enabled     bool
+	ActiveSubs  []string
+}
+
+func (s *Scheduler) Status() PrefetchStatus {
+	s.statusMu.RLock()
+	defer s.statusMu.RUnlock()
+
+	cursors := make(map[string]string, len(s.l1Cursors))
+	for k, v := range s.l1Cursors {
+		cursors[k] = v
+	}
+
+	var nextCycle string
+	if !s.l1NextCycle.IsZero() {
+		if d := time.Until(s.l1NextCycle); d > 0 {
+			nextCycle = "in " + formatDur(d)
+		} else {
+			nextCycle = "now"
+		}
+	}
+
+	subs := make([]string, len(s.l1Subs))
+	copy(subs, s.l1Subs)
+
+	return PrefetchStatus{
+		L1Phase:     s.l1Phase,
+		L1Round:     s.l1Round,
+		L1MaxRounds: s.l1MaxRounds,
+		L1Subs:      subs,
+		L1Cursors:   cursors,
+		L1NextCycle: nextCycle,
+		L2Phase:     s.l2Phase,
+		L2Sub:       s.l2Sub,
+		L2Pending:   s.l2Pending,
+		NPPhase:     s.npPhase,
+		NPCurrent:   s.npCurrent,
+		QueueLen:    len(s.queue),
+		Enabled:     s.isEnabled(),
+		ActiveSubs:  s.activeSubs(),
+	}
+}
+
+func (s *Scheduler) setL1Status(phase string, round, maxRounds int, subs []string, cursors map[string]string, nextCycle time.Time) {
+	s.statusMu.Lock()
+	s.l1Phase = phase
+	s.l1Round = round
+	s.l1MaxRounds = maxRounds
+	s.l1Subs = subs
+	if cursors != nil {
+		c := make(map[string]string, len(cursors))
+		for k, v := range cursors {
+			c[k] = v
+		}
+		s.l1Cursors = c
+	}
+	s.l1NextCycle = nextCycle
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) setL2Status(phase, sub string, pending int) {
+	s.statusMu.Lock()
+	s.l2Phase = phase
+	s.l2Sub = sub
+	s.l2Pending = pending
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) setNPStatus(phase, current string) {
+	s.statusMu.Lock()
+	s.npPhase = phase
+	s.npCurrent = current
+	s.statusMu.Unlock()
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

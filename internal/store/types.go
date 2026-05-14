@@ -48,6 +48,7 @@ type StoredToken struct {
 	Enabled       bool
 	LastUsed      *time.Time
 	CreatedAt     time.Time
+	HeadersJSON   *string
 }
 
 type StoredSubreddit struct {

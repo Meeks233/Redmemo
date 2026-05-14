@@ -18,7 +18,7 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	after := r.URL.Query().Get("after")
 	urlPath := r.URL.Path
 
-	// Level 1: Cache
+	// 1. Cache
 	cacheKey := urlPath + "?" + r.URL.RawQuery
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
 		w.Header().Set("X-Cache", "HIT")
@@ -26,38 +26,16 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		w.Write(cached)
 		return
 	}
-	var diag []string
-	diag = append(diag, "L1 Cache: MISS")
 
-	// Level 2: Own OAuth (if tokens available, prioritize over redlib)
-	triedOAuth := false
+	// 2. OAuth fetch
 	if h.oauthPool.HasAvailableTokens() {
-		triedOAuth = true
 		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
 			return
 		}
-		diag = append(diag, "L2 OAuth: fetch failed")
-	} else {
-		diag = append(diag, "L2 OAuth: no tokens available")
 	}
 
-	// Level 3: Own OAuth fallback (if not tried above)
-	if !triedOAuth {
-		if !h.ratelimit.CanRequestFallback(r.Context()) {
-			diag = append(diag, "L3 OAuth fallback: rate limited locally")
-		} else if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
-			return
-		} else {
-			diag = append(diag, "L3 OAuth fallback: fetch failed")
-		}
-	} else {
-		diag = append(diag, "L3 OAuth fallback: skipped (already tried at L2)")
-	}
-
-	// Level 4: Error + background spawn
-	go h.oauthPool.SpawnTokenIfNeeded(context.Background())
-	log.Printf("handler: all levels failed for /user/%s: %v", name, diag)
-	h.renderer.RenderError(w, "所有上游均已限流，请稍后再试", http.StatusTooManyRequests, diag...)
+	// 3. No archive for users — redirect
+	http.Redirect(w, r, "/fuckreddit", http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {

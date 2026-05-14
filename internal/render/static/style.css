@@ -2320,6 +2320,11 @@ th {
     opacity: 0.7;
 }
 
+#error .token-expires {
+    opacity: 0.7;
+    font-style: italic;
+}
+
 #error .token-ua {
     font-family: monospace;
     font-size: 0.8em;
@@ -2327,6 +2332,63 @@ th {
     word-break: break-all;
     padding-left: 2em;
     margin-top: 2px;
+}
+
+/* Prefetch Status */
+#error .prefetch-status-section {
+    margin-top: 1.5em;
+}
+
+#error .prefetch-status-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+#error .prefetch-status-table td {
+    padding: 3px 8px;
+    vertical-align: top;
+}
+
+#error .ps-label {
+    width: 120px;
+    opacity: 0.6;
+    white-space: nowrap;
+}
+
+#error .ps-divider {
+    font-weight: bold;
+    padding-top: 10px;
+    opacity: 0.8;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#error .ps-phase {
+    font-family: monospace;
+    font-weight: bold;
+}
+
+#error .ps-on {
+    color: #22c55e;
+    font-weight: bold;
+}
+
+#error .ps-off {
+    color: #ef4444;
+    font-weight: bold;
+}
+
+#error .ps-cursor {
+    display: inline-block;
+    margin-right: 1em;
+    font-size: 0.85em;
+}
+
+#error .ps-cursor code {
+    font-size: 0.9em;
+    opacity: 0.7;
 }
 
 /* Prefetch Event Log */
@@ -2735,6 +2797,26 @@ th {
 }
 
 /* Debug warning banner */
+.offline-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    background: #3b82f622;
+    border: 1px solid #3b82f688;
+    border-radius: 6px;
+    color: var(--text);
+    font-weight: 500;
+    font-size: 0.95em;
+}
+
+.offline-banner svg {
+    flex-shrink: 0;
+    color: #60a5fa;
+}
+
 .debug-banner {
     display: flex;
     align-items: center;

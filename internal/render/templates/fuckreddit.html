@@ -1,0 +1,22 @@
+{{ define "title" }}Unavailable — {{ .BrandName }}{{ end }}
+
+{{ template "base" . }}
+
+{{ define "content" }}
+<div id="error">
+	<div class="prefs">
+		<fieldset>
+			<legend>All sources exhausted</legend>
+			<div class="error-icon">
+				<svg class="heart-broken" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+					<path class="heart-shape" d="M19 14.828L13.405 20.422a2.032 2.032 0 0 1-2.81 0L4.998 14.818a5.523 5.523 0 0 1-.735-6.565A5.477 5.477 0 0 1 12 5.052a5.477 5.477 0 0 1 7.737 3.2 5.523 5.523 0 0 1-.737 6.576" stroke="#ef4444" fill="rgba(239,68,68,0.15)"/>
+					<path class="slash-line" d="m2 2 20 20" stroke="#ef4444"/>
+				</svg>
+			</div>
+			<p>This content is not available right now. Reddit API quota has been exhausted and no local archive copy exists for the page you requested.</p>
+			{{ if .ResetSeconds }}<p>Quota resets in approximately <strong>{{ .ResetSeconds }}</strong> seconds.</p>{{ end }}
+			<p><a href="/">Return to front page</a></p>
+		</fieldset>
+	</div>
+</div>
+{{ end }}

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/transport"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 const (
@@ -33,11 +33,13 @@ type TokenResult struct {
 
 type Client struct {
 	httpClient *http.Client
+	uaPool     *useragent.Pool
 }
 
-func NewClient() *Client {
+func NewClient(uaPool *useragent.Pool) *Client {
 	return &Client{
 		httpClient: transport.NewSpoofedClient(authTimeout),
+		uaPool:     uaPool,
 	}
 }
 
@@ -143,9 +145,9 @@ func (c *Client) mobileSpoofAuth() (*TokenResult, error) {
 }
 
 func (c *Client) genericWebAuth() (*TokenResult, error) {
-	deviceID := uuid.New().String()
+	identity := GenerateWebIdentity(c.uaPool)
 
-	formBody := "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + deviceID
+	formBody := "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + identity.DeviceID
 	req, err := http.NewRequest("POST", genericEndpoint, strings.NewReader(formBody))
 	if err != nil {
 		return nil, err
@@ -194,8 +196,6 @@ func (c *Client) genericWebAuth() (*TokenResult, error) {
 	if v := resp.Header.Get("x-reddit-session"); v != "" {
 		headers["x-reddit-session"] = v
 	}
-
-	identity := GenerateWebIdentity(deviceID)
 
 	return &TokenResult{
 		AccessToken: parsed.AccessToken,

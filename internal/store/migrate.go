@@ -135,6 +135,9 @@ var migrations = []string{
 	// v8: re-fetch icons that were stored as local proxy paths instead of raw CDN URLs
 	`UPDATE sub_icons SET expires_at = NOW() - INTERVAL '1 second'
 	 WHERE icon_url NOT LIKE 'http%' AND icon_url != '';`,
+
+	// v9: persist device identity (UA, headers) per token for restart survival
+	`ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS headers_json JSONB;`,
 }
 
 func RunMigrations(db *sql.DB) error {

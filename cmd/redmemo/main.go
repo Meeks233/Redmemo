@@ -103,8 +103,8 @@ func main() {
 	uaPool := useragent.NewPool(settingsStore)
 
 	// 8. Init OAuth
-	oauthClient := oauth.NewClient()
-	oauthPool := oauth.NewPool(cfg.OAuth, oauthClient, tokenStore, redisCache)
+	oauthClient := oauth.NewClient(uaPool)
+	oauthPool := oauth.NewPool(cfg.OAuth, oauthClient, tokenStore, redisCache, uaPool)
 
 	// 9. Init Reddit clients
 	redditAdapter := &oauthAdapter{pool: oauthPool}
@@ -197,6 +197,10 @@ func (a *oauthAdapter) GetBestToken() *reddit.TokenInfo {
 
 func (a *oauthAdapter) OnRequestComplete(tokenID int, resp *http.Response) {
 	a.pool.OnRequestComplete(tokenID, resp)
+}
+
+func (a *oauthAdapter) NotifyUnauthorized() {
+	a.pool.NotifyUnauthorized()
 }
 
 // settingsAdapter bridges store.SettingsStore → prefetch.SettingsProvider interface.

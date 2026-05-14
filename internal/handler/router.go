@@ -108,6 +108,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /quotaRing.js", static)
 	mux.Handle("GET /infiniteScroll.js", static)
 	mux.Handle("GET /subPicker.js", static)
+	mux.Handle("GET /videoAutoplay.js", static)
+	mux.Handle("GET /videoPreload.js", static)
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)
@@ -157,6 +159,9 @@ func (h *Handler) Routes() http.Handler {
 			http.Redirect(w, r, "/settings", http.StatusSeeOther)
 		}
 	})
+
+	// Exhausted — no quota, no archive
+	mux.HandleFunc("GET /fuckreddit", h.handleFuckReddit)
 
 	// Debug error page preview
 	mux.HandleFunc("GET /debug", h.handleDebug)

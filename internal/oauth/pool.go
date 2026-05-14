@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type ManagedToken struct {
@@ -22,40 +24,44 @@ type ManagedToken struct {
 	RateResetAt   time.Time
 }
 
-const (
-	dynamicSpoofBackend = "dynamic_spoof"
-	maxDynamicTokens    = 3
-)
-
 type Pool struct {
 	mu     sync.RWMutex
-	tokens []*ManagedToken
+	active *ManagedToken
 	client *Client
 	store  *store.TokenStore
 	cache  *cache.Cache
 	cfg    config.OAuthConfig
+	uaPool *useragent.Pool
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	spawnMu sync.Mutex
-	bgCtx   context.Context
+	refreshMu       sync.Mutex
+	consecutiveFail int
+	lastRefreshAt   time.Time
+	backend         string // "mobile_spoof" or "generic_web"
 }
 
-func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache) *Pool {
+const (
+	refreshCooldown     = 10 * time.Second
+	maxConsecutiveFails = 5
+)
+
+func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache, uaPool *useragent.Pool) *Pool {
 	return &Pool{
-		client: client,
-		store:  tokenStore,
-		cache:  c,
-		cfg:    cfg,
+		client:  client,
+		store:   tokenStore,
+		cache:   c,
+		cfg:     cfg,
+		uaPool:  uaPool,
+		backend: "mobile_spoof",
 	}
 }
 
 func (p *Pool) Start(ctx context.Context) error {
 	ctx, p.cancel = context.WithCancel(ctx)
-	p.bgCtx = ctx
 
-	// Clean up expired dynamic tokens from DB.
-	if n, err := p.store.DeleteExpiredByBackend(dynamicSpoofBackend); err != nil {
+	// Clean up old dynamic tokens from previous architecture.
+	if n, err := p.store.DeleteExpiredByBackend("dynamic_spoof"); err != nil {
 		log.Printf("oauth: cleanup expired dynamic tokens: %v", err)
 	} else if n > 0 {
 		log.Printf("oauth: cleaned up %d expired dynamic tokens", n)
@@ -67,12 +73,15 @@ func (p *Pool) Start(ctx context.Context) error {
 	}
 
 	now := time.Now()
-	p.mu.Lock()
+
+	// Pick the first valid token from DB.
 	for _, st := range stored {
-		identity := GenerateIdentity()
-		if st.Backend != "" && st.Backend != "mobile_spoof" {
-			identity = GenerateWebIdentity(st.ClientID)
+		if st.Backend == "dynamic_spoof" {
+			continue
 		}
+
+		identity := p.restoreIdentity(st)
+
 		mt := &ManagedToken{
 			StoredToken: *st,
 			Identity:    identity,
@@ -86,83 +95,107 @@ func (p *Pool) Start(ctx context.Context) error {
 			}
 		} else {
 			mt.RateRemaining = 99
-			if st.RateResetAt != nil && !st.RateResetAt.IsZero() {
-				elapsed := now.Sub(*st.RateResetAt)
-				mt.RateResetAt = st.RateResetAt.Add((elapsed/(10*time.Minute) + 1) * 10 * time.Minute)
-			} else {
-				mt.RateResetAt = now.Add(10 * time.Minute)
-			}
-			remaining := 99
-			resetAt := mt.RateResetAt
-			st.RateRemaining = &remaining
-			st.RateResetAt = &resetAt
-			mt.StoredToken = *st
-			log.Printf("oauth: token %d window expired, reset to 99 (next reset in %ds)", st.ID, int(time.Until(mt.RateResetAt).Seconds()))
+			mt.RateResetAt = now.Add(10 * time.Minute)
 		}
-		p.tokens = append(p.tokens, mt)
+
+		p.active = mt
+		p.backend = st.Backend
+		log.Printf("oauth: restored token %d (%s), remaining=%d", st.ID, st.Backend, mt.RateRemaining)
+		break
 	}
-	p.mu.Unlock()
 
-	// If no tokens in DB but config has entries, authenticate them now.
-	if len(p.tokens) == 0 {
-		for _, tcfg := range p.cfg.Tokens {
-			result, err := p.client.Authenticate(tcfg)
-			if err != nil {
-				log.Printf("oauth: initial auth failed for %s: %v", tcfg.ClientID, err)
-				continue
-			}
-			now := time.Now()
-			expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
-			remaining := 99
-			st := &store.StoredToken{
-				ClientID:      tcfg.ClientID,
-				ClientSecret:  tcfg.ClientSecret,
-				AccessToken:   result.AccessToken,
-				ExpiresAt:     &expiresAt,
-				RateRemaining: &remaining,
-				Backend:       tcfg.Backend,
-				Enabled:       true,
-				LastUsed:      &now,
-			}
-			if err := p.store.Upsert(st); err != nil {
-				log.Printf("oauth: failed to store token: %v", err)
-				continue
-			}
-
-			p.mu.Lock()
-			p.tokens = append(p.tokens, &ManagedToken{
-				StoredToken:   *st,
-				Identity:      result.Identity,
-				RateRemaining: 99,
-				RateResetAt:   now.Add(10 * time.Minute),
-			})
-			p.mu.Unlock()
+	// No tokens in DB — authenticate from config.
+	if p.active == nil {
+		if err := p.authenticateFromConfig(); err != nil {
+			log.Printf("oauth: initial auth failed: %v", err)
 		}
 	}
 
-	p.mu.RLock()
-	for _, mt := range p.tokens {
-		p.wg.Add(1)
-		go p.refreshLoop(ctx, mt)
+	if p.active == nil {
+		log.Printf("oauth: WARNING: no active token, will retry on first request")
 	}
-	p.mu.RUnlock()
+
+	p.wg.Add(1)
+	go p.refreshLoop(ctx)
 
 	return nil
 }
 
-func (p *Pool) refreshLoop(ctx context.Context, mt *ManagedToken) {
+func (p *Pool) authenticateFromConfig() error {
+	for _, tcfg := range p.cfg.Tokens {
+		if tcfg.Backend == "" {
+			tcfg.Backend = "mobile_spoof"
+		}
+		result, err := p.client.Authenticate(tcfg)
+		if err != nil {
+			log.Printf("oauth: auth failed for %s/%s: %v", tcfg.Backend, tcfg.ClientID, err)
+			continue
+		}
+		p.installToken(result, tcfg.ClientID, tcfg.ClientSecret, tcfg.Backend)
+		return nil
+	}
+
+	// No config tokens — try mobile_spoof anonymous.
+	result, err := p.client.Authenticate(config.OAuthTokenConfig{Backend: p.backend})
+	if err != nil {
+		return fmt.Errorf("anonymous auth (%s): %w", p.backend, err)
+	}
+	p.installToken(result, "", "", p.backend)
+	return nil
+}
+
+func (p *Pool) installToken(result *TokenResult, clientID, clientSecret, backend string) {
+	now := time.Now()
+	expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
+	remaining := 99
+
+	st := &store.StoredToken{
+		ClientID:      clientID,
+		ClientSecret:  clientSecret,
+		AccessToken:   result.AccessToken,
+		ExpiresAt:     &expiresAt,
+		RateRemaining: &remaining,
+		Backend:       backend,
+		Enabled:       true,
+		LastUsed:      &now,
+		HeadersJSON:   p.identityToJSON(result.Identity),
+	}
+
+	if p.active != nil && p.active.StoredToken.ID > 0 {
+		st.ID = p.active.StoredToken.ID
+	}
+
+	if err := p.store.Upsert(st); err != nil {
+		log.Printf("oauth: failed to store token: %v", err)
+	}
+
+	p.mu.Lock()
+	p.active = &ManagedToken{
+		StoredToken:   *st,
+		Identity:      result.Identity,
+		RateRemaining: 99,
+		RateResetAt:   now.Add(10 * time.Minute),
+	}
+	p.backend = backend
+	p.consecutiveFail = 0
+	p.lastRefreshAt = now
+	p.mu.Unlock()
+
+	log.Printf("oauth: installed new %s token (expires in %ds)", backend, result.ExpiresIn)
+}
+
+func (p *Pool) refreshLoop(ctx context.Context) {
 	defer p.wg.Done()
 	for {
 		p.mu.RLock()
-		expiresAt := mt.StoredToken.ExpiresAt
-		p.mu.RUnlock()
-
 		var sleepDur time.Duration
-		if expiresAt != nil {
-			sleepDur = time.Until(*expiresAt) - 120*time.Second
+		if p.active != nil && p.active.StoredToken.ExpiresAt != nil {
+			sleepDur = time.Until(*p.active.StoredToken.ExpiresAt) - 120*time.Second
 		} else {
 			sleepDur = 22 * time.Minute
 		}
+		p.mu.RUnlock()
+
 		if sleepDur < 10*time.Second {
 			sleepDur = 10 * time.Second
 		}
@@ -175,93 +208,114 @@ func (p *Pool) refreshLoop(ctx context.Context, mt *ManagedToken) {
 			return
 		}
 
-		tcfg := config.OAuthTokenConfig{
-			ClientID:     mt.StoredToken.ClientID,
-			ClientSecret: mt.StoredToken.ClientSecret,
-			Backend:      mt.StoredToken.Backend,
-		}
-		if tcfg.Backend == "password" {
-			for _, tc := range p.cfg.Tokens {
-				if tc.ClientID == tcfg.ClientID && tc.Backend == "password" {
-					tcfg.Username = tc.Username
-					tcfg.Password = tc.Password
-					break
-				}
+		log.Printf("oauth: scheduled refresh (pre-expiry)")
+		p.forceRefresh("scheduled")
+	}
+}
+
+// ForceRefresh re-authenticates with a new device identity. Thread-safe with cooldown.
+func (p *Pool) forceRefresh(reason string) {
+	if !p.refreshMu.TryLock() {
+		return
+	}
+	defer p.refreshMu.Unlock()
+
+	if time.Since(p.lastRefreshAt) < refreshCooldown {
+		return
+	}
+
+	log.Printf("oauth: force refresh (%s), backend=%s, consecutive_fail=%d", reason, p.backend, p.consecutiveFail)
+
+	backend := p.backend
+
+	// Build auth config.
+	tcfg := config.OAuthTokenConfig{Backend: backend}
+	p.mu.RLock()
+	if p.active != nil {
+		tcfg.ClientID = p.active.StoredToken.ClientID
+		tcfg.ClientSecret = p.active.StoredToken.ClientSecret
+	}
+	p.mu.RUnlock()
+
+	if tcfg.Backend == "password" {
+		for _, tc := range p.cfg.Tokens {
+			if tc.ClientID == tcfg.ClientID && tc.Backend == "password" {
+				tcfg.Username = tc.Username
+				tcfg.Password = tc.Password
+				break
 			}
 		}
-		result, err := p.client.Refresh(tcfg)
-		if err != nil {
-			log.Printf("oauth: refresh failed for token %d: %v", mt.StoredToken.ID, err)
-			continue
-		}
-
-		now := time.Now()
-		expiresAtNew := now.Add(time.Duration(result.ExpiresIn) * time.Second)
-		remaining := 99
-
-		p.mu.Lock()
-		mt.StoredToken.AccessToken = result.AccessToken
-		mt.StoredToken.ExpiresAt = &expiresAtNew
-		mt.StoredToken.RateRemaining = &remaining
-		mt.StoredToken.LastUsed = &now
-		mt.Identity = result.Identity
-		mt.RateRemaining = 99
-		mt.RateResetAt = now.Add(10 * time.Minute)
-		p.mu.Unlock()
-
-		if err := p.store.UpdateToken(&mt.StoredToken); err != nil {
-			log.Printf("oauth: failed to persist refreshed token %d: %v", mt.StoredToken.ID, err)
-		}
 	}
+
+	result, err := p.client.Authenticate(tcfg)
+	if err != nil {
+		p.consecutiveFail++
+		log.Printf("oauth: refresh failed (%s): %v (consecutive=%d)", backend, err, p.consecutiveFail)
+
+		if p.consecutiveFail >= maxConsecutiveFails && backend == "mobile_spoof" {
+			log.Printf("oauth: mobile_spoof failed %d times, switching to generic_web", p.consecutiveFail)
+			p.backend = "generic_web"
+			p.consecutiveFail = 0
+			p.lastRefreshAt = time.Now()
+		}
+		return
+	}
+
+	p.installToken(result, tcfg.ClientID, tcfg.ClientSecret, backend)
+}
+
+// NotifyUnauthorized is called when a 401 is received. Triggers re-auth.
+func (p *Pool) NotifyUnauthorized() {
+	go p.forceRefresh("401_unauthorized")
+}
+
+// NotifyLowQuota is called when remaining is critically low.
+func (p *Pool) NotifyLowQuota() {
+	go p.forceRefresh("low_quota")
 }
 
 func (p *Pool) GetBestToken() *ManagedToken {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.active == nil {
+		return nil
+	}
+
 	now := time.Now()
-	var best *ManagedToken
-	for _, mt := range p.tokens {
-		if now.After(mt.RateResetAt) {
-			mt.RateRemaining = 99
-			mt.RateResetAt = now.Add(10 * time.Minute)
-			remaining := 99
-			resetAt := mt.RateResetAt
-			mt.StoredToken.RateRemaining = &remaining
-			mt.StoredToken.RateResetAt = &resetAt
-			if p.store != nil {
-				snapshot := mt.StoredToken
-				go func() {
-					if err := p.store.UpdateToken(&snapshot); err != nil {
-						log.Printf("oauth: persist reset for token %d: %v", snapshot.ID, err)
-					}
-				}()
-			}
-		}
-		if mt.RateRemaining <= 0 {
-			continue
-		}
-		if best == nil || mt.RateRemaining > best.RateRemaining {
-			best = mt
+	if now.After(p.active.RateResetAt) {
+		p.active.RateRemaining = 99
+		p.active.RateResetAt = now.Add(10 * time.Minute)
+		remaining := 99
+		resetAt := p.active.RateResetAt
+		p.active.StoredToken.RateRemaining = &remaining
+		p.active.StoredToken.RateResetAt = &resetAt
+		if p.store != nil {
+			snapshot := p.active.StoredToken
+			go func() {
+				if err := p.store.UpdateToken(&snapshot); err != nil {
+					log.Printf("oauth: persist reset: %v", err)
+				}
+			}()
 		}
 	}
-	return best
+
+	if p.active.RateRemaining <= 0 {
+		return nil
+	}
+
+	return p.active
 }
 
 func (p *Pool) OnRequestComplete(tokenID int, resp *http.Response) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var mt *ManagedToken
-	for _, t := range p.tokens {
-		if t.StoredToken.ID == tokenID {
-			mt = t
-			break
-		}
-	}
-	if mt == nil {
+	if p.active == nil || p.active.StoredToken.ID != tokenID {
 		return
 	}
+
+	mt := p.active
 
 	if v := resp.Header.Get("X-Ratelimit-Remaining"); v != "" {
 		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
@@ -281,15 +335,16 @@ func (p *Pool) OnRequestComplete(tokenID int, resp *http.Response) {
 	now := time.Now()
 	mt.StoredToken.LastUsed = &now
 
-	if mt.RateRemaining < 10 {
-		log.Printf("oauth: token %d low on quota (%d remaining)", tokenID, mt.RateRemaining)
+	if mt.RateRemaining < 2 {
+		log.Printf("oauth: quota critically low (%d), triggering refresh", mt.RateRemaining)
+		go p.NotifyLowQuota()
 	}
 
 	if p.store != nil {
 		snapshot := mt.StoredToken
 		go func() {
 			if err := p.store.UpdateToken(&snapshot); err != nil {
-				log.Printf("oauth: persist rate state for token %d: %v", tokenID, err)
+				log.Printf("oauth: persist rate state: %v", err)
 			}
 		}()
 	}
@@ -300,18 +355,18 @@ func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	now := time.Now()
-	total := 0
-	for _, mt := range p.tokens {
-		remaining := mt.RateRemaining
-		if now.After(mt.RateResetAt) {
-			remaining = 99
-		}
-		if remaining > 0 {
-			total += remaining
-		}
+	if p.active == nil {
+		return 0, nil
 	}
-	return total, nil
+
+	remaining := p.active.RateRemaining
+	if time.Now().After(p.active.RateResetAt) {
+		remaining = 99
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	return remaining, nil
 }
 
 type TokenStatusInfo struct {
@@ -320,74 +375,79 @@ type TokenStatusInfo struct {
 	RateResetAt   time.Time
 	Dynamic       bool
 	UserAgent     string
+	DeviceID      string
+	Loid          string
+	Session       string
+	ExpiresAt     *time.Time
 }
 
 func (p *Pool) TokenStatuses() []TokenStatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	out := make([]TokenStatusInfo, len(p.tokens))
-	for i, mt := range p.tokens {
-		out[i] = TokenStatusInfo{
-			Backend:       mt.StoredToken.Backend,
-			RateRemaining: mt.RateRemaining,
-			RateResetAt:   mt.RateResetAt,
-			Dynamic:       mt.StoredToken.Backend == dynamicSpoofBackend,
-			UserAgent:     mt.Identity.UserAgent,
-		}
+
+	if p.active == nil {
+		return nil
 	}
-	return out
+
+	return []TokenStatusInfo{{
+		Backend:       p.active.StoredToken.Backend,
+		RateRemaining: p.active.RateRemaining,
+		RateResetAt:   p.active.RateResetAt,
+		UserAgent:     p.active.Identity.UserAgent,
+		DeviceID:      p.active.Identity.DeviceID,
+		Loid:          p.active.Identity.Headers["x-reddit-loid"],
+		Session:       p.active.Identity.Headers["x-reddit-session"],
+		ExpiresAt:     p.active.StoredToken.ExpiresAt,
+	}}
 }
 
-// WindowInfo returns the rate limit window state: reset time, total capacity, and current remaining.
+// WindowInfo returns the rate limit window state.
 func (p *Pool) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	const window = 10 * time.Minute
-	now := time.Now()
-	for _, mt := range p.tokens {
-		capacity += 99
-		tokenReset := mt.RateResetAt
-		if now.After(tokenReset) {
-			remaining += 99
-			elapsed := now.Sub(tokenReset)
-			tokenReset = tokenReset.Add((elapsed/window + 1) * window)
-		} else if mt.RateRemaining > 0 {
-			remaining += mt.RateRemaining
-		}
-		if tokenReset.After(resetAt) {
-			resetAt = tokenReset
-		}
+	if p.active == nil {
+		return
 	}
+
+	const window = 10 * time.Minute
+	capacity = 99
+	now := time.Now()
+	tokenReset := p.active.RateResetAt
+	if now.After(tokenReset) {
+		remaining = 99
+		elapsed := now.Sub(tokenReset)
+		tokenReset = tokenReset.Add((elapsed/window + 1) * window)
+	} else if p.active.RateRemaining > 0 {
+		remaining = p.active.RateRemaining
+	}
+	resetAt = tokenReset
 	return
 }
 
-// EarliestReset returns (seconds until soonest reset, window total seconds).
-// For tokens whose window has expired, rolls forward to the next 10-min
-// boundary so there is always a meaningful countdown when tokens exist.
+// EarliestReset returns (seconds until reset, window total seconds).
 func (p *Pool) EarliestReset() (int, int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	const window = 10 * time.Minute
 	windowSec := int(window.Seconds())
-	now := time.Now()
-	earliest := 0
-	for _, mt := range p.tokens {
-		if mt.RateResetAt.IsZero() {
-			continue
-		}
-		resetAt := mt.RateResetAt
-		if !resetAt.After(now) {
-			elapsed := now.Sub(resetAt)
-			resetAt = resetAt.Add((elapsed/window + 1) * window)
-		}
-		secs := int(time.Until(resetAt).Seconds())
-		if secs > 0 && (earliest == 0 || secs < earliest) {
-			earliest = secs
-		}
+
+	if p.active == nil {
+		return 0, windowSec
 	}
-	return earliest, windowSec
+
+	now := time.Now()
+	resetAt := p.active.RateResetAt
+	if !resetAt.After(now) {
+		elapsed := now.Sub(resetAt)
+		resetAt = resetAt.Add((elapsed/window + 1) * window)
+	}
+	secs := int(time.Until(resetAt).Seconds())
+	if secs < 0 {
+		secs = 0
+	}
+	return secs, windowSec
 }
 
 func (p *Pool) EarliestResetSeconds() int {
@@ -395,109 +455,70 @@ func (p *Pool) EarliestResetSeconds() int {
 	return s
 }
 
-// HasAvailableTokens reports whether any token in the pool has remaining quota.
+// HasAvailableTokens reports whether the active token has remaining quota.
 func (p *Pool) HasAvailableTokens() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	now := time.Now()
-	for _, mt := range p.tokens {
-		if mt.RateRemaining > 0 {
-			return true
-		}
-		if now.After(mt.RateResetAt) {
-			return true
-		}
+	if p.active == nil {
+		return false
 	}
-	return false
+	if p.active.RateRemaining > 0 {
+		return true
+	}
+	return time.Now().After(p.active.RateResetAt)
 }
 
-// SpawnTokenIfNeeded creates a dynamic OAuth token in the background when the
-// pool has no available tokens and hasn't reached the dynamic token cap.
-func (p *Pool) SpawnTokenIfNeeded(ctx context.Context) {
-	if p.HasAvailableTokens() {
-		return
-	}
-
-	if !p.spawnMu.TryLock() {
-		return
-	}
-	defer p.spawnMu.Unlock()
-
-	if p.HasAvailableTokens() {
-		return
-	}
-
-	if p.dynamicCount() >= maxDynamicTokens {
-		log.Printf("oauth: dynamic token cap reached (%d/%d)", p.dynamicCount(), maxDynamicTokens)
-		return
-	}
-
-	log.Printf("oauth: spawning dynamic token (current dynamic: %d/%d)", p.dynamicCount(), maxDynamicTokens)
-	if err := p.spawnOne(ctx); err != nil {
-		log.Printf("oauth: spawn dynamic token failed: %v", err)
-	}
-}
-
-func (p *Pool) dynamicCount() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	n := 0
-	for _, mt := range p.tokens {
-		if mt.StoredToken.Backend == dynamicSpoofBackend {
-			n++
-		}
-	}
-	return n
-}
-
-func (p *Pool) spawnOne(ctx context.Context) error {
-	result, err := p.client.Authenticate(config.OAuthTokenConfig{Backend: "mobile_spoof"})
-	if err != nil {
-		return fmt.Errorf("authenticate: %w", err)
-	}
-
-	now := time.Now()
-	expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
-	remaining := 99
-	st := &store.StoredToken{
-		ClientID:      "dynamic",
-		AccessToken:   result.AccessToken,
-		ExpiresAt:     &expiresAt,
-		RateRemaining: &remaining,
-		Backend:       dynamicSpoofBackend,
-		Enabled:       true,
-		LastUsed:      &now,
-	}
-	if err := p.store.Upsert(st); err != nil {
-		return fmt.Errorf("persist token: %w", err)
-	}
-
-	mt := &ManagedToken{
-		StoredToken:   *st,
-		Identity:      result.Identity,
-		RateRemaining: 99,
-		RateResetAt:   now.Add(10 * time.Minute),
-	}
-
-	p.mu.Lock()
-	p.tokens = append(p.tokens, mt)
-	p.mu.Unlock()
-
-	bgCtx := p.bgCtx
-	if bgCtx == nil {
-		bgCtx = ctx
-	}
-	p.wg.Add(1)
-	go p.refreshLoop(bgCtx, mt)
-
-	log.Printf("oauth: dynamic token spawned, expires in %ds", result.ExpiresIn)
-	return nil
-}
+// SpawnTokenIfNeeded is a no-op kept for API compatibility. Single-token model
+// handles recovery via NotifyUnauthorized / NotifyLowQuota.
+func (p *Pool) SpawnTokenIfNeeded(_ context.Context) {}
 
 func (p *Pool) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
 	p.wg.Wait()
+}
+
+// --- Identity persistence helpers ---
+
+func (p *Pool) identityToJSON(id SpoofIdentity) *string {
+	data := map[string]string{
+		"_user_agent": id.UserAgent,
+		"_device_id":  id.DeviceID,
+	}
+	for k, v := range id.Headers {
+		data[k] = v
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	s := string(b)
+	return &s
+}
+
+func (p *Pool) restoreIdentity(st *store.StoredToken) SpoofIdentity {
+	if st.HeadersJSON != nil && *st.HeadersJSON != "" {
+		var data map[string]string
+		if err := json.Unmarshal([]byte(*st.HeadersJSON), &data); err == nil && len(data) > 0 {
+			ua := data["_user_agent"]
+			deviceID := data["_device_id"]
+			delete(data, "_user_agent")
+			delete(data, "_device_id")
+			log.Printf("oauth: restored identity from DB for token %d (ua=%q)", st.ID, ua)
+			return SpoofIdentity{
+				UserAgent: ua,
+				DeviceID:  deviceID,
+				Headers:   data,
+			}
+		}
+	}
+
+	// Fallback: generate new identity based on backend.
+	log.Printf("oauth: no persisted identity for token %d, generating new", st.ID)
+	if st.Backend == "mobile_spoof" || st.Backend == "" {
+		return GenerateIdentity()
+	}
+	return GenerateWebIdentity(p.uaPool)
 }

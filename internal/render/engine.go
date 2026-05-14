@@ -40,7 +40,8 @@ var pageTemplates = map[string]string{
 	"settings.html":  "templates/settings.html",
 	"archive.html":      "templates/archive.html",
 	"archive_hub.html": "templates/archive_hub.html",
-	"error.html":     "templates/error.html",
+	"error.html":      "templates/error.html",
+	"fuckreddit.html": "templates/fuckreddit.html",
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
@@ -78,6 +79,7 @@ type SubredditPageData struct {
 	RedirectURL        string
 	HomepageSort       string
 	HasOAuth           bool
+	IsOffline          bool
 }
 
 type PostPageData struct {
@@ -89,6 +91,7 @@ type PostPageData struct {
 	SingleThread    bool
 	URLWithoutQuery string
 	HasOAuth        bool
+	IsOffline       bool
 }
 
 type SearchPageData struct {
@@ -101,6 +104,7 @@ type SearchPageData struct {
 	AllPostsHiddenNSFW bool
 	NoPosts            bool
 	AllPostsFiltered   bool
+	IsOffline          bool
 }
 
 type UserPageData struct {
@@ -164,6 +168,10 @@ type TokenView struct {
 	RateReset     string // relative: "in 5m30s" or "expired"
 	HasBudget     bool
 	UserAgent     string
+	DeviceID      string
+	Loid          string
+	Session       string
+	ExpiresIn     string
 }
 
 type PrefetchEventView struct {
@@ -184,6 +192,7 @@ type ErrorPageData struct {
 	WindowSeconds  int
 	IsDebug        bool
 	Tokens         []TokenView
+	PrefetchStatus PrefetchStatusView
 	PrefetchEvents []PrefetchEventView
 }
 
@@ -275,10 +284,32 @@ func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 	return e.renderPage(w, "settings.html", data)
 }
 
+type PrefetchStatusView struct {
+	Enabled     bool
+	ActiveSubs  string
+	L1Phase     string
+	L1Progress  string
+	L1Subs      string
+	L1Cursors   []PrefetchCursorView
+	L1NextCycle string
+	L2Phase     string
+	L2Sub       string
+	L2Pending   int
+	NPPhase     string
+	NPCurrent   string
+	QueueLen    int
+}
+
+type PrefetchCursorView struct {
+	Sub    string
+	Cursor string
+}
+
 type DebugData struct {
 	Details        []string
 	TokenBudget    int
 	Tokens         []TokenView
+	PrefetchStatus PrefetchStatusView
 	PrefetchEvents []PrefetchEventView
 }
 
@@ -291,6 +322,7 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
 		TokenBudget:    d.TokenBudget,
 		IsDebug:        true,
 		Tokens:         d.Tokens,
+		PrefetchStatus: d.PrefetchStatus,
 		PrefetchEvents: d.PrefetchEvents,
 	}
 	e.renderPage(w, "error.html", data)
@@ -319,6 +351,20 @@ func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, 
 		Details:    details,
 	}
 	e.renderPage(w, "error.html", data)
+}
+
+type FuckRedditPageData struct {
+	BasePage
+	ResetSeconds int
+}
+
+func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preferences, resetSeconds int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := FuckRedditPageData{
+		BasePage:     e.basePage("", prefs),
+		ResetSeconds: resetSeconds,
+	}
+	e.renderPage(w, "fuckreddit.html", data)
 }
 
 func AvailableThemes() []string {
