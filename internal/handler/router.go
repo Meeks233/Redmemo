@@ -146,6 +146,9 @@ func (h *Handler) Routes() http.Handler {
 	// Wiki
 	mux.HandleFunc("GET /r/{sub}/wiki/{page...}", h.handleWiki)
 
+	// Random archived post (local-only, no upstream)
+	mux.HandleFunc("GET /random", h.handleRandom)
+
 	// Lightweight status check
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)

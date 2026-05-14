@@ -92,7 +92,8 @@ type Media struct {
 	Width        int64
 	Height       int64
 	Poster       string // video poster image
-	DownloadName string // "redlib_{permalink_base}_{media_url_base}"
+	DownloadName string
+	Duration     float64
 }
 
 // GalleryMedia represents one item in a gallery post.

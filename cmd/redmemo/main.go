@@ -124,6 +124,7 @@ func main() {
 
 	archiver := archive.NewService(postStore, commentStore, subStore)
 	subStatusStore := store.NewSubStatusStore(db)
+	archiver.SetSubStatusStore(subStatusStore)
 
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},

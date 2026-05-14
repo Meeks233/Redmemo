@@ -68,6 +68,7 @@ type SubredditStatus struct {
 	LastLive  time.Time
 	FailCount int
 	CheckedAt time.Time
+	NSFW      *bool // nil = never evaluated; once true it stays true
 }
 
 type SubIcon struct {

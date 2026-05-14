@@ -139,13 +139,22 @@ type ArchiveHubEntry struct {
 	Name      string
 	PostCount int64
 	IconURL   string
+	NSFW      bool
+	Dead      bool // banned / private / quarantined upstream — local archive still accessible
+}
+
+type ArchiveAlphaGroup struct {
+	Letter string
+	Subs   []ArchiveHubEntry
 }
 
 type ArchiveHubPageData struct {
 	BasePage
-	Subs    []ArchiveHubEntry
-	Offset  int
-	HasMore bool
+	Sort        string // "new", "top", "all"
+	Subs        []ArchiveHubEntry
+	AlphaGroups []ArchiveAlphaGroup // populated only when Sort == "all"
+	AlphaIndex  []string            // letters present, in display order (A-Z then "#")
+	MinPosts    int                 // threshold used for new/top
 }
 
 type ArchivePageData struct {

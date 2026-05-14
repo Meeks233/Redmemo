@@ -169,6 +169,7 @@ func parseMedia(d map[string]interface{}) (postType string, media Media, thumb M
 				media.AltURL = FormatURL(getString(rvp, "hls_url"))
 				media.Width = getInt64(rvp, "width")
 				media.Height = getInt64(rvp, "height")
+				media.Duration = getFloat64(rvp, "duration")
 				setPreviewDimensions(d, &media)
 				setPoster(d, &media)
 				return
@@ -190,6 +191,7 @@ func parseMedia(d map[string]interface{}) (postType string, media Media, thumb M
 				media.AltURL = FormatURL(getString(rv, "hls_url"))
 				media.Width = getInt64(rv, "width")
 				media.Height = getInt64(rv, "height")
+				media.Duration = getFloat64(rv, "duration")
 				setPoster(d, &media)
 				return
 			}
@@ -212,6 +214,7 @@ func parseMedia(d map[string]interface{}) (postType string, media Media, thumb M
 						media.AltURL = FormatURL(getString(rv, "hls_url"))
 						media.Width = getInt64(rv, "width")
 						media.Height = getInt64(rv, "height")
+						media.Duration = getFloat64(rv, "duration")
 						setPoster(cp, &media)
 						return
 					}

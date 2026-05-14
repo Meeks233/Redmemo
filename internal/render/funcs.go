@@ -70,6 +70,8 @@ func templateFuncs() template.FuncMap {
 			return items
 		},
 		"split": strings.Split,
+		"gtf": func(a, b float64) bool { return a > b },
+		"lef": func(a, b float64) bool { return a > 0 && a <= b },
 		"inList": func(item, delimited string) bool {
 			for _, s := range strings.Split(delimited, "+") {
 				if strings.EqualFold(s, item) {

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type SubStatusStore struct {
@@ -17,10 +19,11 @@ func NewSubStatusStore(db *sql.DB) *SubStatusStore {
 func (s *SubStatusStore) Get(name string) (*SubredditStatus, error) {
 	st := &SubredditStatus{}
 	var reason sql.NullString
+	var nsfw sql.NullBool
 	err := s.db.QueryRow(`
-		SELECT name, status, reason, last_live, fail_count, checked_at
+		SELECT name, status, reason, last_live, fail_count, checked_at, nsfw
 		FROM subreddit_status WHERE name = $1`, name,
-	).Scan(&st.Name, &st.Status, &reason, &st.LastLive, &st.FailCount, &st.CheckedAt)
+	).Scan(&st.Name, &st.Status, &reason, &st.LastLive, &st.FailCount, &st.CheckedAt, &nsfw)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -28,7 +31,79 @@ func (s *SubStatusStore) Get(name string) (*SubredditStatus, error) {
 		return nil, fmt.Errorf("get sub status: %w", err)
 	}
 	st.Reason = reason.String
+	if nsfw.Valid {
+		v := nsfw.Bool
+		st.NSFW = &v
+	}
 	return st, nil
+}
+
+// SetNSFW marks the sub as NSFW (true) or not (false). Once a sub has been
+// marked TRUE we keep it sticky: callers should avoid downgrading to false.
+// Creates a status row if missing (with default status='unknown').
+func (s *SubStatusStore) SetNSFW(name string, nsfw bool) error {
+	_, err := s.db.Exec(`
+		INSERT INTO subreddit_status (name, status, nsfw)
+		VALUES ($1, 'unknown', $2)
+		ON CONFLICT (name) DO UPDATE SET
+			nsfw = CASE
+				WHEN subreddit_status.nsfw IS TRUE THEN TRUE
+				ELSE EXCLUDED.nsfw
+			END`, name, nsfw)
+	if err != nil {
+		return fmt.Errorf("set nsfw: %w", err)
+	}
+	return nil
+}
+
+// GetNSFWMap returns a map of name → nsfw flag. Names without a status row, or
+// with nsfw IS NULL, are absent from the result (caller decides what to do).
+func (s *SubStatusStore) GetNSFWMap(names []string) (map[string]bool, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT name, nsfw FROM subreddit_status
+		WHERE LOWER(name) = ANY(SELECT LOWER(unnest) FROM unnest($1::text[]))
+		  AND nsfw IS NOT NULL`, pq.Array(names))
+	if err != nil {
+		return nil, fmt.Errorf("get nsfw map: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var n string
+		var v bool
+		if err := rows.Scan(&n, &v); err != nil {
+			return nil, err
+		}
+		out[n] = v
+	}
+	return out, rows.Err()
+}
+
+// GetStatusMap returns a map of name → status string (e.g. "dead", "private",
+// "live", "unknown") for the given names. Names without a row are absent.
+func (s *SubStatusStore) GetStatusMap(names []string) (map[string]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT name, status FROM subreddit_status
+		WHERE LOWER(name) = ANY(SELECT LOWER(unnest) FROM unnest($1::text[]))`, pq.Array(names))
+	if err != nil {
+		return nil, fmt.Errorf("get status map: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var n, st string
+		if err := rows.Scan(&n, &st); err != nil {
+			return nil, err
+		}
+		out[n] = st
+	}
+	return out, rows.Err()
 }
 
 func (s *SubStatusStore) MarkLive(name string) error {

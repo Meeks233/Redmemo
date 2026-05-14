@@ -63,14 +63,21 @@
 					renderArc(0, win);
 					save(rem, 0, win, Date.now());
 				}
-			}).catch(function(){});
+			}).catch(function(){ setTimeout(fetchStatus, 3000); });
 		}
 
 		pollIv = setInterval(function() {
 			fetch('/api/status').then(function(r){ return r.json(); }).then(function(d) {
-				renderNum(d.remaining);
-				if (d.reset > 0 && tickIv) {
-					save(d.remaining, d.reset, d.window || 600, Date.now());
+				var rem = d.remaining, left = d.reset || 0, win = d.window || 600;
+				renderNum(rem);
+				if (left > 0) {
+					if (!tickIv) {
+						startTick(rem, left, win, Date.now());
+					} else {
+						_endMs = Date.now() + left * 1000;
+						_win = win;
+						save(rem, left, win, Date.now());
+					}
 				}
 			}).catch(function(){});
 		}, 5000);

@@ -128,7 +128,12 @@
 			</a>
 		</div>
 		{{ else if or (eq $post.PostType "gif") (eq $post.PostType "video") }}
-			{{ if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
+			{{ $asGif := or (eq $post.PostType "gif") (lef $post.Media.Duration 3.0) }}
+			{{ if $asGif }}
+			<div class="post_media_content">
+				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} autoplay loop muted playsinline preload="auto"></video>
+			</div>
+			{{ else if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 			<div class="post_media_content">
 				<video class="post_media_video short" {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" controls preload="metadata">
 					<source src="{{ $post.Media.AltURL }}" type="application/vnd.apple.mpegurl" />

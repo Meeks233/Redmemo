@@ -7,68 +7,60 @@
 
 {{ define "content" }}
 <div id="archive-hub">
-	<h1>Archived Subreddits</h1>
-	<div id="archive-sub-list">
-	{{ if eq (len .Subs) 0 }}
-		<p class="archive-empty">No archived subreddits yet.</p>
-	{{ else }}
-		{{ range .Subs }}
-		<a class="archive-sub-card" href="/archive/r/{{ .Name }}">
-			<div class="archive-sub-icon">
-				{{ if .IconURL }}
-				<img src="/proxy/media?url={{ .IconURL }}" alt="r/{{ .Name }}" width="40" height="40" loading="lazy">
-				{{ else }}
-				<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>
-				{{ end }}
-			</div>
-			<div class="archive-sub-info">
-				<span class="archive-sub-name">r/{{ .Name }}</span>
-				<span class="archive-sub-count">{{ .PostCount }} posts</span>
-			</div>
-		</a>
+	<form id="sort">
+		<div id="sort_options">
+			<a {{ if eq .Sort "new" }}class="selected"{{ end }} href="/archive?sort=new">New</a>
+			<a {{ if eq .Sort "top" }}class="selected"{{ end }} href="/archive?sort=top">Top</a>
+			<a {{ if eq .Sort "all" }}class="selected"{{ end }} href="/archive?sort=all">All</a>
+		</div>
+	</form>
+
+	<h1>
+		{{ if eq .Sort "new" }}Recently Archived Subreddits
+		{{ else if eq .Sort "top" }}Top Archived Subreddits
+		{{ else }}All Archived Subreddits ({{ len .Subs }}){{ end }}
+		{{ if or (eq .Sort "new") (eq .Sort "top") }}
+			<small class="archive-hint">(only subs with more than {{ .MinPosts }} posts)</small>
 		{{ end }}
-	{{ end }}
-	</div>
-	{{ if .HasMore }}
-	<div id="archive-load-more" data-offset="{{ .Offset }}">
-		<button onclick="loadMoreArchiveSubs()">Load more</button>
-	</div>
+	</h1>
+
+	{{ if eq (len .Subs) 0 }}
+		<p class="archive-empty">No archived subreddits {{ if ne .Sort "all" }}with more than {{ .MinPosts }} posts {{ end }}yet.</p>
+	{{ else if eq .Sort "all" }}
+		<div id="archive-alpha-groups">
+		{{ range .AlphaGroups }}
+			<section class="archive-alpha-group" id="archive-letter-{{ .Letter }}">
+				<h2 class="archive-alpha-letter">{{ .Letter }}</h2>
+				<div class="archive-sub-list">
+				{{ range .Subs }}
+					{{ template "archive_sub_card" . }}
+				{{ end }}
+				</div>
+			</section>
+		{{ end }}
+		</div>
+	{{ else }}
+		<div id="archive-sub-list">
+		{{ range .Subs }}
+			{{ template "archive_sub_card" . }}
+		{{ end }}
+		</div>
 	{{ end }}
 </div>
-<script>
-var archiveOffset = {{ .Offset }};
-function loadMoreArchiveSubs() {
-	var btn = document.querySelector('#archive-load-more button');
-	btn.textContent = 'Loading...';
-	btn.disabled = true;
-	fetch('/archive?offset=' + archiveOffset + '&format=json')
-		.then(function(r) { return r.json(); })
-		.then(function(data) {
-			var list = document.getElementById('archive-sub-list');
-			data.subs.forEach(function(s) {
-				var a = document.createElement('a');
-				a.className = 'archive-sub-card';
-				a.href = '/archive/r/' + s.name;
-				var iconHTML;
-				if (s.icon_url) {
-					iconHTML = '<img src="/proxy/media?url=' + encodeURIComponent(s.icon_url) + '" alt="r/' + s.name + '" width="40" height="40" loading="lazy">';
-				} else {
-					iconHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>';
-				}
-				a.innerHTML = '<div class="archive-sub-icon">' + iconHTML + '</div>' +
-					'<div class="archive-sub-info"><span class="archive-sub-name">r/' + s.name + '</span>' +
-					'<span class="archive-sub-count">' + s.post_count + ' posts</span></div>';
-				list.appendChild(a);
-			});
-			archiveOffset = data.offset;
-			if (!data.has_more) {
-				document.getElementById('archive-load-more').remove();
-			} else {
-				btn.textContent = 'Load more';
-				btn.disabled = false;
-				document.getElementById('archive-load-more').dataset.offset = data.offset;
-			}
-		});
-}
-</script>
+{{ end }}
+
+{{ define "archive_sub_card" }}
+<a class="archive-sub-card" href="/archive/r/{{ .Name }}" title="r/{{ .Name }}{{ if .NSFW }} · NSFW{{ end }}{{ if .Dead }} · Banned on Reddit (local archive still readable){{ end }}">
+	<div class="archive-sub-icon">
+		{{ if .IconURL }}
+		<img src="/proxy/media?url={{ .IconURL }}" alt="r/{{ .Name }}" width="40" height="40" loading="lazy">
+		{{ else }}
+		<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"/></svg>
+		{{ end }}
+	</div>
+	<div class="archive-sub-info">
+		<span class="archive-sub-name">{{ if .Dead }}<span class="dead" title="Banned on Reddit (local archive still readable)" aria-label="banned">🚫</span>{{ end }}<span class="archive-sub-name-text">r/{{ .Name }}</span>{{ if .NSFW }}<small class="nsfw">NSFW</small>{{ end }}</span>
+		<span class="archive-sub-count">{{ .PostCount }} posts</span>
+	</div>
+</a>
 {{ end }}

@@ -138,6 +138,9 @@ var migrations = []string{
 
 	// v9: persist device identity (UA, headers) per token for restart survival
 	`ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS headers_json JSONB;`,
+
+	// v11: per-sub NSFW flag (nullable: NULL = never evaluated; once TRUE it is sticky)
+	`ALTER TABLE subreddit_status ADD COLUMN IF NOT EXISTS nsfw BOOLEAN;`,
 }
 
 func RunMigrations(db *sql.DB) error {

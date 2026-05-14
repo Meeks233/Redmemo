@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -41,79 +42,63 @@ func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (r
 	return h.publicCli.FetchPost(ctx, sub, id, commentSort)
 }
 
-const archiveHubPageSize = 5
 const archivePageSize = 25
+const archiveHubMinPosts = 10
 
 func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 
-	offset := 0
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			offset = n
-		}
+	sort := r.URL.Query().Get("sort")
+	switch sort {
+	case "new", "top", "all":
+	default:
+		sort = "new"
 	}
 
-	var subs []render.ArchiveHubEntry
+	var raw []store.ArchivedSub
 	if h.postStore != nil {
-		recent, err := h.postStore.RecentlyArchivedSubs(archiveHubPageSize+1, offset)
+		var err error
+		switch sort {
+		case "top":
+			raw, err = h.postStore.ArchivedSubsByTop(archiveHubMinPosts)
+		case "all":
+			raw, err = h.postStore.ArchivedSubsAlphabetical()
+		default:
+			raw, err = h.postStore.ArchivedSubsByNew(archiveHubMinPosts)
+		}
 		if err != nil {
-			log.Printf("handler: archive hub: %v", err)
-		}
-
-		var names []string
-		for _, rs := range recent {
-			names = append(names, rs.Name)
-		}
-
-		var iconMap map[string]*store.SubIcon
-		if h.subIconStore != nil && len(names) > 0 {
-			iconMap, _ = h.subIconStore.GetIconMap(names)
-		}
-
-		for _, rs := range recent {
-			entry := render.ArchiveHubEntry{
-				Name:      rs.Name,
-				PostCount: rs.PostCount,
-			}
-			if icon, ok := iconMap[rs.Name]; ok {
-				entry.IconURL = icon.IconURL
-			}
-			subs = append(subs, entry)
+			log.Printf("handler: archive hub (%s): %v", sort, err)
 		}
 	}
 
-	hasMore := len(subs) > archiveHubPageSize
-	if hasMore {
-		subs = subs[:archiveHubPageSize]
+	names := make([]string, 0, len(raw))
+	for _, rs := range raw {
+		names = append(names, rs.Name)
+	}
+	var iconMap map[string]*store.SubIcon
+	if h.subIconStore != nil && len(names) > 0 {
+		iconMap, _ = h.subIconStore.GetIconMap(names)
 	}
 
-	if r.URL.Query().Get("format") == "json" {
-		type jsonEntry struct {
-			Name      string `json:"name"`
-			PostCount int64  `json:"post_count"`
-			IconURL   string `json:"icon_url,omitempty"`
+	nsfwSet, deadSet := h.resolveArchiveTags(names)
+
+	subs := make([]render.ArchiveHubEntry, 0, len(raw))
+	for _, rs := range raw {
+		entry := render.ArchiveHubEntry{
+			Name:      rs.Name,
+			PostCount: rs.PostCount,
 		}
-		type jsonResp struct {
-			Subs    []jsonEntry `json:"subs"`
-			Offset  int         `json:"offset"`
-			HasMore bool        `json:"has_more"`
+		if icon, ok := iconMap[rs.Name]; ok {
+			entry.IconURL = icon.IconURL
 		}
-		entries := make([]jsonEntry, len(subs))
-		for i, s := range subs {
-			entries[i] = jsonEntry{
-				Name:      s.Name,
-				PostCount: s.PostCount,
-				IconURL:   s.IconURL,
-			}
+		key := strings.ToLower(rs.Name)
+		if nsfwSet[key] {
+			entry.NSFW = true
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(jsonResp{
-			Subs:    entries,
-			Offset:  offset + len(subs),
-			HasMore: hasMore,
-		})
-		return
+		if deadSet[key] {
+			entry.Dead = true
+		}
+		subs = append(subs, entry)
 	}
 
 	// Trigger passive L4 icon check
@@ -128,15 +113,128 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 			BrandName: h.cfg.Render.BrandName,
 			Version:   "0.1.0",
 		},
-		Subs:    subs,
-		Offset:  offset + len(subs),
-		HasMore: hasMore,
+		Sort:     sort,
+		Subs:     subs,
+		MinPosts: archiveHubMinPosts,
+	}
+	if sort == "all" {
+		data.AlphaGroups, data.AlphaIndex = groupSubsAlphabetical(subs)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.renderer.RenderArchiveHub(w, data); err != nil {
 		log.Printf("handler: render archive hub: %v", err)
 	}
+}
+
+// resolveArchiveTags returns lowercase-keyed sets of NSFW and Dead subs for
+// the given names. NSFW is looked up in subreddit_status first; for any name
+// missing a recorded flag, we lazily compute it from the posts table and
+// upsert the result so subsequent calls are O(1).
+func (h *Handler) resolveArchiveTags(names []string) (nsfw map[string]bool, dead map[string]bool) {
+	nsfw = make(map[string]bool)
+	dead = make(map[string]bool)
+	if len(names) == 0 {
+		return
+	}
+
+	var recorded map[string]bool
+	if h.subStatusStore != nil {
+		m, err := h.subStatusStore.GetNSFWMap(names)
+		if err != nil {
+			log.Printf("handler: archive hub get nsfw map: %v", err)
+		} else {
+			recorded = make(map[string]bool, len(m))
+			for k, v := range m {
+				recorded[strings.ToLower(k)] = v
+			}
+		}
+	}
+
+	var missing []string
+	for _, n := range names {
+		if _, ok := recorded[strings.ToLower(n)]; !ok {
+			missing = append(missing, n)
+		}
+	}
+
+	if len(missing) > 0 && h.postStore != nil {
+		detected, err := h.postStore.DetectNSFWForSubs(missing)
+		if err != nil {
+			log.Printf("handler: archive hub detect nsfw: %v", err)
+		} else if h.subStatusStore != nil {
+			for _, n := range missing {
+				v := detected[n]
+				if recorded == nil {
+					recorded = make(map[string]bool)
+				}
+				recorded[strings.ToLower(n)] = v
+				if err := h.subStatusStore.SetNSFW(n, v); err != nil {
+					log.Printf("handler: archive hub upsert nsfw %s: %v", n, err)
+				}
+			}
+		}
+	}
+	for k, v := range recorded {
+		if v {
+			nsfw[k] = true
+		}
+	}
+
+	if h.subStatusStore != nil {
+		stMap, err := h.subStatusStore.GetStatusMap(names)
+		if err != nil {
+			log.Printf("handler: archive hub get status map: %v", err)
+		} else {
+			for n, st := range stMap {
+				if st == "dead" || st == "private" || st == "quarantined" {
+					dead[strings.ToLower(n)] = true
+				}
+			}
+		}
+	}
+	return
+}
+
+// groupSubsAlphabetical buckets subs by their initial letter (A-Z); anything
+// starting with a non-letter goes to the "#" group. Input is assumed sorted
+// case-insensitively by Name.
+func groupSubsAlphabetical(subs []render.ArchiveHubEntry) ([]render.ArchiveAlphaGroup, []string) {
+	if len(subs) == 0 {
+		return nil, nil
+	}
+	groupMap := make(map[string]*render.ArchiveAlphaGroup)
+	var order []string
+	for _, s := range subs {
+		letter := "#"
+		if s.Name != "" {
+			c := s.Name[0]
+			if c >= 'a' && c <= 'z' {
+				letter = strings.ToUpper(string(c))
+			} else if c >= 'A' && c <= 'Z' {
+				letter = strings.ToUpper(string(c))
+			}
+		}
+		g, ok := groupMap[letter]
+		if !ok {
+			g = &render.ArchiveAlphaGroup{Letter: letter}
+			groupMap[letter] = g
+			order = append(order, letter)
+		}
+		g.Subs = append(g.Subs, s)
+	}
+	groups := make([]render.ArchiveAlphaGroup, 0, len(order))
+	for _, l := range order {
+		g := groupMap[l]
+		sort.SliceStable(g.Subs, func(i, j int) bool {
+			if g.Subs[i].PostCount != g.Subs[j].PostCount {
+				return g.Subs[i].PostCount > g.Subs[j].PostCount
+			}
+			return strings.ToLower(g.Subs[i].Name) < strings.ToLower(g.Subs[j].Name)
+		})
+		groups = append(groups, *g)
+	}
+	return groups, order
 }
 
 func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {

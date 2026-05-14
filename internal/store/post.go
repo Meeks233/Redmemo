@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -220,6 +222,80 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 	return scanPosts(rows)
 }
 
+// RandomPostOpts filters the candidate pool for PostStore.Random.
+// All fields are optional; zero/empty values are skipped.
+type RandomPostOpts struct {
+	Subs      []string   // case-insensitive whitelist; empty = all subs
+	MinScore  *int       // post.score >= MinScore
+	After     *time.Time // created_utc >= After
+	Before    *time.Time // created_utc <= Before
+	NSFW      string     // "" | "include" (default) | "exclude" | "only"
+	MediaOnly bool       // only image/gallery/gif posts with cached media
+}
+
+// Random returns a single random post matching the given filters, or
+// (nil, nil) if no post matches.
+func (s *PostStore) Random(opts RandomPostOpts) (*StoredPost, error) {
+	where := "1=1"
+	var args []any
+	argN := 1
+
+	if len(opts.Subs) > 0 {
+		lower := make([]string, len(opts.Subs))
+		for i, sub := range opts.Subs {
+			lower[i] = strings.ToLower(sub)
+		}
+		where += fmt.Sprintf(" AND LOWER(subreddit) = ANY($%d)", argN)
+		args = append(args, pq.Array(lower))
+		argN++
+	}
+	if opts.MinScore != nil {
+		where += fmt.Sprintf(" AND score >= $%d", argN)
+		args = append(args, *opts.MinScore)
+		argN++
+	}
+	if opts.After != nil {
+		where += fmt.Sprintf(" AND created_utc >= $%d", argN)
+		args = append(args, *opts.After)
+		argN++
+	}
+	if opts.Before != nil {
+		where += fmt.Sprintf(" AND created_utc <= $%d", argN)
+		args = append(args, *opts.Before)
+		argN++
+	}
+	switch opts.NSFW {
+	case "exclude":
+		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = false"
+	case "only":
+		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = true"
+	}
+	if opts.MediaOnly {
+		where += " AND media_done = true AND (json_data->>'PostType') IN ('image','gallery','gif')"
+	}
+
+	q := fmt.Sprintf(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source, media_done
+		FROM posts
+		WHERE %s
+		ORDER BY RANDOM()
+		LIMIT 1`, where)
+
+	p := &StoredPost{}
+	err := s.db.QueryRow(q, args...).Scan(
+		&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
+		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("random post: %w", err)
+	}
+	return p, nil
+}
+
 func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
@@ -326,31 +402,93 @@ func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
 	return result, rows.Err()
 }
 
-type RecentArchivedSub struct {
+type ArchivedSub struct {
 	Name      string
 	PostCount int64
 }
 
-func (s *PostStore) RecentlyArchivedSubs(limit, offset int) ([]RecentArchivedSub, error) {
+func (s *PostStore) scanArchivedSubs(rows *sql.Rows) ([]ArchivedSub, error) {
+	defer rows.Close()
+	var subs []ArchivedSub
+	for rows.Next() {
+		var a ArchivedSub
+		if err := rows.Scan(&a.Name, &a.PostCount); err != nil {
+			return nil, fmt.Errorf("scan archived sub: %w", err)
+		}
+		subs = append(subs, a)
+	}
+	return subs, rows.Err()
+}
+
+// ArchivedSubsByNew returns subs with strictly more than minPosts archived posts,
+// ordered by most-recent archive activity first.
+func (s *PostStore) ArchivedSubsByNew(minPosts int) ([]ArchivedSub, error) {
 	rows, err := s.db.Query(`
 		SELECT subreddit, COUNT(*) AS cnt
 		FROM posts
 		GROUP BY subreddit
-		ORDER BY MAX(last_updated) DESC
-		LIMIT $1 OFFSET $2`, limit, offset)
+		HAVING COUNT(*) > $1
+		ORDER BY MAX(last_updated) DESC`, minPosts)
 	if err != nil {
-		return nil, fmt.Errorf("recently archived subs: %w", err)
+		return nil, fmt.Errorf("archived subs by new: %w", err)
+	}
+	return s.scanArchivedSubs(rows)
+}
+
+// ArchivedSubsByTop returns subs with strictly more than minPosts archived posts,
+// ordered by post count descending.
+func (s *PostStore) ArchivedSubsByTop(minPosts int) ([]ArchivedSub, error) {
+	rows, err := s.db.Query(`
+		SELECT subreddit, COUNT(*) AS cnt
+		FROM posts
+		GROUP BY subreddit
+		HAVING COUNT(*) > $1
+		ORDER BY cnt DESC, LOWER(subreddit) ASC`, minPosts)
+	if err != nil {
+		return nil, fmt.Errorf("archived subs by top: %w", err)
+	}
+	return s.scanArchivedSubs(rows)
+}
+
+// DetectNSFWForSubs scans the posts table for the given sub names and returns,
+// for each, whether at least one archived post is over_18=true. Names without
+// any posts are absent from the result.
+func (s *PostStore) DetectNSFWForSubs(names []string) (map[string]bool, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT subreddit, BOOL_OR(COALESCE((json_data->>'over_18')::boolean, false))
+		FROM posts
+		WHERE LOWER(subreddit) = ANY(SELECT LOWER(unnest) FROM unnest($1::text[]))
+		GROUP BY subreddit`, pq.Array(names))
+	if err != nil {
+		return nil, fmt.Errorf("detect nsfw: %w", err)
 	}
 	defer rows.Close()
-	var subs []RecentArchivedSub
+	out := make(map[string]bool)
 	for rows.Next() {
-		var s RecentArchivedSub
-		if err := rows.Scan(&s.Name, &s.PostCount); err != nil {
-			return nil, fmt.Errorf("scan recently archived sub: %w", err)
+		var name string
+		var v bool
+		if err := rows.Scan(&name, &v); err != nil {
+			return nil, fmt.Errorf("scan detect nsfw: %w", err)
 		}
-		subs = append(subs, s)
+		out[name] = v
 	}
-	return subs, rows.Err()
+	return out, rows.Err()
+}
+
+// ArchivedSubsAlphabetical returns all archived subs sorted alphabetically (case-insensitive).
+func (s *PostStore) ArchivedSubsAlphabetical() ([]ArchivedSub, error) {
+	rows, err := s.db.Query(`
+		SELECT subreddit, COUNT(*) AS cnt
+		FROM posts
+		GROUP BY subreddit
+		ORDER BY LOWER(subreddit) ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("archived subs alphabetical: %w", err)
+	}
+	return s.scanArchivedSubs(rows)
 }
 
 func (s *PostStore) SetMediaDone(urlPath string) error {
