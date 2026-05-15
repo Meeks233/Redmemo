@@ -117,6 +117,10 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		h.archiver.ArchiveComments(post.Permalink, comments)
 	}()
 
+	if sp, _ := h.postStore.Get(post.Permalink); sp != nil {
+		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+	}
+
 	data := render.PostPageData{
 		BasePage: render.BasePage{
 			URL:       r.URL.Path,
@@ -146,6 +150,7 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		h.renderer.RenderError(w, "存档数据解析失败", http.StatusInternalServerError)
 		return
 	}
+	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 
 	var comments []reddit.Comment
 	stored, _ := h.commentStore.GetLatest(sp.URLPath)

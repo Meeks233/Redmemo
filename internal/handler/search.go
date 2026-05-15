@@ -84,6 +84,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			for _, sp := range stored {
 				var p reddit.Post
 				if err := json.Unmarshal(sp.JSONData, &p); err == nil {
+					p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 					posts = append(posts, p)
 				}
 			}

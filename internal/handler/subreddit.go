@@ -52,6 +52,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	for _, sp := range stored {
 		var p reddit.Post
 		if err := json.Unmarshal(sp.JSONData, &p); err == nil {
+			p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 			posts = append(posts, p)
 		}
 	}
@@ -223,6 +224,7 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 	for _, sp := range stored {
 		var p reddit.Post
 		if err := json.Unmarshal(sp.JSONData, &p); err == nil {
+			p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 			posts = append(posts, p)
 		}
 	}

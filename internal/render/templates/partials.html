@@ -17,7 +17,7 @@
 		<p class="modal-url">https://www.reddit.com{{ . }}</p>
 		<div class="modal-actions">
 			<button class="modal-cancel" onclick="document.getElementById('reddit-modal').classList.remove('visible')">No, go back</button>
-			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" rel="nofollow">Yes, take me to Reddit</a>
+			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" target="_blank" rel="nofollow noopener noreferrer" onclick="document.getElementById('reddit-modal').classList.remove('visible')">Yes, take me to Reddit</a>
 		</div>
 	</div>
 </div>
@@ -182,33 +182,61 @@
 {{ define "post_detail" }}
 {{ $post := .Post }}
 {{ $prefs := .Prefs }}
+{{ $hasOAuth := .HasOAuth }}
 {{ $blurred := and $post.Flags.Spoiler (eq $prefs.BlurSpoiler "on") }}
 <div class="post highlighted{{ if $blurred }} post_blurred{{ end }}">
-	<p class="post_header">
-		<a class="post_subreddit" href="/r/{{ $post.Community }}">r/{{ $post.Community }}</a>
-		<span class="dot">&bull;</span>
-		<a class="post_author {{ $post.Author.Distinguished }}" href="/user/{{ $post.Author.Name }}">u/{{ $post.Author.Name }}</a>
-		{{ if $post.Author.Flair.FlairParts }}
-			<small class="author_flair">{{ template "render_flair" $post.Author.Flair.FlairParts }}</small>
-		{{ end }}
-		<span class="dot">&bull;</span>
-		<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
-		{{ if $post.ArchivedRelTime }}
+	<div class="post_header_row">
+		<p class="post_header">
+			<a class="post_subreddit" href="/r/{{ $post.Community }}">r/{{ $post.Community }}</a>
 			<span class="dot">&bull;</span>
-			<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
-		{{ end }}
-		{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
-		<span class="dot">&bull;</span>
-		<span class="awards">
-			{{ range $post.Awards }}
-			<span class="award" title="{{ .Name }}">
-				<img alt="{{ .Name }}" src="{{ .IconURL }}" width="16" height="16"/>
-				{{ .Count }}
+			<a class="post_author {{ $post.Author.Distinguished }}" href="/user/{{ $post.Author.Name }}">u/{{ $post.Author.Name }}</a>
+			{{ if $post.Author.Flair.FlairParts }}
+				<small class="author_flair">{{ template "render_flair" $post.Author.Flair.FlairParts }}</small>
+			{{ end }}
+			<span class="dot">&bull;</span>
+			<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
+			{{ if $post.ArchivedRelTime }}
+				<span class="dot">&bull;</span>
+				<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
+			{{ end }}
+			{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
+			<span class="dot">&bull;</span>
+			<span class="awards">
+				{{ range $post.Awards }}
+				<span class="award" title="{{ .Name }}">
+					<img alt="{{ .Name }}" src="{{ .IconURL }}" width="16" height="16"/>
+					{{ .Count }}
+				</span>
+				{{ end }}
 			</span>
 			{{ end }}
-		</span>
-		{{ end }}
-	</p>
+		</p>
+		<div class="post_header_actions">
+			{{ if $hasOAuth }}
+			<button id="refresh_post" class="post-action-btn" title="Re-fetch this post from Reddit" onclick="refreshPost('{{ $post.Community }}','{{ $post.ID }}')">
+				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+				<span>Refresh</span>
+			</button>
+			{{ else }}
+			<button id="refresh_post" class="post-action-btn disabled" title="No session tokens available" onclick="alert('No session tokens available on this instance')">
+				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8L18.74 5.74A9.75 9.75 0 0 0 12 3C11 3 10.03 3.16 9.13 3.47"/><path d="M8 16H3v5"/><path d="M3 12C3 9.51 4 7.26 5.64 5.64"/><path d="m3 16 2.26 2.26A9.75 9.75 0 0 0 12 21c2.49 0 4.74-1 6.36-2.64"/><path d="M21 12c0 1-.16 1.97-.47 2.87"/><path d="M21 3v5h-5"/><path d="M22 22 2 2"/></svg>
+				<span>Refresh</span>
+			</button>
+			{{ end }}
+			{{ if eq $prefs.DisableVisitRedditConfirmation "on" }}
+			<a class="post-action-btn" title="Go to Reddit" href="https://www.reddit.com{{ $post.Permalink }}" target="_blank" rel="nofollow noopener noreferrer">
+				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
+				<span>Reddit</span>
+			</a>
+			{{ else }}
+			<button class="post-action-btn" title="Go to Reddit" onclick="document.getElementById('reddit-modal').classList.add('visible')">
+				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
+				<span>Reddit</span>
+			</button>
+			{{ template "visit_reddit_confirmation" $post.Permalink }}
+			{{ end }}
+		</div>
+	</div>
 	<h1 class="post_title">
 		{{ if $post.Flair.FlairParts }}
 			<a href="/r/{{ $post.Community }}/search?q=flair_name%3A%22{{ $post.Flair.Text }}%22&restrict_sr=on"

@@ -1577,7 +1577,7 @@ a.search_subreddit:hover {
 }
 
 .archived {
-    opacity: 0.4;
+    opacity: 0.5;
     font-style: italic;
 }
 
@@ -2835,12 +2835,26 @@ th {
     font-weight: 600;
 }
 
-/* Post action buttons (refresh + go to reddit) */
-#post_actions {
+/* Post action buttons (refresh + go to reddit) — inline with sub/author header */
+.post_header_row {
+    grid-area: post_header;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.post_header_row .post_header {
+    grid-area: unset;
+    flex: 1;
+    min-width: 0;
+}
+
+.post_header_actions {
     display: flex;
     gap: 8px;
-    justify-content: flex-end;
-    margin-bottom: 8px;
+    flex-shrink: 0;
+    margin: 12px 15px 0 0;
 }
 
 .post-action-btn {

@@ -84,6 +84,7 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 
 	var post reddit.Post
 	_ = json.Unmarshal(sp.JSONData, &post)
+	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 
 	// When media=images, redirect straight to the image bytes via the
 	// media proxy instead of returning JSON.
