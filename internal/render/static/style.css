@@ -309,13 +309,6 @@ figcaption {
     }
 }
 
-.popup-backdrop {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    /* invisible — exists only to capture backdrop clicks */
-}
-
 .popup-inner {
     display: flex;
     flex-direction: column;
@@ -329,8 +322,6 @@ figcaption {
     background: var(--popup-background);
     border: var(--popup-border);
     border-radius: 5px;
-    position: relative;
-    z-index: 2;
 }
 
 .popup-inner svg {
@@ -3090,9 +3081,18 @@ th {
     background: var(--highlighted);
 }
 
+.modal-confirm,
+.modal-confirm:link,
+.modal-confirm:visited,
+.modal-confirm:hover,
+.modal-confirm:focus,
+.modal-confirm:active {
+    color: #fff;
+    text-decoration: none;
+}
+
 .modal-confirm {
     background: var(--accent);
-    color: #fff;
     border-color: var(--accent);
 }
 

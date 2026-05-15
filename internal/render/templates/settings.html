@@ -153,6 +153,11 @@
 						<input type="hidden" value="off" name="disable_visit_reddit_confirmation">
 						<input type="checkbox" name="disable_visit_reddit_confirmation" {{ if eq .Prefs.DisableVisitRedditConfirmation "on" }}checked{{ end }}>
 					</div>
+					<div class="prefs-group">
+						<label for="fetch_sub_about" title="When off (default), visiting a subreddit page does not actively request the sub's about info upstream; only cached data is used. The background icon/about prefetch is unaffected.">Fetch sub about info on visit</label>
+						<input type="hidden" value="off" name="fetch_sub_about">
+						<input type="checkbox" name="fetch_sub_about" id="fetch_sub_about" {{ if eq .Prefs.FetchSubAbout "on" }}checked{{ end }}>
+					</div>
 				</fieldset>
 			</div>
 			<div id="save-bar">

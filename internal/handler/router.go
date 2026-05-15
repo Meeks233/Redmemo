@@ -114,6 +114,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /subPicker.js", static)
 	mux.Handle("GET /videoAutoplay.js", static)
 	mux.Handle("GET /videoPreload.js", static)
+	mux.Handle("GET /redditModal.js", static)
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)

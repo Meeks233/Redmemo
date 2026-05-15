@@ -192,7 +192,12 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	}
 
 	// Active visit: cached if fresh, else fetch + persist (60-day TTL).
-	subInfo, _ := h.fetchSubredditAbout(r.Context(), sub, true)
+	// Gated by the fetch_sub_about preference — when off (default), the HR
+	// layer is cache-only and never triggers an upstream about request.
+	// The background icon/about prefetch path (internal/prefetch/icon.go)
+	// is independent of this setting.
+	activeAbout := prefs.FetchSubAbout == "on"
+	subInfo, _ := h.fetchSubredditAbout(r.Context(), sub, activeAbout)
 
 	go func() {
 		h.archiver.ArchivePosts(posts, sub, "oauth_fallback")

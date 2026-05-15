@@ -21,6 +21,7 @@ var settingsKeys = []string{
 	"disable_visit_reddit_confirmation",
 	"comment_sort", "post_sort",
 	"hide_awards", "hide_score", "remove_default_feeds",
+	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
 	"prefetch_threshold", "scroll_interval",
 }

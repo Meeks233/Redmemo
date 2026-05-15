@@ -182,6 +182,7 @@ type Preferences struct {
 	HideAwards                     string
 	HideScore                      string
 	RemoveDefaultFeeds             string
+	FetchSubAbout                  string
 	EnableDebug                    string
 	EnableNaturalPrefetch          string
 	PrefetchSubs                   string

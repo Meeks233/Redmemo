@@ -85,6 +85,7 @@ var prefDefaults = map[string]string{
 	"hide_awards":                     "off",
 	"hide_score":                      "off",
 	"remove_default_feeds":            "off",
+	"fetch_sub_about":                 "off",
 	"disable_visit_reddit_confirmation": "off",
 	"comment_sort": "new",
 	"post_sort":    "new",
@@ -129,6 +130,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.HideAwards = pref("hide_awards")
 	p.HideScore = pref("hide_score")
 	p.RemoveDefaultFeeds = pref("remove_default_feeds")
+	p.FetchSubAbout = pref("fetch_sub_about")
 	p.DisableVisitRedditConfirmation = pref("disable_visit_reddit_confirmation")
 	p.FixedNavbar = pref("fixed_navbar")
 	p.EnableDebug = pref("enable_debug")

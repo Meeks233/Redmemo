@@ -34,7 +34,7 @@
 			<p>Reset at: <span id="fr-countdown" data-from="{{ .From }}"{{ if .Freeze }} data-freeze="1"{{ end }}>{{ if .Freeze }}99:99{{ else }}--:--{{ end }}</span></p>
 			{{ if .From }}
 			<div class="fr-actions">
-				<a class="fr-go-reddit" href="#popup">
+				<a class="fr-go-reddit" href="https://www.reddit.com{{ .From }}" target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm="Access Reddit directly">
 					<span class="fr-go-reddit-emoji" aria-hidden="true">😈</span>
 					<span>Access Reddit directly</span>
 				</a>
@@ -54,8 +54,8 @@
 	</div>
 </div>
 {{ if and .Reason .From }}
-{{/* Popup rendered OUTSIDE #error so the broad `#error a { color: var(--accent) }`
-     rule cannot bleed into the popup's #goback / #toreddit anchors. */}}
+{{/* Modal rendered OUTSIDE #error so the broad `#error a { color: var(--accent) }`
+     rule cannot bleed into the modal's .modal-cancel / .modal-confirm anchors. */}}
 {{ template "visit_reddit_confirmation" .From }}
 {{ end }}
 {{ if .Reason }}
