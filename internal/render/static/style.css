@@ -2810,6 +2810,35 @@ th {
     color: #60a5fa;
 }
 
+/* HR-degraded banner — clickable, amber so it's visually distinct from
+   the blue offline banner. Click → /fuckreddit?reason=... */
+.degraded-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    background: #f59e0b22;
+    border: 1px solid #f59e0b88;
+    border-radius: 6px;
+    color: var(--text);
+    font-weight: 500;
+    font-size: 0.95em;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.degraded-banner:hover {
+    background: #f59e0b44;
+}
+
+.degraded-banner svg {
+    flex-shrink: 0;
+    color: #f59e0b;
+}
+
 .debug-banner {
     display: flex;
     align-items: center;

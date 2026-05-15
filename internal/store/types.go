@@ -78,6 +78,11 @@ type SubIcon struct {
 	Hash      *string
 	FetchedAt time.Time
 	ExpiresAt time.Time
+	// About cache (separate expiry from icon). All nullable: zero values
+	// mean "about has never been fetched".
+	AboutJSON       []byte
+	AboutFetchedAt  *time.Time
+	AboutExpiresAt  *time.Time
 }
 
 type StoredPrefetchConfig struct {

@@ -141,6 +141,12 @@ var migrations = []string{
 
 	// v11: per-sub NSFW flag (nullable: NULL = never evaluated; once TRUE it is sticky)
 	`ALTER TABLE subreddit_status ADD COLUMN IF NOT EXISTS nsfw BOOLEAN;`,
+
+	// v12: cache subreddit /about/.json in the same row as the icon, with its
+	// own independent 60-day expiry. NULL columns mean "never fetched".
+	`ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_json JSONB;
+	 ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_fetched_at TIMESTAMPTZ;
+	 ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_expires_at TIMESTAMPTZ;`,
 }
 
 func RunMigrations(db *sql.DB) error {

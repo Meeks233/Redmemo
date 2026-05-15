@@ -64,6 +64,11 @@ type BasePage struct {
 	Prefs     reddit.Preferences
 	BrandName string
 	Version   string
+	// DegradedReason is set when the page is being served from local archive
+	// instead of the live API because of the HR rate-limit layer or OAuth
+	// quota exhaustion. Empty string = not degraded. When non-empty the
+	// "degraded_banner" partial renders and links to /fuckreddit?reason=...
+	DegradedReason string
 }
 
 type SubredditPageData struct {
@@ -365,13 +370,22 @@ func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, 
 type FuckRedditPageData struct {
 	BasePage
 	ResetSeconds int
+	// Reason explains why the user landed here: "hr_l1"/"hr_l2"/"hr_l3"
+	// (HR rate-limit cooldown), "quota_exhausted" (OAuth budget drained),
+	// or "" (unknown / direct navigation). Threaded through for the page
+	// template to consume — content presentation deferred.
+	Reason string
 }
 
-func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preferences, resetSeconds int) {
+func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preferences, resetSeconds int, reason string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if reason != "" {
+		w.Header().Set("X-Reason", reason)
+	}
 	data := FuckRedditPageData{
 		BasePage:     e.basePage("", prefs),
 		ResetSeconds: resetSeconds,
+		Reason:       reason,
 	}
 	e.renderPage(w, "fuckreddit.html", data)
 }

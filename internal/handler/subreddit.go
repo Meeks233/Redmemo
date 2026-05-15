@@ -131,22 +131,29 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		return
 	}
 
-	// 2. OAuth fetch
-	if h.oauthPool.HasAvailableTokens() {
+	// 2. HR gate / OAuth quota. On degrade, skip upstream and fall through.
+	degrade, reason := h.shouldDegrade(r.Context())
+	if !degrade {
 		if h.renderSubredditFallback(w, r, sub, sort, after, prefs, limit) {
 			return
 		}
 	}
 
-	// 3. Archive fallback (offline)
+	// 3. Archive fallback. Distinguish "truly offline" (upstream failed,
+	// reason==""→show offline banner) from "deliberately degraded" (HR /
+	// quota, reason!=""→show only degraded banner, not the offline one).
 	posts, _ := h.postStore.ListBySubreddit(sub, limit, 0)
 	if len(posts) > 0 {
-		h.renderSubredditFromArchive(w, r, sub, posts, prefs, true)
+		h.renderSubredditFromArchive(w, r, sub, posts, prefs, reason == "", reason)
 		return
 	}
 
 	// 4. Nothing available
-	http.Redirect(w, r, "/fuckreddit", http.StatusTemporaryRedirect)
+	target := "/fuckreddit"
+	if reason != "" {
+		target += "?reason=" + reason
+	}
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
@@ -164,8 +171,11 @@ func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
 	}
 	h.archiver.ArchivePosts(posts, sub, "background")
 
-	subInfo, err := h.fetchSubredditAbout(ctx, sub)
-	if err == nil {
+	// About is never fetched from background paths — only on active user
+	// visits (see fetchSubredditAbout). Read whatever is cached and persist
+	// it to the subreddit archive if available.
+	subInfo, _ := h.fetchSubredditAbout(ctx, sub, false)
+	if subInfo.Name != "" {
 		h.archiver.ArchiveSubreddit(&subInfo)
 	}
 }
@@ -176,6 +186,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	}
 
 	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, limit)
+	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
 		if h.subStatusStore != nil {
@@ -184,11 +195,14 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		return false
 	}
 
-	subInfo, _ := h.redditCli.FetchSubredditAbout(r.Context(), sub)
+	// Active visit: cached if fresh, else fetch + persist (60-day TTL).
+	subInfo, _ := h.fetchSubredditAbout(r.Context(), sub, true)
 
 	go func() {
 		h.archiver.ArchivePosts(posts, sub, "oauth_fallback")
-		h.archiver.ArchiveSubreddit(&subInfo)
+		if subInfo.Name != "" {
+			h.archiver.ArchiveSubreddit(&subInfo)
+		}
 		if h.subStatusStore != nil {
 			h.subStatusStore.MarkLive(sub)
 		}
@@ -219,7 +233,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	return true
 }
 
-func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Request, sub string, stored []*store.StoredPost, prefs reddit.Preferences, offline bool) {
+func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Request, sub string, stored []*store.StoredPost, prefs reddit.Preferences, offline bool, degradedReason string) {
 	var posts []reddit.Post
 	for _, sp := range stored {
 		var p reddit.Post
@@ -231,10 +245,11 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 
 	data := render.SubredditPageData{
 		BasePage: render.BasePage{
-			URL:       r.URL.Path,
-			Prefs:     prefs,
-			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			URL:            r.URL.Path,
+			Prefs:          prefs,
+			BrandName:      h.cfg.Render.BrandName,
+			Version:        "0.1.0",
+			DegradedReason: degradedReason,
 		},
 		Posts:     posts,
 		NoPosts:   len(posts) == 0,

@@ -17,9 +17,11 @@ func NewSubIconStore(db *sql.DB) *SubIconStore {
 func (s *SubIconStore) Get(name string) (*SubIcon, error) {
 	icon := &SubIcon{}
 	err := s.db.QueryRow(`
-		SELECT name, icon_url, local_path, hash, fetched_at, expires_at
+		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
+		       about_json, about_fetched_at, about_expires_at
 		FROM sub_icons WHERE name = $1`, name,
-	).Scan(&icon.Name, &icon.IconURL, &icon.LocalPath, &icon.Hash, &icon.FetchedAt, &icon.ExpiresAt)
+	).Scan(&icon.Name, &icon.IconURL, &icon.LocalPath, &icon.Hash, &icon.FetchedAt, &icon.ExpiresAt,
+		&icon.AboutJSON, &icon.AboutFetchedAt, &icon.AboutExpiresAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -49,7 +51,8 @@ func (s *SubIconStore) Save(icon *SubIcon) error {
 
 func (s *SubIconStore) ListExpired() ([]*SubIcon, error) {
 	rows, err := s.db.Query(`
-		SELECT name, icon_url, local_path, hash, fetched_at, expires_at
+		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
+		       about_json, about_fetched_at, about_expires_at
 		FROM sub_icons
 		WHERE expires_at < NOW()
 		ORDER BY expires_at`)
@@ -62,7 +65,8 @@ func (s *SubIconStore) ListExpired() ([]*SubIcon, error) {
 
 func (s *SubIconStore) ListAll() ([]*SubIcon, error) {
 	rows, err := s.db.Query(`
-		SELECT name, icon_url, local_path, hash, fetched_at, expires_at
+		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
+		       about_json, about_fetched_at, about_expires_at
 		FROM sub_icons ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list all icons: %w", err)
@@ -92,6 +96,36 @@ func (s *SubIconStore) IconTTL() time.Duration {
 	return 30 * 24 * time.Hour
 }
 
+// AboutTTL is the cache lifetime for /r/<sub>/about.json responses.
+// Independent of icon TTL — about data refreshes far less often than icons.
+func (s *SubIconStore) AboutTTL() time.Duration {
+	return 60 * 24 * time.Hour
+}
+
+// SaveAbout upserts the about JSON for `name` with a fresh fetched_at and
+// expires_at = now + AboutTTL. It does NOT touch icon_url / local_path /
+// hash / fetched_at / expires_at. If the row does not exist yet, it is
+// created with default (placeholder) icon fields — the icon scheduler
+// will fill them on its own pass.
+func (s *SubIconStore) SaveAbout(name string, aboutJSON []byte) error {
+	now := time.Now()
+	expires := now.Add(s.AboutTTL())
+	_, err := s.db.Exec(`
+		INSERT INTO sub_icons (name, icon_url, fetched_at, expires_at,
+		                      about_json, about_fetched_at, about_expires_at)
+		VALUES ($1, '', NOW(), NOW(), $2, $3, $4)
+		ON CONFLICT (name) DO UPDATE SET
+			about_json       = EXCLUDED.about_json,
+			about_fetched_at = EXCLUDED.about_fetched_at,
+			about_expires_at = EXCLUDED.about_expires_at`,
+		name, aboutJSON, now, expires,
+	)
+	if err != nil {
+		return fmt.Errorf("save sub about: %w", err)
+	}
+	return nil
+}
+
 func scanIcons(rows *sql.Rows) ([]*SubIcon, error) {
 	var icons []*SubIcon
 	for rows.Next() {
@@ -99,6 +133,7 @@ func scanIcons(rows *sql.Rows) ([]*SubIcon, error) {
 		if err := rows.Scan(
 			&icon.Name, &icon.IconURL, &icon.LocalPath, &icon.Hash,
 			&icon.FetchedAt, &icon.ExpiresAt,
+			&icon.AboutJSON, &icon.AboutFetchedAt, &icon.AboutExpiresAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan sub icon: %w", err)
 		}

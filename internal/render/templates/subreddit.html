@@ -9,6 +9,7 @@
 {{ define "body" }}
 <main>
 	{{ template "offline_banner" . }}
+	{{ template "degraded_banner" . }}
 	{{ if not .IsFiltered }}
 	<div id="column_one">
 		<form id="sort">

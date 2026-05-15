@@ -2,10 +2,12 @@ package prefetch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
+	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/store"
 )
 
@@ -140,7 +142,9 @@ func (s *Scheduler) fetchAndSaveIcon(ctx context.Context, sub string) {
 			s.Events.Addf(LevelError, "L4", "r/%s: no public client for icon fetch", sub)
 			return
 		}
+		var about reddit.Subreddit
 		about, aboutErr := s.publicCli.FetchSubredditAbout(ctx, sub)
+		s.recordUpstream(ctx)
 		if aboutErr != nil {
 			fetchErr = aboutErr
 			s.Events.Addf(LevelError, "L4", "r/%s: icon fetch failed: %v", sub, aboutErr)
@@ -148,6 +152,15 @@ func (s *Scheduler) fetchAndSaveIcon(ctx context.Context, sub string) {
 		}
 		iconURL = about.RawIcon
 		s.Events.Addf(LevelOK, "L4", "r/%s: got icon URL: %q", sub, iconURL)
+
+		// Piggy-back: persist the about JSON with its own 60-day expiry.
+		// The icon scheduler runs more often than about expires, so this
+		// keeps about data fresh "for free" without any extra upstream cost.
+		if data, jerr := json.Marshal(about); jerr == nil {
+			if serr := s.iconStore.SaveAbout(sub, data); serr != nil {
+				log.Printf("L4: r/%s: save about failed: %v", sub, serr)
+			}
+		}
 	})
 	if err != nil {
 		return

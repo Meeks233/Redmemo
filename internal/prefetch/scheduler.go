@@ -37,6 +37,13 @@ type SubStatusChecker interface {
 	ListAllAlive() ([]string, error)
 }
 
+// HRRecorder reports every successful upstream call to the HR rate-limit
+// layer so background prefetch contributes to the global counter just like
+// foreground HR requests.
+type HRRecorder interface {
+	RecordUpstream(ctx context.Context)
+}
+
 // workItem is a single request submitted by L1/L2 to the NP dispatch queue.
 type workItem struct {
 	label       string
@@ -57,6 +64,7 @@ const cycleStateKey = "_prefetch_cycle_state"
 type SubIconProvider interface {
 	Get(name string) (*store.SubIcon, error)
 	Save(icon *store.SubIcon) error
+	SaveAbout(name string, aboutJSON []byte) error
 	ListExpired() ([]*store.SubIcon, error)
 	ListAll() ([]*store.SubIcon, error)
 	IconTTL() time.Duration
@@ -73,6 +81,7 @@ type Scheduler struct {
 	subStatus SubStatusChecker
 	postStore *store.PostStore
 	iconStore SubIconProvider
+	hr        HRRecorder
 	Events    *EventLog
 
 	queue       chan *workItem
@@ -109,6 +118,7 @@ func New(
 	subStatus SubStatusChecker,
 	postStore *store.PostStore,
 	iconStore SubIconProvider,
+	hr HRRecorder,
 ) *Scheduler {
 	return &Scheduler{
 		cfg:       cfg,
@@ -121,8 +131,16 @@ func New(
 		subStatus: subStatus,
 		postStore: postStore,
 		iconStore: iconStore,
+		hr:        hr,
 		Events:    NewEventLog(200),
 		queue:     make(chan *workItem, 1),
+	}
+}
+
+// recordUpstream tolerates a nil HR recorder (HR layer disabled).
+func (s *Scheduler) recordUpstream(ctx context.Context) {
+	if s.hr != nil {
+		s.hr.RecordUpstream(ctx)
 	}
 }
 
@@ -431,10 +449,12 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			label := fmt.Sprintf("L1 r/%s round %d/%d listing (after=%q)", sub, round+1, maxRoundsPerCycle, cursor)
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
 				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+				s.recordUpstream(ctx)
 				if fetchErr != nil {
 					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: oauth failed: %v, trying public", sub, round+1, fetchErr)
 					if s.publicCli != nil {
 						posts, _, after, fetchErr = s.publicCli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+						s.recordUpstream(ctx)
 					}
 				}
 				if fetchErr != nil {

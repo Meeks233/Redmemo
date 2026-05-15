@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
@@ -23,23 +24,29 @@ func (h *Handler) notifyUserRequest() {
 func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, after string, limit int) ([]reddit.Post, string, string, error) {
 	if h.oauthPool.HasAvailableTokens() {
 		posts, before, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, after, limit)
+		h.recordUpstream(ctx)
 		if err == nil {
 			h.notifyUserRequest()
 			return posts, before, after, nil
 		}
 	}
-	return h.publicCli.FetchSubreddit(ctx, sub, sort, after, limit)
+	posts, before, afterCur, err := h.publicCli.FetchSubreddit(ctx, sub, sort, after, limit)
+	h.recordUpstream(ctx)
+	return posts, before, afterCur, err
 }
 
 func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (reddit.Post, []reddit.Comment, error) {
 	if h.oauthPool.HasAvailableTokens() {
 		post, comments, err := h.redditCli.FetchPost(ctx, sub, id, commentSort)
+		h.recordUpstream(ctx)
 		if err == nil {
 			h.notifyUserRequest()
 			return post, comments, nil
 		}
 	}
-	return h.publicCli.FetchPost(ctx, sub, id, commentSort)
+	post, comments, err := h.publicCli.FetchPost(ctx, sub, id, commentSort)
+	h.recordUpstream(ctx)
+	return post, comments, err
 }
 
 const archivePageSize = 25
@@ -323,13 +330,62 @@ func (h *Handler) isArchivableSub(sub string) bool {
 	return false
 }
 
-func (h *Handler) fetchSubredditAbout(ctx context.Context, sub string) (reddit.Subreddit, error) {
-	if h.oauthPool.HasAvailableTokens() {
-		info, err := h.redditCli.FetchSubredditAbout(ctx, sub)
-		if err == nil {
-			h.notifyUserRequest()
-			return info, nil
+// fetchSubredditAbout returns the /r/<sub>/about data. It ALWAYS prefers the
+// DB cache (60-day TTL via sub_icons.about_*). Upstream is consulted only
+// when:
+//   1. active=true (the request was initiated by a user actively viewing
+//      the subreddit page — never by background prefetch or archive jobs), AND
+//   2. The cache is missing OR expired.
+//
+// When active=false and the cache is missing/expired, an empty Subreddit
+// is returned without any upstream call. This enforces the "no auto-fetch
+// of about" policy.
+func (h *Handler) fetchSubredditAbout(ctx context.Context, sub string, active bool) (reddit.Subreddit, error) {
+	// 1. DB cache lookup.
+	if h.subIconStore != nil {
+		if cached, err := h.subIconStore.Get(sub); err == nil && cached != nil && len(cached.AboutJSON) > 0 {
+			fresh := cached.AboutExpiresAt != nil && time.Now().Before(*cached.AboutExpiresAt)
+			if fresh {
+				var info reddit.Subreddit
+				if jerr := json.Unmarshal(cached.AboutJSON, &info); jerr == nil {
+					return info, nil
+				}
+			}
+			// Stale or unparseable — fall through. If we're not in active
+			// mode, return the stale data rather than nothing (better than
+			// an empty page) but do not refresh.
+			if !active {
+				var info reddit.Subreddit
+				_ = json.Unmarshal(cached.AboutJSON, &info)
+				return info, nil
+			}
 		}
 	}
-	return h.publicCli.FetchSubredditAbout(ctx, sub)
+
+	// 2. Active visit + cache miss/expired → upstream + persist.
+	if !active {
+		return reddit.Subreddit{}, nil
+	}
+
+	var info reddit.Subreddit
+	var err error
+	if h.oauthPool.HasAvailableTokens() {
+		info, err = h.redditCli.FetchSubredditAbout(ctx, sub)
+		h.recordUpstream(ctx)
+		if err == nil {
+			h.notifyUserRequest()
+		}
+	}
+	if err != nil || info.Name == "" {
+		info, err = h.publicCli.FetchSubredditAbout(ctx, sub)
+		h.recordUpstream(ctx)
+	}
+	if err == nil && h.subIconStore != nil && info.Name != "" {
+		if data, jerr := json.Marshal(info); jerr == nil {
+			if serr := h.subIconStore.SaveAbout(sub, data); serr != nil {
+				log.Printf("handler: save about r/%s: %v", sub, serr)
+			}
+		}
+	}
+	return info, err
 }

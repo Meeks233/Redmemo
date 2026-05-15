@@ -191,6 +191,12 @@ func (c *Cache) Close() error {
 	return c.client.Close()
 }
 
+// Client returns the underlying redis client so callers (e.g. hrlimit)
+// can share the same connection pool.
+func (c *Cache) Client() *redis.Client {
+	return c.client
+}
+
 // MarshalJSON/UnmarshalJSON helpers for RateLimitState
 func (s *RateLimitState) MarshalBinary() ([]byte, error) {
 	return json.Marshal(s)

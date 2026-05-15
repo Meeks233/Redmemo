@@ -27,15 +27,20 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. OAuth fetch
-	if h.oauthPool.HasAvailableTokens() {
+	// 2. HR gate / OAuth quota
+	degrade, reason := h.shouldDegrade(r.Context())
+	if !degrade {
 		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
 			return
 		}
 	}
 
 	// 3. No archive for users — redirect
-	http.Redirect(w, r, "/fuckreddit", http.StatusTemporaryRedirect)
+	target := "/fuckreddit"
+	if reason != "" {
+		target += "?reason=" + reason
+	}
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
@@ -50,6 +55,7 @@ func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
 	} else {
 		_, posts, _, err = h.publicCli.FetchUser(ctx, name, listing, sort, after)
 	}
+	h.recordUpstream(ctx)
 	if err != nil {
 		log.Printf("background archive user %s: %v", name, err)
 		return
@@ -59,6 +65,7 @@ func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
 
 func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences) bool {
 	user, posts, _, err := h.redditCli.FetchUser(r.Context(), name, listing, sort, after)
+	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: fallback fetch user %s: %v", name, err)
 		return false

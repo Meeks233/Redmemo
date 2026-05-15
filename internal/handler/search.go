@@ -38,10 +38,12 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		return
 	}
 
-	// 2. OAuth fetch
-	if h.oauthPool.HasAvailableTokens() {
+	// 2. HR gate / OAuth quota
+	degrade, reason := h.shouldDegrade(r.Context())
+	if !degrade {
 		restrictSR := sub != ""
 		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 10)
+		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
 
@@ -91,10 +93,11 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 
 			data := render.SearchPageData{
 				BasePage: render.BasePage{
-					URL:       urlPath,
-					Prefs:     prefs,
-					BrandName: h.cfg.Render.BrandName,
-					Version:   "0.1.0",
+					URL:            urlPath,
+					Prefs:          prefs,
+					BrandName:      h.cfg.Render.BrandName,
+					Version:        "0.1.0",
+					DegradedReason: reason,
 				},
 				Posts: posts,
 				Params: reddit.SearchParams{
@@ -104,7 +107,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				Sub:                sub,
 				NoPosts:            len(posts) == 0,
 				AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
-				IsOffline:          true,
+				IsOffline:          reason == "",
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -117,7 +120,11 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	}
 
 	// 4. Nothing available
-	http.Redirect(w, r, "/fuckreddit", http.StatusTemporaryRedirect)
+	target := "/fuckreddit"
+	if reason != "" {
+		target += "?reason=" + reason
+	}
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
@@ -133,6 +140,7 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 	} else {
 		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 25)
 	}
+	h.recordUpstream(ctx)
 	if err != nil {
 		log.Printf("background archive search %q: %v", query, err)
 		return

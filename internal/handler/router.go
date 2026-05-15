@@ -6,6 +6,7 @@ import (
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
+	"github.com/redmemo/redmemo/internal/hrlimit"
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/oauth"
 	"github.com/redmemo/redmemo/internal/prefetch"
@@ -18,6 +19,7 @@ import (
 
 type Handler struct {
 	ratelimit     *ratelimit.Manager
+	hr            *hrlimit.Manager
 	cache         *cache.Cache
 	renderer      *render.Engine
 	redditCli     *reddit.Client
@@ -40,6 +42,7 @@ type Handler struct {
 
 func New(
 	rl *ratelimit.Manager,
+	hr *hrlimit.Manager,
 	c *cache.Cache,
 	r *render.Engine,
 	rc *reddit.Client,
@@ -64,6 +67,7 @@ func New(
 	}
 	return &Handler{
 		ratelimit:     rl,
+		hr:            hr,
 		cache:         c,
 		renderer:      r,
 		redditCli:     rc,

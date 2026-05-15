@@ -49,6 +49,15 @@ prefetch:
       max_pages: 1
       priority: 5
 
+hrlimit:
+  enabled: true
+  l1_window: 5s
+  l1_threshold: 5
+  l2_window: 30s
+  l2_threshold: 15
+  l3_window: 5m
+  l3_threshold: 50
+
 render:
   brand_name: "RedMemo"
   show_archive_badge: true

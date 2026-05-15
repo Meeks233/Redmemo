@@ -20,7 +20,18 @@ type Config struct {
 	OAuth     OAuthConfig     `yaml:"oauth"`
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
 	Prefetch  PrefetchConfig  `yaml:"prefetch"`
+	HRLimit   HRLimitConfig   `yaml:"hrlimit"`
 	Render    RenderConfig    `yaml:"render"`
+}
+
+type HRLimitConfig struct {
+	Enabled     bool          `yaml:"enabled"`
+	L1Window    time.Duration `yaml:"l1_window"`
+	L1Threshold int           `yaml:"l1_threshold"`
+	L2Window    time.Duration `yaml:"l2_window"`
+	L2Threshold int           `yaml:"l2_threshold"`
+	L3Window    time.Duration `yaml:"l3_window"`
+	L3Threshold int           `yaml:"l3_threshold"`
 }
 
 type ServerConfig struct {
@@ -130,6 +141,15 @@ func defaults() *Config {
 		Prefetch: PrefetchConfig{
 			Enabled:       true,
 			CheckInterval: 30 * time.Second,
+		},
+		HRLimit: HRLimitConfig{
+			Enabled:     true,
+			L1Window:    5 * time.Second,
+			L1Threshold: 5,
+			L2Window:    30 * time.Second,
+			L2Threshold: 15,
+			L3Window:    5 * time.Minute,
+			L3Threshold: 50,
 		},
 		Render: RenderConfig{
 			BrandName:        "RedMemo",

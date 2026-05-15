@@ -35,22 +35,28 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. OAuth fetch
-	if h.oauthPool.HasAvailableTokens() {
+	// 2. HR gate / OAuth quota
+	degrade, reason := h.shouldDegrade(r.Context())
+	if !degrade {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
 			return
 		}
 	}
 
-	// 3. Archive fallback (offline)
+	// 3. Archive fallback. offline=true only when upstream actually failed
+	// (reason==""); when degraded, only the amber degraded banner shows.
 	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
-		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, true)
+		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason)
 		return
 	}
 
 	// 4. Nothing available
-	http.Redirect(w, r, "/fuckreddit", http.StatusTemporaryRedirect)
+	target := "/fuckreddit"
+	if reason != "" {
+		target += "?reason=" + reason
+	}
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {
@@ -85,7 +91,17 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	commentSort := r.URL.Query().Get("sort")
 
+	// User-triggered refresh is HR-gated like any foreground request.
+	if degrade, reason := h.shouldDegrade(r.Context()); degrade {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Reason", reason)
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprintf(w, `{"ok":false,"error":"degraded","reason":"%s"}`, reason)
+		return
+	}
+
 	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
+	h.recordUpstream(r.Context())
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
@@ -107,6 +123,7 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) bool {
 	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
+	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: fallback fetch post %s/%s: %v", sub, id, err)
 		return false
@@ -144,7 +161,7 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	return true
 }
 
-func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool) {
+func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string) {
 	var post reddit.Post
 	if err := json.Unmarshal(sp.JSONData, &post); err != nil {
 		h.renderer.RenderError(w, "存档数据解析失败", http.StatusInternalServerError)
@@ -160,10 +177,11 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 
 	data := render.PostPageData{
 		BasePage: render.BasePage{
-			URL:       r.URL.Path,
-			Prefs:     prefs,
-			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			URL:            r.URL.Path,
+			Prefs:          prefs,
+			BrandName:      h.cfg.Render.BrandName,
+			Version:        "0.1.0",
+			DegradedReason: degradedReason,
 		},
 		Post:            post,
 		Comments:        comments,

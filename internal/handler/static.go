@@ -116,7 +116,19 @@ func (h *Handler) handleWiki(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 	reset, _ := h.oauthPool.EarliestReset()
-	h.renderer.RenderFuckReddit(w, prefs, reset)
+
+	// Reason priority: explicit query param > active HR cooldown > quota probe.
+	reason := r.URL.Query().Get("reason")
+	if reason == "" && h.hr != nil {
+		if r2, _ := h.hr.CooldownReason(r.Context()); r2 != "" {
+			reason = r2
+		}
+	}
+	if reason == "" && !h.oauthPool.HasAvailableTokens() {
+		reason = "quota_exhausted"
+	}
+
+	h.renderer.RenderFuckReddit(w, prefs, reset, reason)
 }
 
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +290,15 @@ func (h *Handler) handleProbeSub(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// User-triggered probe is HR-gated.
+	if degrade, reason := h.shouldDegrade(r.Context()); degrade {
+		w.Header().Set("X-Reason", reason)
+		json.NewEncoder(w).Encode(map[string]interface{}{"exists": false, "error": "degraded", "reason": reason})
+		return
+	}
+
 	sub, err := h.publicCli.FetchSubredditAbout(r.Context(), name)
+	h.recordUpstream(r.Context())
 	if err != nil {
 		if h.subStatusStore != nil {
 			h.subStatusStore.RecordFailure(name, err.Error())

@@ -12,6 +12,7 @@ import (
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/handler"
+	"github.com/redmemo/redmemo/internal/hrlimit"
 	"github.com/redmemo/redmemo/internal/legacy"
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/oauth"
@@ -113,6 +114,7 @@ func main() {
 
 	// 10. Init modules
 	rateLimiter := ratelimit.New(cfg.RateLimit, oauthPool)
+	hrLimiter := hrlimit.NewManager(redisCache.Client(), cfg.HRLimit)
 
 	renderer, err := render.New(cfg.Render)
 	if err != nil {
@@ -129,7 +131,7 @@ func main() {
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
 		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,
-		subIconStore,
+		subIconStore, hrLimiter,
 	)
 
 	// 11. Start background tasks
@@ -142,7 +144,7 @@ func main() {
 
 	// 12. Register routes, start HTTP server
 	h := handler.New(
-		rateLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
+		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
 		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, uaPool, cfg,
 	)
