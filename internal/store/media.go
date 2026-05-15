@@ -17,12 +17,12 @@ func (s *MediaIndexStore) Resolve(originalURL string) (*MediaMeta, error) {
 	m := &MediaMeta{}
 	err := s.db.QueryRow(`
 		SELECT original_url, hash, file_path, mime_type, file_size,
-		       first_seen, last_accessed, access_count
+		       first_seen, last_accessed, access_count, audio_state
 		FROM media_index
 		WHERE original_url = $1`, originalURL,
 	).Scan(
 		&m.OriginalURL, &m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
-		&m.FirstSeen, &m.LastAccessed, &m.AccessCount,
+		&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.AudioState,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -104,10 +104,23 @@ func (s *MediaIndexStore) MarkEvicted(hash string) error {
 	return nil
 }
 
+// SetAudioState updates only the audio_state column on an existing media_index
+// row. Caller must Save the row first. Accepts "has_audio" or "silent".
+func (s *MediaIndexStore) SetAudioState(originalURL, state string) error {
+	_, err := s.db.Exec(`
+		UPDATE media_index SET audio_state = $2 WHERE original_url = $1`,
+		originalURL, state,
+	)
+	if err != nil {
+		return fmt.Errorf("set audio state: %w", err)
+	}
+	return nil
+}
+
 func (s *MediaIndexStore) ListEvictionCandidates(limit int) ([]*MediaMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT original_url, hash, file_path, mime_type, file_size,
-		       first_seen, last_accessed, access_count
+		       first_seen, last_accessed, access_count, audio_state
 		FROM media_index
 		WHERE file_path IS NOT NULL
 		ORDER BY (file_size / 1048576.0) * (EXTRACT(EPOCH FROM NOW() - last_accessed) / 3600.0) DESC
@@ -123,7 +136,7 @@ func (s *MediaIndexStore) ListEvictionCandidates(limit int) ([]*MediaMeta, error
 		m := &MediaMeta{}
 		if err := rows.Scan(
 			&m.OriginalURL, &m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
-			&m.FirstSeen, &m.LastAccessed, &m.AccessCount,
+			&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.AudioState,
 		); err != nil {
 			return nil, fmt.Errorf("scan eviction candidate: %w", err)
 		}

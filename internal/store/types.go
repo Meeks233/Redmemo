@@ -34,6 +34,10 @@ type MediaMeta struct {
 	FirstSeen    time.Time
 	LastAccessed time.Time
 	AccessCount  int64
+	// AudioState is only meaningful for muxed video rows (key prefix "muxed:").
+	// nil = never checked, "has_audio" = mux succeeded, "silent" = no audio
+	// track exists on Reddit, skip mux on future requests.
+	AudioState *string
 }
 
 type StoredToken struct {

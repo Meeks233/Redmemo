@@ -14,8 +14,14 @@ import (
 )
 
 func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
-	sub := r.PathValue("sub")
-	id := r.PathValue("id")
+	h.servePost(w, r, r.PathValue("sub"), r.PathValue("id"))
+}
+
+func (h *Handler) handleUserPost(w http.ResponseWriter, r *http.Request) {
+	h.servePost(w, r, "u_"+r.PathValue("name"), r.PathValue("id"))
+}
+
+func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id string) {
 	prefs := h.readPreferences(r)
 	urlPath := r.URL.Path
 	commentSort := r.URL.Query().Get("sort")

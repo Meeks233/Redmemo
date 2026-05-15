@@ -134,6 +134,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /r/{sub}", h.handleSubreddit)
 	mux.HandleFunc("GET /r/{sub}/{sort}", h.handleSubredditSort)
 	mux.HandleFunc("GET /r/{sub}/comments/{id}/{title...}", h.handlePost)
+	mux.HandleFunc("GET /user/{name}/comments/{id}/{title...}", h.handleUserPost)
 	mux.HandleFunc("POST /api/refresh/{sub}/{id}", h.handleRefreshPost)
 	mux.HandleFunc("GET /user/{name}", h.handleUser)
 	mux.HandleFunc("GET /user/{name}/{listing}", h.handleUser)

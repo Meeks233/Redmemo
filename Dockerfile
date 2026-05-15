@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /redmemo ./cmd/redmemo
 
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk add --no-cache ca-certificates tzdata ffmpeg \
     && addgroup -S redmemo && adduser -S redmemo -G redmemo
 
 COPY --from=builder /redmemo /usr/local/bin/redmemo

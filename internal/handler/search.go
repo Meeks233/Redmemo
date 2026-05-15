@@ -42,7 +42,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
 		restrictSR := sub != ""
-		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 10)
+		posts, subs, _, err := h.redditCli.FetchSearch(r.Context(), query, sub, sort, t, after, restrictSR, 5)
 		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
@@ -133,9 +133,9 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 	var err error
 
 	if h.oauthPool.HasAvailableTokens() {
-		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 25)
+		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 5)
 	} else {
-		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 25)
+		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 5)
 	}
 	h.recordUpstream(ctx)
 	if err != nil {

@@ -389,6 +389,7 @@ figcaption {
 
 main {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     max-width: 1000px;
     padding: 10px 20px;
@@ -2864,6 +2865,8 @@ th {
 
 /* Debug warning banner */
 .offline-banner {
+    flex: 0 0 100%;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2886,6 +2889,8 @@ th {
 /* HR-degraded banner — clickable, amber so it's visually distinct from
    the blue offline banner. Click → /fuckreddit?reason=... */
 .degraded-banner {
+    flex: 0 0 100%;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;

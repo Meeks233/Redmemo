@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/render"
 )
 
@@ -75,6 +76,15 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasSuffix(path, ".m3u8") || strings.Contains(path, "HLSPlaylist") {
 		h.proxyHLSManifest(w, r, upstream)
+		return
+	}
+
+	// v.redd.it DASH/CMAF video segments are video-only — the audio track
+	// lives in a sibling DASH_AUDIO_*.mp4. Mux them on the fly so the page's
+	// plain <video src> tag plays with sound. The muxed result is cached by
+	// the standard media proxy machinery.
+	if strings.HasPrefix(path, "/vid/") && media.IsMuxableVideoSegment(path) {
+		h.mediaProxy.ServeMuxed(w, r, upstream)
 		return
 	}
 

@@ -147,6 +147,14 @@ var migrations = []string{
 	`ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_json JSONB;
 	 ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_fetched_at TIMESTAMPTZ;
 	 ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS about_expires_at TIMESTAMPTZ;`,
+
+	// v13: audio-track verdict for muxed v.redd.it entries. Lives on the same
+	// media_index row as the muxed/silent cached file. NULL = never checked;
+	// 'has_audio' = mux succeeded; 'silent' = Reddit returned 4xx for every
+	// audio candidate (skip mux permanently). Transient failures (ffmpeg
+	// missing, network 5xx) never write this column — the next request retries.
+	`ALTER TABLE media_index ADD COLUMN IF NOT EXISTS audio_state TEXT
+		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent'));`,
 }
 
 func RunMigrations(db *sql.DB) error {

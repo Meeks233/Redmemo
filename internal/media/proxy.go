@@ -68,6 +68,22 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 	p.serve(w, r, meta)
 }
 
+// loaderSVG is an animated spinner served in place of an empty/broken image
+// when the upstream fetch is blocked, rate-limited, or otherwise unavailable.
+// SMIL animation runs even inside <img> contexts where scripts can't.
+const loaderSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-loader-icon lucide-loader"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/><animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></svg>`
+
+func serveLoader(w http.ResponseWriter, status int) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(loaderSVG)))
+	if status == 0 {
+		status = http.StatusAccepted
+	}
+	w.WriteHeader(status)
+	io.WriteString(w, loaderSVG)
+}
+
 func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaMeta) {
 	w.Header().Set("Content-Type", meta.MIMEType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -155,7 +171,7 @@ func (p *Proxy) DownloadAsync(originalURL string) {
 func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string) {
 	req, err := http.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
 	if err != nil {
-		http.Error(w, "bad upstream url", http.StatusBadGateway)
+		serveLoader(w, http.StatusAccepted)
 		return
 	}
 	req.Header.Set("User-Agent", p.uaPool.Get())
@@ -168,10 +184,15 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		http.Error(w, "upstream error", http.StatusBadGateway)
+		serveLoader(w, http.StatusAccepted)
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		serveLoader(w, http.StatusAccepted)
+		return
+	}
 
 	for k, vs := range resp.Header {
 		for _, v := range vs {

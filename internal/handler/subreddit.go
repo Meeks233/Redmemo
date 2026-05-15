@@ -160,7 +160,7 @@ func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	posts, _, _, err := h.fetchSubreddit(ctx, sub, sort, after, 25)
+	posts, _, _, err := h.fetchSubreddit(ctx, sub, sort, after, 5)
 	if err != nil {
 		log.Printf("background archive sub %s: %v", sub, err)
 		return
