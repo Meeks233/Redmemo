@@ -119,12 +119,9 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		}
 	}
 
-	// 4. Nothing available
-	target := "/fuckreddit"
-	if reason != "" {
-		target += "?reason=" + reason
-	}
-	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+	// 4. Nothing available — preserve query string so upstream link keeps the
+	// user's search terms.
+	h.redirectFuckReddit(w, r, r.URL.RequestURI(), reason)
 }
 
 func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {

@@ -36,11 +36,7 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. No archive for users — redirect
-	target := "/fuckreddit"
-	if reason != "" {
-		target += "?reason=" + reason
-	}
-	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+	h.redirectFuckReddit(w, r, r.URL.Path, reason)
 }
 
 func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {

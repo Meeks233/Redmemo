@@ -149,11 +149,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	}
 
 	// 4. Nothing available
-	target := "/fuckreddit"
-	if reason != "" {
-		target += "?reason=" + reason
-	}
-	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+	h.redirectFuckReddit(w, r, r.URL.Path, reason)
 }
 
 func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {

@@ -84,6 +84,66 @@ function Stop-TitleSpinner {
 
 Set-TabTitle "redmemo: starting"
 
+# --- 0. Spawn a single elevated helper that handles BOTH portproxy phases ---
+# Why one helper instead of two elevated calls:
+#   1) We must CLEAR stale portproxy before deploy.sh, so Docker (in WSL2's net
+#      namespace under mirrored networking, or because of localhostForwarding)
+#      can bind 8080/8081 without hitting "address already in use".
+#   2) We must ADD the new portproxy AFTER deploy.sh succeeds, because we need
+#      the (possibly new) WSL IP, and adding before Docker is up can race the
+#      bind under mirrored mode.
+# Doing both phases in one long-running elevated process means only ONE UAC.
+# The helper clears immediately, blocks on a signal file, then reads the WSL IP
+# from a file and adds the new rules. -EncodedCommand sidesteps all argument
+# quoting headaches.
+
+$ipcDir     = Join-Path $env:TEMP "redmemo-portproxy-$PID"
+$signalFile = Join-Path $ipcDir "go"
+$ipFile     = Join-Path $ipcDir "wslip"
+$doneFile   = Join-Path $ipcDir "done"
+Remove-Item $ipcDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $ipcDir -Force | Out-Null
+
+$portsCsv = ($Ports -join ',')
+$helperSrc = @"
+`$ErrorActionPreference = 'Continue'
+`$ports = '$portsCsv' -split ',' | ForEach-Object { [int]`$_ }
+# Phase 1: clear stale rules so Docker can bind cleanly.
+foreach (`$p in `$ports) {
+    netsh interface portproxy delete v4tov4 listenport=`$p listenaddress=127.0.0.1 2>`$null | Out-Null
+}
+# Phase 2: wait for main script to write WSL IP and drop the go-signal.
+`$deadline = (Get-Date).AddMinutes(10)
+while (-not (Test-Path '$signalFile')) {
+    if ((Get-Date) -gt `$deadline) { exit 2 }
+    Start-Sleep -Milliseconds 200
+}
+`$wslIp = (Get-Content '$ipFile' -Raw).Trim()
+# Phase 3: install new forwarding rules.
+foreach (`$p in `$ports) {
+    netsh interface portproxy delete v4tov4 listenport=`$p listenaddress=127.0.0.1 2>`$null | Out-Null
+    netsh interface portproxy add v4tov4 listenport=`$p listenaddress=127.0.0.1 connectport=`$p connectaddress=`$wslIp | Out-Null
+}
+New-Item -ItemType File -Path '$doneFile' -Force | Out-Null
+"@
+
+$helperEncoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($helperSrc))
+
+Log "Requesting elevation (single UAC for clear+forward)..."
+$helperProc = Start-Process powershell `
+    -Verb RunAs `
+    -ArgumentList '-NoProfile','-WindowStyle','Hidden','-EncodedCommand',$helperEncoded `
+    -PassThru
+Log "Elevated portproxy helper started (PID $($helperProc.Id)); stale rules clearing now"
+
+function Stop-PortproxyHelper {
+    if ($script:helperProc -and -not $script:helperProc.HasExited) {
+        try { $script:helperProc.Kill() } catch {}
+    }
+    Remove-Item $ipcDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+$script:helperProc = $helperProc
+
 # --- 1. Convert Windows path to WSL mount path ---
 $drive = $WinDir.Substring(0, 1).ToLower()
 $rest  = $WinDir.Substring(2) -replace '\\', '/'
@@ -100,6 +160,7 @@ $rsyncCmd = "rsync -a --delete --exclude='_redlib_ref/' --exclude='.git/' --excl
 wsl -d $WslDist -- bash -c $rsyncCmd
 if ($LASTEXITCODE -ne 0) {
     Err "rsync failed"
+    Stop-PortproxyHelper
     exit 1
 }
 Log "Sync complete"
@@ -117,6 +178,7 @@ Log "Starting deployment in WSL..."
 wsl -d $WslDist -- bash -c "chmod +x $WslDir/deploy.sh; cd $WslDir; ./deploy.sh --watch"
 if ($LASTEXITCODE -ne 0) {
     Err "Deployment failed"
+    Stop-PortproxyHelper
     exit 1
 }
 
@@ -135,20 +197,25 @@ if (-not $deployed) {
     Warn "Deployment health check timed out, continuing anyway"
 }
 
-# --- 6. Set up Windows portproxy (WSL2 Docker ports -> Windows localhost) ---
-# Single elevated invocation: delete any stale rule for each port, then add a
-# fresh rule pointing at the current WSL IP. The delete is idempotent (errors
-# swallowed by `2>$null`), so we don't need a separate pre-check pass.
+# --- 6. Signal elevated helper to install portproxy rules ---
 $wslIp = (wsl -d $WslDist -- hostname -I).Trim().Split(" ")[0]
-Log "WSL IP: $wslIp, configuring port forwarding (UAC prompt may appear)..."
+Log "WSL IP: $wslIp, signaling elevated helper to install portproxy rules..."
 
-$cmds = ($Ports | ForEach-Object {
-    "netsh interface portproxy delete v4tov4 listenport=$_ listenaddress=127.0.0.1 2>`$null;"
-    "netsh interface portproxy add v4tov4 listenport=$_ listenaddress=127.0.0.1 connectport=$_ connectaddress=$wslIp"
-}) -join "; "
+Set-Content -Path $ipFile -Value $wslIp -NoNewline -Encoding ASCII
+New-Item -ItemType File -Path $signalFile -Force | Out-Null
 
-Start-Process powershell -Verb RunAs -ArgumentList "-Command", $cmds -Wait
-Log "Port forwarding configured (WSL IP: $wslIp)"
+# Wait up to 30s for helper to finish; bail loudly if it hangs.
+if (-not $helperProc.WaitForExit(30000)) {
+    Warn "Portproxy helper still running after 30s — continuing anyway"
+} elseif ($helperProc.ExitCode -ne 0) {
+    Warn "Portproxy helper exited with code $($helperProc.ExitCode); port forwarding may be broken"
+} elseif (Test-Path $doneFile) {
+    Log "Port forwarding configured (WSL IP: $wslIp)"
+} else {
+    Warn "Portproxy helper finished without writing done-marker; verify with: netsh interface portproxy show v4tov4"
+}
+
+Remove-Item $ipcDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Log "Done. Access http://127.0.0.1:8080"
 
@@ -263,6 +330,7 @@ try {
 } finally {
     [Console]::TreatControlCAsInput = $false
     Stop-TitleSpinner -FinalTitle "redmemo: exited"
+    Stop-PortproxyHelper
     if ($wslKeepAlive -and -not $wslKeepAlive.HasExited) {
         $wslKeepAlive.Kill()
     }

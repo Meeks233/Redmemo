@@ -372,12 +372,18 @@ type FuckRedditPageData struct {
 	ResetSeconds int
 	// Reason explains why the user landed here: "hr_l1"/"hr_l2"/"hr_l3"
 	// (HR rate-limit cooldown), "quota_exhausted" (OAuth budget drained),
-	// or "" (unknown / direct navigation). Threaded through for the page
-	// template to consume — content presentation deferred.
+	// or "" (no failure — render the healthy state).
 	Reason string
+	// From is the reddit path the user was trying to reach (validated to
+	// /r/, /user/, or /search prefixes). Empty when there is no origin
+	// context. When set, the template renders an "Access Reddit directly"
+	// escape hatch linking to https://www.reddit.com{From}.
+	From string
+	// Freeze pins the countdown to 99:99 and disables polling. Debug-only.
+	Freeze bool
 }
 
-func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preferences, resetSeconds int, reason string) {
+func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preferences, resetSeconds int, reason, from string, freeze bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if reason != "" {
 		w.Header().Set("X-Reason", reason)
@@ -386,6 +392,8 @@ func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preference
 		BasePage:     e.basePage("", prefs),
 		ResetSeconds: resetSeconds,
 		Reason:       reason,
+		From:         from,
+		Freeze:       freeze,
 	}
 	e.renderPage(w, "fuckreddit.html", data)
 }

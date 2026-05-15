@@ -23,9 +23,9 @@
     );
 
     --popup-toreddit-background: var(--popup-black);
-    --popup-toreddit-text: var(--popup-red);
+    --popup-toreddit-text: var(--popup-text);
     --popup-goback-background: var(--popup-red);
-    --popup-goback-text: #222;
+    --popup-goback-text: var(--popup-text);
     --popup-border: 1px solid var(--popup-red);
 
     --footer-height: 30px;
@@ -309,6 +309,13 @@ figcaption {
     }
 }
 
+.popup-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    /* invisible — exists only to capture backdrop clicks */
+}
+
 .popup-inner {
     display: flex;
     flex-direction: column;
@@ -322,6 +329,8 @@ figcaption {
     background: var(--popup-background);
     border: var(--popup-border);
     border-radius: 5px;
+    position: relative;
+    z-index: 2;
 }
 
 .popup-inner svg {
@@ -2208,30 +2217,103 @@ th {
 }
 
 .heart-broken {
-    filter: drop-shadow(0 0 6px rgba(239,68,68,0.5));
+    /* Override the global `svg { stroke: var(--text) }` rule, which otherwise
+       wins over the inline stroke="#dc2626" and bleeds the theme text color
+       (near-white in dark mode) into the child paths via inheritance. */
+    stroke: #dc2626;
+    filter: drop-shadow(0 0 6px rgba(220,38,38,0.55));
+    overflow: visible; /* let the halves drift past the viewBox */
 }
 
-.heart-broken .heart-shape {
-    transform-origin: center;
-    animation: heartbreak-pulse 2s ease-in-out infinite;
+/* Each half holds a full copy of the heart, clipped with a zigzag polygon
+   that follows the heart-crack path. Both halves sit on top of each other
+   while closed, so the heart looks whole; then the animation translates +
+   rotates them apart so it visibly splits down the middle. */
+.heart-broken .heart-half {
+    transform-origin: 50% 50%;
+    transform-box: fill-box;
+}
+.heart-broken .heart-half.left {
+    clip-path: polygon(0% 0%, 50% 0%, 46% 33%, 54% 42%, 45% 52%, 50% 63%, 50% 100%, 0% 100%);
+    animation: heart-split-left 3.6s ease-in-out infinite;
+}
+.heart-broken .heart-half.right {
+    clip-path: polygon(50% 0%, 100% 0%, 100% 100%, 50% 100%, 50% 63%, 45% 52%, 54% 42%, 46% 33%);
+    animation: heart-split-right 3.6s ease-in-out infinite;
 }
 
-.heart-broken .slash-line {
-    stroke-dasharray: 30;
-    stroke-dashoffset: 30;
-    animation: slash-draw 2s ease-in-out infinite;
+@keyframes heart-split-left {
+    0%, 25%  { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+    60%      { transform: translate(-7px, 4px) rotate(-16deg); opacity: 0.9; }
+    80%      { transform: translate(-12px, 11px) rotate(-26deg); opacity: 0; }
+    81%, 99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+    100%     { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+}
+@keyframes heart-split-right {
+    0%, 25%  { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+    60%      { transform: translate(7px, 4px) rotate(16deg); opacity: 0.9; }
+    80%      { transform: translate(12px, 11px) rotate(26deg); opacity: 0; }
+    81%, 99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+    100%     { transform: translate(0, 0) rotate(0deg); opacity: 1; }
 }
 
-@keyframes heartbreak-pulse {
-    0%, 100% { transform: scale(1); opacity: 0.7; }
-    50% { transform: scale(1.05); opacity: 1; }
+/* Centered, vivid text on the fuckreddit page */
+#error .prefs fieldset > p {
+    text-align: center;
+    margin: 0.6em 0;
 }
 
-@keyframes slash-draw {
-    0% { stroke-dashoffset: 30; opacity: 0; }
-    40% { stroke-dashoffset: 0; opacity: 1; }
-    70% { stroke-dashoffset: 0; opacity: 1; }
-    100% { stroke-dashoffset: 0; opacity: 0.3; }
+#fr-countdown {
+    display: inline-block;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: #ef4444;
+    min-width: 4ch;
+}
+
+.fr-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 1.2em;
+}
+
+/* CTA on the /fuckreddit page — matches the modal-confirm pattern so it
+   inherits theme accent without hard-coding colors. */
+.fr-go-reddit,
+.fr-go-reddit:link,
+.fr-go-reddit:visited,
+.fr-go-reddit:hover,
+.fr-go-reddit:focus,
+.fr-go-reddit:active {
+    color: var(--text);
+    text-decoration: none;
+}
+
+.fr-go-reddit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 8px 20px;
+    background: var(--outside);
+    border: 1px solid var(--highlighted);
+    border-radius: 6px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.fr-go-reddit:hover {
+    background: var(--highlighted);
+}
+
+.fr-go-reddit:active {
+    transform: scale(0.97);
+}
+
+.fr-go-reddit-emoji {
+    font-size: 1.15em;
+    line-height: 1;
 }
 
 #error .error-status-code {

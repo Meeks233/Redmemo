@@ -52,11 +52,7 @@ func (h *Handler) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Nothing available
-	target := "/fuckreddit"
-	if reason != "" {
-		target += "?reason=" + reason
-	}
-	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+	h.redirectFuckReddit(w, r, r.URL.Path, reason)
 }
 
 func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {

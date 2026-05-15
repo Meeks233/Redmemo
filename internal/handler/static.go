@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,28 +116,112 @@ func (h *Handler) handleWiki(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
-	reset, _ := h.oauthPool.EarliestReset()
+	q := r.URL.Query()
+	debug := prefs.EnableDebug == "on"
 
-	// Reason priority: explicit query param > active HR cooldown > quota probe.
-	reason := r.URL.Query().Get("reason")
-	if reason == "" && h.hr != nil {
-		if r2, _ := h.hr.CooldownReason(r.Context()); r2 != "" {
-			reason = r2
+	reset, _ := h.oauthPool.EarliestReset()
+	reason := q.Get("reason")
+
+	// Debug mode: query params are authoritative for previewing the page —
+	// skip every auto-detection branch so the developer can render any
+	// combination of states without waiting for a real failure.
+	//   /fuckreddit?reason=hr_l1&reset=42&from=/r/golang
+	//   /fuckreddit?reason=         (force healthy)
+	//   /fuckreddit?reason=quota_exhausted&from=/r/golang/comments/abc/title
+	if debug {
+		if v := q.Get("reset"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				reset = n
+			}
+		}
+	} else {
+		// Reason priority: explicit query param > active HR cooldown > quota probe.
+		if reason == "" && h.hr != nil {
+			if r2, _ := h.hr.CooldownReason(r.Context()); r2 != "" {
+				reason = r2
+			}
+		}
+		if reason == "" && !h.oauthPool.HasAvailableTokens() {
+			reason = "quota_exhausted"
+		}
+		// For HR cooldowns, override reset with the actual cooldown TTL —
+		// the OAuth quota reset is unrelated to when HR cooldown lifts.
+		if strings.HasPrefix(reason, "hr_") && h.hr != nil {
+			if _, until := h.hr.CooldownReason(r.Context()); until > 0 {
+				if secs := until - time.Now().Unix(); secs > 0 {
+					reset = int(secs)
+				}
+			}
 		}
 	}
-	if reason == "" && !h.oauthPool.HasAvailableTokens() {
-		reason = "quota_exhausted"
-	}
 
-	h.renderer.RenderFuckReddit(w, prefs, reset, reason)
+	from := validateFromPath(q.Get("from"))
+
+	// ?freeze=1 (debug-only): pin the countdown to 99:99 and disable polling,
+	// so the page can be inspected without the timer ticking down or the
+	// auto-redirect firing once the degrade clears.
+	freeze := debug && q.Get("freeze") == "1"
+
+	h.renderer.RenderFuckReddit(w, prefs, reset, reason, from, freeze)
 }
+
+// validateFromPath accepts paths under /r/, /user/, or /search that look safe
+// to append to "https://www.reddit.com". Returns "" for anything else.
+// Prevents open-redirect through the "Go back to Reddit" button.
+func validateFromPath(from string) string {
+	if from == "" || !strings.HasPrefix(from, "/") || strings.HasPrefix(from, "//") {
+		return ""
+	}
+	// Reject characters that could break out of attribute / URL context.
+	for _, c := range from {
+		if c < 0x20 || c == 0x7f || c == '"' || c == '<' || c == '>' || c == '\\' {
+			return ""
+		}
+	}
+	rest := strings.TrimPrefix(from, "/")
+	seg, _, _ := strings.Cut(rest, "/")
+	seg, _, _ = strings.Cut(seg, "?")
+	switch seg {
+	case "r", "user", "search":
+		return from
+	}
+	return ""
+}
+
 
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	budget, _ := h.oauthPool.RemainingBudget(r.Context())
 	reset, window := h.oauthPool.EarliestReset()
+
+	// HR cooldown (most-severe active tier).
+	hrReset := 0
+	hrReason := ""
+	if h.hr != nil {
+		if reason, until := h.hr.CooldownReason(r.Context()); reason != "" && until > 0 {
+			if secs := until - time.Now().Unix(); secs > 0 {
+				hrReset = int(secs)
+				hrReason = reason
+			}
+		}
+	}
+
+	// Combined "current degrade" view consumed by /fuckreddit so the page
+	// shows one authoritative reason + countdown per poll. Priority mirrors
+	// shouldDegrade: HR cooldown > quota_exhausted > clear.
+	currentReason := ""
+	currentReset := 0
+	if hrReason != "" {
+		currentReason = hrReason
+		currentReset = hrReset
+	} else if !h.oauthPool.HasAvailableTokens() {
+		currentReason = "quota_exhausted"
+		currentReset = reset
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
-	fmt.Fprintf(w, `{"remaining":%d,"reset":%d,"window":%d}`, budget, reset, window)
+	fmt.Fprintf(w, `{"remaining":%d,"reset":%d,"window":%d,"hr_reset":%d,"hr_reason":%q,"current_reason":%q,"current_reset":%d}`,
+		budget, reset, window, hrReset, hrReason, currentReason, currentReset)
 }
 
 func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {

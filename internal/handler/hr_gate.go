@@ -1,6 +1,10 @@
 package handler
 
-import "context"
+import (
+	"context"
+	"net/http"
+	"net/url"
+)
 
 // shouldDegrade reports whether an HR-originated request should bypass the
 // upstream Reddit call and instead serve archived content with a banner.
@@ -30,4 +34,26 @@ func (h *Handler) recordUpstream(ctx context.Context) {
 	if h.hr != nil {
 		h.hr.RecordUpstream(ctx)
 	}
+}
+
+// redirectFuckReddit issues a 302/307 to the /fuckreddit page, carrying the
+// origin request URI (?from=) and degrade reason (?reason=) so the page can
+// render context-aware content (a "Go back to ..." escape hatch and the
+// specific failure-mode explanation). Both params are optional.
+//
+// For search routes pass r.URL.RequestURI() (path + raw query) so the user's
+// query terms reach the upstream link. For other routes r.URL.Path is enough.
+func (h *Handler) redirectFuckReddit(w http.ResponseWriter, r *http.Request, from, reason string) {
+	q := url.Values{}
+	if from != "" {
+		q.Set("from", from)
+	}
+	if reason != "" {
+		q.Set("reason", reason)
+	}
+	target := "/fuckreddit"
+	if enc := q.Encode(); enc != "" {
+		target += "?" + enc
+	}
+	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 }

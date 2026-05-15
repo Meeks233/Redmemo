@@ -20,15 +20,35 @@
 
 {{/* Visit Reddit confirmation modal overlay */}}
 {{ define "visit_reddit_confirmation" }}
-<div class="modal-overlay" id="reddit-modal" onclick="if(event.target===this)this.classList.remove('visible')">
-	<div class="modal-box">
-		<h2>You are about to leave this site</h2>
+{{/*
+	Off-site warning popup — uses the project's existing `.popup` system
+	(see style.css around line 282 onward, plus the --popup-* constants
+	defined on :root). It is pure CSS:
+
+	* Triggers carry  href="#popup"          → :target shows the popup.
+	* #goback         href="#"                → :target stops matching → hides.
+	* #toreddit       href="https://reddit…"  → actual outbound link.
+
+	The popup intentionally uses fixed red/black/white "warning" colors via
+	--popup-* (NOT theme-adaptive) so the off-site alert reads the same
+	across every theme.
+
+	One popup per page is enough — pages render this macro once with the
+	reddit path that the trigger element should point to.
+*/}}
+<div class="popup" id="popup">
+	<a class="popup-backdrop" href="#" aria-label="Close" tabindex="-1"></a>
+	<div class="popup-inner">
+		<h1>You are about to leave this site</h1>
 		<p>Do you want to continue?</p>
-		<p class="modal-url">https://www.reddit.com{{ . }}</p>
-		<div class="modal-actions">
-			<button class="modal-cancel" onclick="document.getElementById('reddit-modal').classList.remove('visible')">No, go back</button>
-			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" target="_blank" rel="nofollow noopener noreferrer" onclick="document.getElementById('reddit-modal').classList.remove('visible')">Yes, take me to Reddit</a>
-		</div>
+		<p id="reddit_url">https://www.reddit.com{{ . }}</p>
+		<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="var(--popup-red)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+			<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>
+			<path d="M12 9v4"/>
+			<path d="M12 17h.01"/>
+		</svg>
+		<a id="goback" href="#">No, go back!</a>
+		<a id="toreddit" href="https://www.reddit.com{{ . }}" target="_blank" rel="nofollow noopener noreferrer">Yes, take me to Reddit</a>
 	</div>
 </div>
 {{ end }}
@@ -239,10 +259,10 @@
 				<span>Reddit</span>
 			</a>
 			{{ else }}
-			<button class="post-action-btn" title="Go to Reddit" onclick="document.getElementById('reddit-modal').classList.add('visible')">
+			<a class="post-action-btn" title="Go to Reddit" href="#popup">
 				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
 				<span>Reddit</span>
-			</button>
+			</a>
 			{{ template "visit_reddit_confirmation" $post.Permalink }}
 			{{ end }}
 		</div>
