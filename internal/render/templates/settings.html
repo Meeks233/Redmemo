@@ -299,6 +299,12 @@ var homePicker = SubPicker({
 	listId: 'sub_list',
 	onChange: function(sel) {
 		document.getElementById('front_page_subs_hidden').value = sel.join('+');
+		if (sel.length === 0) {
+			// Nothing selected — an empty filter is meaningless, revert to "Show all".
+			document.getElementById('show_all_subs').checked = true;
+			document.getElementById('show_all_subs_hidden').value = 'on';
+			document.getElementById('sub_filter').style.display = 'none';
+		}
 		checkDirty();
 	}
 });

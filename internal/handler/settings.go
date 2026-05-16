@@ -144,6 +144,11 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		updates["front_page_subs_mode"] = "whitelist"
 	}
 
+	// An empty whitelist/blacklist is meaningless — fall back to "show all".
+	if v, ok := updates["front_page_subs"]; ok && strings.TrimSpace(v) == "" {
+		updates["show_all_subs"] = "on"
+	}
+
 	if v, ok := updates["prefetch_threshold"]; ok {
 		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 99 {
 			delete(updates, "prefetch_threshold")
