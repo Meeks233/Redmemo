@@ -327,9 +327,9 @@ type DebugData struct {
 	PrefetchEvents []PrefetchEventView
 }
 
-func (e *Engine) RenderDebug(w io.Writer, msg string, d DebugData) {
+func (e *Engine) RenderDebug(w io.Writer, msg string, prefs reddit.Preferences, d DebugData) {
 	data := ErrorPageData{
-		BasePage:       e.basePage("", reddit.Preferences{}),
+		BasePage:       e.basePage("", prefs),
 		Message:        msg,
 		StatusCode:     200,
 		Details:        d.Details,

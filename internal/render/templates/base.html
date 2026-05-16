@@ -31,10 +31,18 @@
 			</div>
 			{{ block "search" . }}{{ end }}
 			<div id="links">
-				<a id="status_quota" {{ if eq .Prefs.EnableDebug "on" }}href="/debug"{{ else }}href="javascript:void(0)"{{ end }}>
+				<a id="status_quota" href="/fuckreddit">
 					<svg class="nav-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" class="nav-ring-track"/><circle id="nav-ring-arc" cx="10" cy="10" r="8" class="nav-ring-arc"/></svg>
 					<span id="nav-quota-text"></span>
 				</a>
+				{{ if eq .Prefs.EnableDebug "on" }}
+				<a id="debug_link" href="/debug">
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bug-icon lucide-bug">
+						<title>debug</title>
+						<path d="M12 20v-9"/><path d="M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z"/><path d="M14.12 3.88 16 2"/><path d="M21 21a4 4 0 0 0-3.81-4"/><path d="M21 5a4 4 0 0 1-3.55 3.97"/><path d="M22 13h-4"/><path d="M3 21a4 4 0 0 1 3.81-4"/><path d="M3 5a4 4 0 0 0 3.55 3.97"/><path d="M6 13H2"/><path d="m8 2 1.88 1.88"/><path d="M9 7.13V6a3 3 0 1 1 6 0v1.13"/>
+					</svg>
+				</a>
+				{{ end }}
 				<a id="archive_link" href="/archive">
 					<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 						<title>archive</title>

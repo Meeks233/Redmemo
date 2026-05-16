@@ -3271,12 +3271,14 @@ th {
     font-weight: 600;
 }
 
-/* Navbar archive link — matches #settings_link */
-#archive_link {
+/* Navbar archive + debug links — match #settings_link */
+#archive_link,
+#debug_link {
     opacity: 0.8;
     margin-left: 10px;
 }
 
-#archive_link svg {
+#archive_link svg,
+#debug_link svg {
     display: block;
 }

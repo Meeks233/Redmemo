@@ -358,7 +358,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	h.renderer.RenderDebug(w, "Instance Diagnostics", dd)
+	h.renderer.RenderDebug(w, "Instance Diagnostics", prefs, dd)
 }
 
 func (h *Handler) handleProbeSub(w http.ResponseWriter, r *http.Request) {
