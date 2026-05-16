@@ -19,6 +19,13 @@ var partialLastReq sync.Map
 
 func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
+
+	// When the homepage is removed, redirect to the archive hub instead.
+	if prefs.RemoveDefaultFeeds == "on" {
+		http.Redirect(w, r, "/archive", http.StatusFound)
+		return
+	}
+
 	sort := r.URL.Query().Get("sort")
 	if sort == "" {
 		sort = "new"
@@ -33,7 +40,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 
 	var subs []string
 	mode := prefs.FrontPageSubsMode
-	if prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
+	if prefs.ShowAllSubs != "on" && prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
 		for _, s := range strings.Split(prefs.FrontPageSubs, "+") {
 			s = strings.TrimSpace(s)
 			if s != "" {

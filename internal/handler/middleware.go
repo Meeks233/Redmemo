@@ -71,6 +71,7 @@ var prefDefaults = map[string]string{
 	"front_page":      "default",
 	"front_page_subs":      "all",
 	"front_page_subs_mode": "whitelist",
+	"show_all_subs":        "on",
 	"layout":        "card",
 	"wide":          "off",
 	"blur_spoiler":  "on",
@@ -115,6 +116,14 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.FrontPage = pref("front_page")
 	p.FrontPageSubs = pref("front_page_subs")
 	p.FrontPageSubsMode = pref("front_page_subs_mode")
+	if _, ok := h.siteDefaults["show_all_subs"]; ok {
+		p.ShowAllSubs = pref("show_all_subs")
+	} else if p.FrontPageSubs != "" && p.FrontPageSubs != "all" {
+		// Legacy: a sub list was saved before show_all_subs existed.
+		p.ShowAllSubs = "off"
+	} else {
+		p.ShowAllSubs = "on"
+	}
 	p.Layout = pref("layout")
 	p.Wide = pref("wide")
 	p.BlurSpoiler = pref("blur_spoiler")

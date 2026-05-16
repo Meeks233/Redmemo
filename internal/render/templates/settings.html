@@ -26,30 +26,6 @@
 							{{ end }}
 						</select>
 					</div>
-				</fieldset>
-				<fieldset>
-					<legend>Interface</legend>
-					<div class="prefs-group">
-						<label for="remove_default_feeds">Remove default feeds</label>
-						<input type="hidden" value="off" name="remove_default_feeds">
-						<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" {{ if eq .Prefs.RemoveDefaultFeeds "on" }}checked{{ end }}>
-					</div>
-					<div class="prefs-group">
-						<label for="front_page">Front page:</label>
-						<select name="front_page" id="front_page">
-							{{ $pages := list "default" "popular" "all" }}
-							{{ range $pages }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.FrontPage }}selected{{ end }}>{{ capitalize . }}</option>
-							{{ end }}
-						</select>
-					</div>
-					<div class="prefs-group">
-						<label for="show_all_subs">Show all subs on homepage</label>
-						<input type="hidden" value="off" name="show_all_subs">
-						<input type="hidden" name="front_page_subs" id="front_page_subs_hidden" value="{{ if or (eq .Prefs.FrontPageSubs "") (eq .Prefs.FrontPageSubs "all") }}all{{ else }}{{ .Prefs.FrontPageSubs }}{{ end }}">
-						<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value="{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}blacklist{{ else }}whitelist{{ end }}">
-						<input type="checkbox" name="show_all_subs" id="show_all_subs" {{ if or (eq .Prefs.FrontPageSubs "all") (eq .Prefs.FrontPageSubs "") }}checked{{ end }} onchange="toggleSubPicker(this)">
-					</div>
 					<div class="prefs-group">
 						<label for="layout">Layout:</label>
 						<select name="layout" id="layout">
@@ -66,18 +42,17 @@
 					</div>
 				</fieldset>
 				<fieldset>
-					<legend>Content</legend>
+					<legend>Interface</legend>
 					<div class="prefs-group">
-						<label for="video_quality">Video quality:</label>
-						<select name="video_quality" id="video_quality">
-							{{ $qualities := list "best" "medium" "worst" }}
-							{{ range $qualities }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ capitalize . }}</option>
-							{{ end }}
-						</select>
+						<label for="remove_default_feeds">Remove homepage</label>
+						<input type="hidden" value="off" name="remove_default_feeds">
+						<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" {{ if eq .Prefs.RemoveDefaultFeeds "on" }}checked{{ end }} onchange="toggleRemoveHome(this)">
 					</div>
+					<input type="hidden" name="front_page_subs" id="front_page_subs_hidden" value="{{ if eq .Prefs.FrontPageSubs "all" }}{{ else }}{{ .Prefs.FrontPageSubs }}{{ end }}">
+					<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value="{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}blacklist{{ else }}whitelist{{ end }}">
+					<input type="hidden" name="show_all_subs" id="show_all_subs_hidden" value="{{ if eq .Prefs.ShowAllSubs "off" }}off{{ else }}on{{ end }}">
 					<div class="prefs-group">
-						<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort:</label>
+						<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort</label>
 						<select name="post_sort">
 							<option value="new" {{ if eq "new" $.Prefs.PostSort }}selected{{ end }}>New</option>
 							<option value="new_archive" {{ if eq "new_archive" $.Prefs.PostSort }}selected{{ end }}>Archive</option>
@@ -86,12 +61,24 @@
 						</select>
 					</div>
 					<div class="prefs-group">
-						<label for="comment_sort">Default comment sort:</label>
+						<label for="comment_sort">Default comment sort</label>
 						<select name="comment_sort" id="comment_sort">
 							<option value="new" {{ if eq "new" $.Prefs.CommentSort }}selected{{ end }}>New</option>
 							<option value="new_archive" {{ if eq "new_archive" $.Prefs.CommentSort }}selected{{ end }}>Archive</option>
 							<option value="top" {{ if eq "top" $.Prefs.CommentSort }}selected{{ end }}>Top</option>
 							<option value="notorious" {{ if eq "notorious" $.Prefs.CommentSort }}selected{{ end }}>Notorious</option>
+						</select>
+					</div>
+				</fieldset>
+				<fieldset>
+					<legend>Content</legend>
+					<div class="prefs-group">
+						<label for="video_quality">Video quality:</label>
+						<select name="video_quality" id="video_quality">
+							{{ $qualities := list "best" "medium" "worst" }}
+							{{ range $qualities }}
+								<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ capitalize . }}</option>
+							{{ end }}
 						</select>
 					</div>
 					<div class="prefs-group">
@@ -167,27 +154,33 @@
 	</div>
 
 	<div class="settings-column">
-		<div class="prefs" id="sub_picker" style="{{ if or (eq .Prefs.FrontPageSubs "all") (eq .Prefs.FrontPageSubs "") }}display:none{{ end }}">
+		<div class="prefs" id="sub_picker" style="{{ if eq .Prefs.RemoveDefaultFeeds "on" }}display:none{{ end }}">
 			<fieldset>
 				<legend>Homepage Subreddits</legend>
-				<div class="sub-picker-mode">
-					<div class="mode-segmented">
-						<a class="mode-seg{{ if ne .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="whitelist" onclick="setMode('whitelist')">Whitelist</a>
-						<a class="mode-seg{{ if eq .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="blacklist" onclick="setMode('blacklist')">Blacklist</a>
+				<div class="prefs-group" id="show_all_row">
+					<label for="show_all_subs">Show all subs on homepage</label>
+					<input type="checkbox" id="show_all_subs" {{ if ne .Prefs.ShowAllSubs "off" }}checked{{ end }} onchange="toggleSubPicker(this)">
+				</div>
+				<div id="sub_filter" style="{{ if ne .Prefs.ShowAllSubs "off" }}display:none{{ end }}">
+					<div class="sub-picker-mode">
+						<div class="mode-segmented">
+							<a class="mode-seg{{ if ne .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="whitelist" onclick="setMode('whitelist')">Whitelist</a>
+							<a class="mode-seg{{ if eq .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="blacklist" onclick="setMode('blacklist')">Blacklist</a>
+						</div>
+						<span class="mode-hint" id="mode_hint">{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}Selected subs are hidden{{ else }}Only selected subs are shown{{ end }}</span>
 					</div>
-					<span class="mode-hint" id="mode_hint">{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}Selected subs are hidden{{ else }}Only selected subs are shown{{ end }}</span>
-				</div>
-				<div class="sub-picker-selected" id="sub_selected">
-					{{ if and (ne .Prefs.FrontPageSubs "all") (ne .Prefs.FrontPageSubs "") }}
-						{{ range $i, $s := split .Prefs.FrontPageSubs "+" }}
-						<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove">&times;</button></span>
+					<div class="sub-picker-selected" id="sub_selected">
+						{{ if and (ne .Prefs.FrontPageSubs "all") (ne .Prefs.FrontPageSubs "") }}
+							{{ range $i, $s := split .Prefs.FrontPageSubs "+" }}
+							<span class="sub-tag" data-sub="{{ $s }}">r/{{ $s }}<button type="button" class="sub-tag-remove">&times;</button></span>
+							{{ end }}
 						{{ end }}
-					{{ end }}
+					</div>
+					<div class="sub-picker-search">
+						<input type="text" id="sub_search" placeholder="Search subreddits..." autocomplete="off">
+					</div>
+					<div class="sub-picker-list" id="sub_list"></div>
 				</div>
-				<div class="sub-picker-search">
-					<input type="text" id="sub_search" placeholder="Search subreddits..." autocomplete="off">
-				</div>
-				<div class="sub-picker-list" id="sub_list"></div>
 			</fieldset>
 		</div>
 
@@ -305,8 +298,7 @@ var homePicker = SubPicker({
 	searchId: 'sub_search',
 	listId: 'sub_list',
 	onChange: function(sel) {
-		var h = document.getElementById('front_page_subs_hidden');
-		h.value = sel.length === 0 ? 'all' : sel.join('+');
+		document.getElementById('front_page_subs_hidden').value = sel.join('+');
 		checkDirty();
 	}
 });
@@ -322,24 +314,17 @@ var prefetchPicker = SubPicker({
 	}
 });
 
-function isPickerOpen() {
-	return document.getElementById('sub_picker').style.display !== 'none';
+function toggleSubPicker(cb) {
+	// "Show all subs" only toggles whether the filter is applied/shown.
+	// The whitelist/blacklist selection is preserved regardless.
+	document.getElementById('show_all_subs_hidden').value = cb.checked ? 'on' : 'off';
+	document.getElementById('sub_filter').style.display = cb.checked ? 'none' : '';
+	if (!cb.checked && homePicker) homePicker.render();
+	checkDirty();
 }
 
-function toggleSubPicker(cb) {
-	var picker = document.getElementById('sub_picker');
-	if (cb.checked) {
-		picker.style.display = 'none';
-		document.getElementById('front_page_subs_hidden').value = 'all';
-		document.getElementById('sub_selected').innerHTML = '';
-	} else {
-		picker.style.display = '';
-		if (homePicker) {
-			var h = document.getElementById('front_page_subs_hidden');
-			h.value = homePicker.getSelected().length === 0 ? 'all' : homePicker.getSelected().join('+');
-			homePicker.render();
-		}
-	}
+function toggleRemoveHome(cb) {
+	document.getElementById('sub_picker').style.display = cb.checked ? 'none' : '';
 }
 
 function setMode(mode) {
@@ -364,21 +349,11 @@ function serializeForm() {
 var initialSerialized = serializeForm();
 
 function checkDirty() {
-	var dirty = serializeForm() !== initialSerialized;
-	if (dirty && isPickerOpen() && homePicker && homePicker.getSelected().length === 0) {
-		dirty = false;
-	}
-	saveBar.classList.toggle('visible', dirty);
+	saveBar.classList.toggle('visible', serializeForm() !== initialSerialized);
 }
 
 form.addEventListener('change', checkDirty);
 form.addEventListener('input', checkDirty);
-
-form.addEventListener('submit', function(e) {
-	if (isPickerOpen() && homePicker && homePicker.getSelected().length === 0) {
-		e.preventDefault();
-	}
-});
 
 function togglePrefetch(cb) {
 	if (cb.checked) {

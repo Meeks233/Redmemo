@@ -163,6 +163,7 @@ type Preferences struct {
 	FrontPage                      string
 	FrontPageSubs                  string
 	FrontPageSubsMode              string
+	ShowAllSubs                    string
 	Layout                         string
 	Wide                           string
 	BlurSpoiler                    string

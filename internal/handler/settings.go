@@ -13,7 +13,7 @@ import (
 const cookieMaxAge = 52 * 7 * 24 * 60 * 60 // 52 weeks in seconds
 
 var settingsKeys = []string{
-	"theme", "front_page", "front_page_subs", "front_page_subs_mode", "layout", "wide",
+	"theme", "front_page_subs", "front_page_subs_mode", "show_all_subs", "layout", "wide",
 	"blur_spoiler", "show_nsfw", "blur_nsfw",
 	"hide_hls_notification", "video_quality",
 	"hide_sidebar_and_summary", "use_hls",
@@ -138,15 +138,6 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		if vals, ok := r.Form[key]; ok && len(vals) > 0 {
 			updates[key] = vals[len(vals)-1]
 		}
-	}
-
-	cb := "off"
-	if vals, ok := r.Form["show_all_subs"]; ok && len(vals) > 0 {
-		cb = vals[len(vals)-1]
-	}
-	if cb == "on" {
-		updates["front_page_subs"] = "all"
-		updates["front_page_subs_mode"] = "whitelist"
 	}
 
 	if mode, ok := updates["front_page_subs_mode"]; ok && mode != "whitelist" && mode != "blacklist" {
