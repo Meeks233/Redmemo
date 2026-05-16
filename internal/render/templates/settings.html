@@ -1,4 +1,4 @@
-{{ define "title" }}{{ .BrandName }} Settings{{ end }}
+{{ define "title" }}{{ T "settings.page_title" .BrandName }}{{ end }}
 
 {{ define "search" }}{{ template "searchbox" dict "Root" "" "Query" "" }}{{ end }}
 
@@ -9,7 +9,7 @@
 {{ if eq .Prefs.EnableDebug "on" }}
 <div class="debug-banner">
 	<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-	<span>Warning: Debug page is <a href="/debug">available</a>!</span>
+	<span>{{ T "settings.debug_warn_pre" }}<a href="/debug">{{ T "settings.debug_warn_link" }}</a>{{ T "settings.debug_warn_post" }}</span>
 </div>
 {{ end }}
 <div id="settings">
@@ -17,9 +17,9 @@
 		<form action="/settings" method="POST">
 			<div class="prefs">
 				<fieldset>
-					<legend>Appearance</legend>
+					<legend>{{ T "settings.appearance" }}</legend>
 					<div class="prefs-group">
-						<label for="theme">Theme:</label>
+						<label for="theme">{{ T "settings.theme" }}</label>
 						<select name="theme" id="theme">
 							{{ range .Prefs.AvailableThemes }}
 								<option value="{{ . }}" {{ if eq . $.Prefs.Theme }}selected{{ end }}>{{ capitalize . }}</option>
@@ -27,24 +27,31 @@
 						</select>
 					</div>
 					<div class="prefs-group">
-						<label for="layout">Layout:</label>
+						<label for="lang">{{ T "settings.language" }}</label>
+						<select name="lang" id="lang">
+							<option value="en" {{ if eq "en" .Prefs.Lang }}selected{{ end }}>English</option>
+							<option value="zh" {{ if eq "zh" .Prefs.Lang }}selected{{ end }}>中文</option>
+						</select>
+					</div>
+					<div class="prefs-group">
+						<label for="layout">{{ T "settings.layout" }}</label>
 						<select name="layout" id="layout">
 							{{ $layouts := list "card" "clean" "compact" }}
 							{{ range $layouts }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.Layout }}selected{{ end }}>{{ capitalize . }}</option>
+								<option value="{{ . }}" {{ if eq . $.Prefs.Layout }}selected{{ end }}>{{ T (concat "layout." .) }}</option>
 							{{ end }}
 						</select>
 					</div>
 					<div class="prefs-group">
-						<label for="wide">Wide UI:</label>
+						<label for="wide">{{ T "settings.wide" }}</label>
 						<input type="hidden" value="off" name="wide">
 						<input type="checkbox" name="wide" id="wide" {{ if eq .Prefs.Wide "on" }}checked{{ end }}>
 					</div>
 				</fieldset>
 				<fieldset>
-					<legend>Interface</legend>
+					<legend>{{ T "settings.interface" }}</legend>
 					<div class="prefs-group">
-						<label for="remove_default_feeds">Remove homepage</label>
+						<label for="remove_default_feeds">{{ T "settings.remove_home" }}</label>
 						<input type="hidden" value="off" name="remove_default_feeds">
 						<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" {{ if eq .Prefs.RemoveDefaultFeeds "on" }}checked{{ end }} onchange="toggleRemoveHome(this)">
 					</div>
@@ -52,103 +59,108 @@
 					<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value="{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}blacklist{{ else }}whitelist{{ end }}">
 					<input type="hidden" name="show_all_subs" id="show_all_subs_hidden" value="{{ if eq .Prefs.ShowAllSubs "off" }}off{{ else }}on{{ end }}">
 					<div class="prefs-group">
-						<label for="post_sort" title="Applies only to subreddit feeds">Default subreddit post sort</label>
+						<label for="post_sort" title="{{ T "settings.post_sort_title" }}">{{ T "settings.post_sort" }}</label>
 						<select name="post_sort">
-							<option value="new" {{ if eq "new" $.Prefs.PostSort }}selected{{ end }}>New</option>
-							<option value="new_archive" {{ if eq "new_archive" $.Prefs.PostSort }}selected{{ end }}>Archive</option>
-							<option value="top" {{ if eq "top" $.Prefs.PostSort }}selected{{ end }}>Top</option>
-							<option value="notorious" {{ if eq "notorious" $.Prefs.PostSort }}selected{{ end }}>Notorious</option>
+							<option value="new" {{ if eq "new" $.Prefs.PostSort }}selected{{ end }}>{{ T "sort.new" }}</option>
+							<option value="new_archive" {{ if eq "new_archive" $.Prefs.PostSort }}selected{{ end }}>{{ T "sort.archive" }}</option>
+							<option value="top" {{ if eq "top" $.Prefs.PostSort }}selected{{ end }}>{{ T "sort.top" }}</option>
+							<option value="notorious" {{ if eq "notorious" $.Prefs.PostSort }}selected{{ end }}>{{ T "sort.notorious" }}</option>
 						</select>
 					</div>
 					<div class="prefs-group">
-						<label for="comment_sort">Default comment sort</label>
+						<label for="comment_sort">{{ T "settings.comment_sort" }}</label>
 						<select name="comment_sort" id="comment_sort">
-							<option value="new" {{ if eq "new" $.Prefs.CommentSort }}selected{{ end }}>New</option>
-							<option value="new_archive" {{ if eq "new_archive" $.Prefs.CommentSort }}selected{{ end }}>Archive</option>
-							<option value="top" {{ if eq "top" $.Prefs.CommentSort }}selected{{ end }}>Top</option>
-							<option value="notorious" {{ if eq "notorious" $.Prefs.CommentSort }}selected{{ end }}>Notorious</option>
+							<option value="new" {{ if eq "new" $.Prefs.CommentSort }}selected{{ end }}>{{ T "sort.new" }}</option>
+							<option value="new_archive" {{ if eq "new_archive" $.Prefs.CommentSort }}selected{{ end }}>{{ T "sort.archive" }}</option>
+							<option value="top" {{ if eq "top" $.Prefs.CommentSort }}selected{{ end }}>{{ T "sort.top" }}</option>
+							<option value="notorious" {{ if eq "notorious" $.Prefs.CommentSort }}selected{{ end }}>{{ T "sort.notorious" }}</option>
 						</select>
 					</div>
 				</fieldset>
 				<fieldset>
-					<legend>Content</legend>
+					<legend>{{ T "settings.content" }}</legend>
 					<div class="prefs-group">
-						<label for="video_quality">Video quality:</label>
+						<label for="video_quality">{{ T "settings.video_quality" }}</label>
 						<select name="video_quality" id="video_quality">
 							{{ $qualities := list "best" "medium" "worst" }}
 							{{ range $qualities }}
-								<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ capitalize . }}</option>
+								<option value="{{ . }}" {{ if eq . $.Prefs.VideoQuality }}selected{{ end }}>{{ T (concat "quality." .) }}</option>
 							{{ end }}
 						</select>
 					</div>
 					<div class="prefs-group">
-						<label for="blur_spoiler">Blur spoiler previews:</label>
+						<label for="blur_spoiler">{{ T "settings.blur_spoiler" }}</label>
 						<input type="hidden" value="off" name="blur_spoiler">
 						<input type="checkbox" name="blur_spoiler" id="blur_spoiler" {{ if eq .Prefs.BlurSpoiler "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="show_nsfw">Show NSFW posts:</label>
+						<label for="show_nsfw">{{ T "settings.show_nsfw" }}</label>
 						<input type="hidden" value="off" name="show_nsfw">
 						<input type="checkbox" name="show_nsfw" id="show_nsfw" {{ if eq .Prefs.ShowNSFW "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="blur_nsfw">Blur NSFW previews:</label>
+						<label for="blur_nsfw">{{ T "settings.blur_nsfw" }}</label>
 						<input type="hidden" value="off" name="blur_nsfw">
 						<input type="checkbox" name="blur_nsfw" id="blur_nsfw" {{ if eq .Prefs.BlurNSFW "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="autoplay_videos">Autoplay videos</label>
+						<label for="autoplay_videos">{{ T "settings.autoplay" }}</label>
 						<input type="hidden" value="off" name="autoplay_videos">
 						<input type="checkbox" name="autoplay_videos" id="autoplay_videos" {{ if eq .Prefs.AutoplayVideos "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="fixed_navbar">Keep navbar fixed</label>
+						<label for="lazy_media" title="{{ T "settings.lazy_media_title" }}">{{ T "settings.lazy_media" }}</label>
+						<input type="hidden" value="off" name="lazy_media">
+						<input type="checkbox" name="lazy_media" id="lazy_media" {{ if eq .Prefs.LazyMedia "on" }}checked{{ end }}>
+					</div>
+					<div class="prefs-group">
+						<label for="fixed_navbar">{{ T "settings.fixed_navbar" }}</label>
 						<input type="hidden" value="off" name="fixed_navbar">
 						<input type="checkbox" name="fixed_navbar" {{ if eq .Prefs.FixedNavbar "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="scroll_interval">Infinite scroll interval (seconds)</label>
+						<label for="scroll_interval">{{ T "settings.scroll_interval" }}</label>
 						<input type="number" name="scroll_interval" id="scroll_interval" min="1" step="1" value="{{ .Prefs.ScrollInterval }}" style="width:60px">
 					</div>
 					<div class="prefs-group">
-						<label for="hide_sidebar_and_summary">Hide the summary and sidebar</label>
+						<label for="hide_sidebar_and_summary">{{ T "settings.hide_sidebar" }}</label>
 						<input type="hidden" value="off" name="hide_sidebar_and_summary">
 						<input type="checkbox" name="hide_sidebar_and_summary" {{ if eq .Prefs.HideSidebarAndSummary "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="use_hls">Use HLS for videos</label>
+						<label for="use_hls">{{ T "settings.use_hls" }}</label>
 						<input type="hidden" value="off" name="use_hls">
 						<input type="checkbox" name="use_hls" id="use_hls" {{ if eq .Prefs.UseHLS "on" }}checked{{ end }} onchange="toggleHLS(this)">
 					</div>
 					<div class="prefs-group">
-						<label for="hide_hls_notification">Hide notification about possible HLS usage</label>
+						<label for="hide_hls_notification">{{ T "settings.hide_hls_notif" }}</label>
 						<input type="hidden" value="off" name="hide_hls_notification">
 						<input type="checkbox" name="hide_hls_notification" id="hide_hls_notification" {{ if eq .Prefs.HideHLSNotification "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="hide_awards">Hide awards</label>
+						<label for="hide_awards">{{ T "settings.hide_awards" }}</label>
 						<input type="hidden" value="off" name="hide_awards">
 						<input type="checkbox" name="hide_awards" id="hide_awards" {{ if eq .Prefs.HideAwards "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="hide_score">Hide score</label>
+						<label for="hide_score">{{ T "settings.hide_score" }}</label>
 						<input type="hidden" value="off" name="hide_score">
 						<input type="checkbox" name="hide_score" id="hide_score" {{ if eq .Prefs.HideScore "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="disable_visit_reddit_confirmation">Do not confirm before visiting content on Reddit</label>
+						<label for="disable_visit_reddit_confirmation">{{ T "settings.disable_visit_confirm" }}</label>
 						<input type="hidden" value="off" name="disable_visit_reddit_confirmation">
 						<input type="checkbox" name="disable_visit_reddit_confirmation" {{ if eq .Prefs.DisableVisitRedditConfirmation "on" }}checked{{ end }}>
 					</div>
 					<div class="prefs-group">
-						<label for="fetch_sub_about" title="When off (default), visiting a subreddit page does not actively request the sub's about info upstream; only cached data is used. The background icon/about prefetch is unaffected.">Fetch sub about info on visit</label>
+						<label for="fetch_sub_about" title="{{ T "settings.fetch_sub_about_title" }}">{{ T "settings.fetch_sub_about" }}</label>
 						<input type="hidden" value="off" name="fetch_sub_about">
 						<input type="checkbox" name="fetch_sub_about" id="fetch_sub_about" {{ if eq .Prefs.FetchSubAbout "on" }}checked{{ end }}>
 					</div>
 				</fieldset>
 			</div>
 			<div id="save-bar">
-				<input id="save" type="submit" value="Save">
+				<input id="save" type="submit" value="{{ T "settings.save" }}">
 			</div>
 		</form>
 	</div>
@@ -156,18 +168,18 @@
 	<div class="settings-column">
 		<div class="prefs" id="sub_picker" style="{{ if eq .Prefs.RemoveDefaultFeeds "on" }}display:none{{ end }}">
 			<fieldset>
-				<legend>Homepage Subreddits</legend>
+				<legend>{{ T "settings.homepage_subs" }}</legend>
 				<div class="prefs-group" id="show_all_row">
-					<label for="show_all_subs">Show all subs on homepage</label>
+					<label for="show_all_subs">{{ T "settings.show_all_subs" }}</label>
 					<input type="checkbox" id="show_all_subs" {{ if ne .Prefs.ShowAllSubs "off" }}checked{{ end }} onchange="toggleSubPicker(this)">
 				</div>
 				<div id="sub_filter" style="{{ if ne .Prefs.ShowAllSubs "off" }}display:none{{ end }}">
 					<div class="sub-picker-mode">
 						<div class="mode-segmented">
-							<a class="mode-seg{{ if ne .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="whitelist" onclick="setMode('whitelist')">Whitelist</a>
-							<a class="mode-seg{{ if eq .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="blacklist" onclick="setMode('blacklist')">Blacklist</a>
+							<a class="mode-seg{{ if ne .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="whitelist" onclick="setMode('whitelist')">{{ T "settings.whitelist" }}</a>
+							<a class="mode-seg{{ if eq .Prefs.FrontPageSubsMode "blacklist" }} selected{{ end }}" data-mode="blacklist" onclick="setMode('blacklist')">{{ T "settings.blacklist" }}</a>
 						</div>
-						<span class="mode-hint" id="mode_hint">{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}Selected subs are hidden{{ else }}Only selected subs are shown{{ end }}</span>
+						<span class="mode-hint" id="mode_hint">{{ if eq .Prefs.FrontPageSubsMode "blacklist" }}{{ T "settings.mode_blacklist_hint" }}{{ else }}{{ T "settings.mode_whitelist_hint" }}{{ end }}</span>
 					</div>
 					<div class="sub-picker-selected" id="sub_selected">
 						{{ if and (ne .Prefs.FrontPageSubs "all") (ne .Prefs.FrontPageSubs "") }}
@@ -177,7 +189,7 @@
 						{{ end }}
 					</div>
 					<div class="sub-picker-search">
-						<input type="text" id="sub_search" placeholder="Search subreddits..." autocomplete="off">
+						<input type="text" id="sub_search" placeholder="{{ T "settings.search_subs_placeholder" }}" autocomplete="off">
 					</div>
 					<div class="sub-picker-list" id="sub_list"></div>
 				</div>
@@ -186,14 +198,14 @@
 
 		<div class="prefs" id="prefetch_settings">
 			<fieldset>
-				<legend>Natural Prefetch</legend>
+				<legend>{{ T "settings.natural_prefetch" }}</legend>
 				<div class="prefs-group">
-					<label for="enable_natural_prefetch">Enable natural prefetch</label>
+					<label for="enable_natural_prefetch">{{ T "settings.enable_np" }}</label>
 					<input type="checkbox" id="enable_natural_prefetch" {{ if eq .Prefs.EnableNaturalPrefetch "on" }}checked{{ end }} onchange="togglePrefetch(this)">
 				</div>
 				<div class="prefetch-picker" id="prefetch_picker" style="{{ if ne .Prefs.EnableNaturalPrefetch "on" }}display:none{{ end }}">
 					<div class="prefs-group">
-						<label for="prefetch_threshold">Start after % of window elapsed</label>
+						<label for="prefetch_threshold">{{ T "settings.np_threshold" }}</label>
 						<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value="{{ .Prefs.PrefetchThreshold }}" style="width:60px" onchange="savePrefetchThreshold(this.value)">
 					</div>
 					<div class="sub-picker-selected" id="prefetch_sub_selected">
@@ -204,7 +216,7 @@
 						{{ end }}
 					</div>
 					<div class="sub-picker-search">
-						<input type="text" id="prefetch_sub_search" placeholder="Add subreddit..." autocomplete="off">
+						<input type="text" id="prefetch_sub_search" placeholder="{{ T "settings.add_sub_placeholder" }}" autocomplete="off">
 					</div>
 					<div class="sub-picker-list" id="prefetch_sub_list"></div>
 				</div>
@@ -213,42 +225,42 @@
 
 		<div class="prefs" id="instance_info">
 			<fieldset>
-			<legend>Instance Information</legend>
+			<legend>{{ T "settings.instance_info" }}</legend>
 			<div class="prefs-group">
-				<label for="enable_debug">Enable debug page</label>
+				<label for="enable_debug">{{ T "settings.enable_debug" }}</label>
 				<input type="checkbox" id="enable_debug" {{ if eq .Prefs.EnableDebug "on" }}checked{{ end }} onchange="toggleDebug(this)">
 			</div>
 			<table>
 				<tbody>
 					<tr>
-						<td>Version</td>
+						<td>{{ T "settings.version" }}</td>
 						<td>{{ .Version }}</td>
 					</tr>
 					<tr>
-						<td>Archived Posts</td>
+						<td>{{ T "settings.archived_posts" }}</td>
 						<td>{{ .PostCount }}</td>
 					</tr>
 					<tr>
-						<td>Archived Subreddits</td>
+						<td>{{ T "settings.archived_subs" }}</td>
 						<td>{{ .SubredditCount }}</td>
 					</tr>
 					<tr>
-						<td>Cached Media Files</td>
+						<td>{{ T "settings.cached_media" }}</td>
 						<td>{{ .MediaCount }}</td>
 					</tr>
 					<tr>
-						<td>Media Storage Used</td>
+						<td>{{ T "settings.media_storage" }}</td>
 						<td>{{ .MediaSize }}</td>
 					</tr>
 					<tr>
-						<td>OAuth Fallback</td>
-						<td>{{ if .OAuthEnabled }}Enabled{{ else }}Disabled{{ end }}</td>
+						<td>{{ T "settings.oauth_fallback" }}</td>
+						<td>{{ if .OAuthEnabled }}{{ T "settings.enabled" }}{{ else }}{{ T "settings.disabled" }}{{ end }}</td>
 					</tr>
 				</tbody>
 			</table>
 			{{ if .SubredditStats }}
 			<table>
-				<thead><tr><th>Archived Subreddit</th><th>Posts</th></tr></thead>
+				<thead><tr><th>{{ T "settings.th_archived_sub" }}</th><th>{{ T "settings.th_posts" }}</th></tr></thead>
 				<tbody>
 					{{ range .SubredditStats }}
 					<tr>
@@ -339,7 +351,7 @@ function setMode(mode) {
 		el.classList.toggle('selected', el.dataset.mode === mode);
 	});
 	document.getElementById('mode_hint').textContent =
-		mode === 'blacklist' ? 'Selected subs are hidden' : 'Only selected subs are shown';
+		mode === 'blacklist' ? '{{ T "settings.mode_blacklist_hint" }}' : '{{ T "settings.mode_whitelist_hint" }}';
 	checkDirty();
 }
 
@@ -451,33 +463,33 @@ function submitHLSSetting(val) {
 </script>
 <div class="modal-overlay" id="prefetch-modal" onclick="if(event.target===this)cancelPrefetch()">
 	<div class="modal-box">
-		<h2>Enable natural prefetch?</h2>
-		<p>Enabling this may cause your request quota to deplete rapidly. Make sure you know what you are doing.</p>
+		<h2>{{ T "settings.np_modal_title" }}</h2>
+		<p>{{ T "settings.np_modal_body" }}</p>
 		<div class="modal-actions">
-			<button class="modal-cancel" onclick="cancelPrefetch()">Cancel</button>
-			<button class="modal-confirm" onclick="confirmPrefetch()">Accept risk &amp; enable</button>
+			<button class="modal-cancel" onclick="cancelPrefetch()">{{ T "settings.cancel" }}</button>
+			<button class="modal-confirm" onclick="confirmPrefetch()">{{ T "settings.accept_risk" }}</button>
 		</div>
 	</div>
 </div>
 <div class="modal-overlay" id="debug-modal" onclick="if(event.target===this)cancelDebug()">
 	<div class="modal-box">
-		<h2>Enable debug page?</h2>
-		<p>Enabling this on a public network may expose instance diagnostics and private information.</p>
-		<p>Are you sure you want to continue?</p>
+		<h2>{{ T "settings.debug_modal_title" }}</h2>
+		<p>{{ T "settings.debug_modal_body" }}</p>
+		<p>{{ T "settings.confirm_continue" }}</p>
 		<div class="modal-actions">
-			<button class="modal-cancel" onclick="cancelDebug()">Cancel</button>
-			<button class="modal-confirm" onclick="confirmDebug()">Accept risk &amp; enable</button>
+			<button class="modal-cancel" onclick="cancelDebug()">{{ T "settings.cancel" }}</button>
+			<button class="modal-confirm" onclick="confirmDebug()">{{ T "settings.accept_risk" }}</button>
 		</div>
 	</div>
 </div>
 <div class="modal-overlay" id="hls-modal" onclick="if(event.target===this)cancelHLS()">
 	<div class="modal-box">
-		<h2>Enable HLS video?</h2>
-		<p>HLS generates dozens of uncacheable segment requests per video, causing your request quota to deplete rapidly and bypassing the media cache layer.</p>
-		<p>Are you sure you want to continue?</p>
+		<h2>{{ T "settings.hls_modal_title" }}</h2>
+		<p>{{ T "settings.hls_modal_body" }}</p>
+		<p>{{ T "settings.confirm_continue" }}</p>
 		<div class="modal-actions">
-			<button class="modal-cancel" onclick="cancelHLS()">Cancel</button>
-			<button class="modal-confirm" onclick="confirmHLS()">Accept risk &amp; enable</button>
+			<button class="modal-cancel" onclick="cancelHLS()">{{ T "settings.cancel" }}</button>
+			<button class="modal-confirm" onclick="confirmHLS()">{{ T "settings.accept_risk" }}</button>
 		</div>
 	</div>
 </div>

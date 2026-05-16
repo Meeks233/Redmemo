@@ -29,8 +29,9 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 		commentSort = prefs.CommentSort
 	}
 
-	// 1. Cache
-	cacheKey := urlPath
+	// 1. Cache — keyed by UI language so a zh visitor never receives the
+	// cached zh-neutral page rendered for an en visitor (and vice versa).
+	cacheKey := prefs.Lang + ":" + urlPath
 	if commentSort != "" {
 		cacheKey += "?sort=" + commentSort
 	}
@@ -117,7 +118,10 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	urlPath := "/r/" + sub + "/comments/" + id
-	h.cache.InvalidateHTML(r.Context(), urlPath)
+	// HTML cache entries are language-prefixed; drop every language variant.
+	for _, lang := range render.SupportedLangs {
+		h.cache.InvalidateHTML(r.Context(), lang+":"+urlPath)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"ok":true}`)
@@ -166,7 +170,7 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string) {
 	var post reddit.Post
 	if err := json.Unmarshal(sp.JSONData, &post); err != nil {
-		h.renderer.RenderError(w, "存档数据解析失败", http.StatusInternalServerError)
+		h.renderer.RenderError(w, prefs.Lang, "存档数据解析失败", http.StatusInternalServerError)
 		return
 	}
 	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))

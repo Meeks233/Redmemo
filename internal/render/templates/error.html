@@ -1,4 +1,4 @@
-{{ define "title" }}{{ if .ResetSeconds }}Rate Limited{{ else if and (ge .StatusCode 200) (lt .StatusCode 300) }}{{ .Message }}{{ else }}Error: {{ .Message }}{{ end }}{{ end }}
+{{ define "title" }}{{ if .ResetSeconds }}{{ T "error.rate_limited" }}{{ else if and (ge .StatusCode 200) (lt .StatusCode 300) }}{{ .Message }}{{ else }}{{ T "error.title" .Message }}{{ end }}{{ end }}
 
 {{ template "base" . }}
 
@@ -23,7 +23,7 @@
 			<p class="error-status-code" id="error-message">{{ .StatusCode }}</p>
 			{{ if .Details }}
 			<div class="error-diagnostics">
-				<h4>Diagnostics</h4>
+				<h4>{{ T "error.diagnostics" }}</h4>
 				<ul>
 				{{ range .Details }}
 					<li>{{ . }}</li>
@@ -33,7 +33,7 @@
 			{{ end }}
 			{{ if .Tokens }}
 			<div class="error-diagnostics">
-				<h4>OAuth Tokens ({{ len .Tokens }} total, {{ .TokenBudget }} remaining)</h4>
+				<h4>{{ T "error.tokens_header" (len .Tokens) .TokenBudget }}</h4>
 				<ul class="token-list">
 				{{ range .Tokens }}
 					<li class="{{ if .HasBudget }}token-ok{{ else }}token-empty{{ end }}">
@@ -41,9 +41,9 @@
 							<span class="token-index">#{{ .Index }}</span>
 							<span class="token-backend">{{ .Backend }}</span>
 							<span class="token-kind">{{ .Kind }}</span>
-							<span class="token-remaining">{{ .RateRemaining }} left</span>
+							<span class="token-remaining">{{ .RateRemaining }} {{ T "error.left" }}</span>
 							<span class="token-reset">{{ .RateReset }}</span>
-							{{ if .ExpiresIn }}<span class="token-expires">expires {{ .ExpiresIn }}</span>{{ end }}
+							{{ if .ExpiresIn }}<span class="token-expires">{{ T "error.expires" }} {{ .ExpiresIn }}</span>{{ end }}
 						</div>
 						{{ if .UserAgent }}<div class="token-ua">UA: {{ .UserAgent }}</div>{{ end }}
 						{{ if .DeviceID }}<div class="token-ua">Device: {{ .DeviceID }}</div>{{ end }}
@@ -56,55 +56,60 @@
 			{{ end }}
 			{{ if .IsDebug }}
 			<div class="error-diagnostics prefetch-status-section">
-				<h4>Prefetch Status</h4>
+				<h4>{{ T "error.prefetch_status" }}</h4>
 				<table class="prefetch-status-table">
 					<tr>
-						<td class="ps-label">NP Enabled</td>
-						<td>{{ if .PrefetchStatus.Enabled }}<span class="ps-on">ON</span>{{ else }}<span class="ps-off">OFF</span>{{ end }}</td>
+						<td class="ps-label">{{ T "error.np_enabled" }}</td>
+						<td>{{ if .PrefetchStatus.Enabled }}<span class="ps-on">{{ T "error.on" }}</span>{{ else }}<span class="ps-off">{{ T "error.off" }}</span>{{ end }}</td>
 					</tr>
 					{{ if .PrefetchStatus.ActiveSubs }}
 					<tr>
-						<td class="ps-label">Active Subs</td>
+						<td class="ps-label">{{ T "error.active_subs" }}</td>
 						<td>{{ .PrefetchStatus.ActiveSubs }}</td>
 					</tr>
 					{{ end }}
 					<tr>
-						<td class="ps-label">NP Dispatch</td>
-						<td><span class="ps-phase">{{ or .PrefetchStatus.NPPhase "—" }}</span>{{ if .PrefetchStatus.NPCurrent }} · {{ .PrefetchStatus.NPCurrent }}{{ end }} {{ if .PrefetchStatus.QueueLen }}({{ .PrefetchStatus.QueueLen }} queued){{ end }}</td>
+						<td class="ps-label">{{ T "error.np_dispatch" }}</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.NPPhase "—" }}</span>{{ if .PrefetchStatus.NPCurrent }} · {{ .PrefetchStatus.NPCurrent }}{{ end }} {{ if .PrefetchStatus.QueueLen }}{{ T "error.queued" .PrefetchStatus.QueueLen }}{{ end }}</td>
 					</tr>
 					<tr><td colspan="2" class="ps-divider">L1 — Listing Fetch</td></tr>
 					<tr>
-						<td class="ps-label">Phase</td>
+						<td class="ps-label">{{ T "error.phase" }}</td>
 						<td><span class="ps-phase">{{ or .PrefetchStatus.L1Phase "—" }}</span></td>
 					</tr>
 					{{ if .PrefetchStatus.L1Progress }}
 					<tr>
-						<td class="ps-label">Round</td>
+						<td class="ps-label">{{ T "error.round" }}</td>
 						<td>{{ .PrefetchStatus.L1Progress }}</td>
 					</tr>
 					{{ end }}
 					{{ if .PrefetchStatus.L1Subs }}
 					<tr>
-						<td class="ps-label">Subs</td>
+						<td class="ps-label">{{ T "error.subs" }}</td>
 						<td>{{ .PrefetchStatus.L1Subs }}</td>
 					</tr>
 					{{ end }}
 					{{ if .PrefetchStatus.L1Cursors }}
 					<tr>
-						<td class="ps-label">Cursors</td>
+						<td class="ps-label">{{ T "error.cursors" }}</td>
 						<td>{{ range .PrefetchStatus.L1Cursors }}<span class="ps-cursor">r/{{ .Sub }}: <code>{{ .Cursor }}</code></span> {{ end }}</td>
 					</tr>
 					{{ end }}
 					{{ if .PrefetchStatus.L1NextCycle }}
 					<tr>
-						<td class="ps-label">Next Cycle</td>
+						<td class="ps-label">{{ T "error.next_cycle" }}</td>
 						<td>{{ .PrefetchStatus.L1NextCycle }}</td>
 					</tr>
 					{{ end }}
 					<tr><td colspan="2" class="ps-divider">L2 — Media Download</td></tr>
 					<tr>
-						<td class="ps-label">Phase</td>
-						<td><span class="ps-phase">{{ or .PrefetchStatus.L2Phase "—" }}</span>{{ if .PrefetchStatus.L2Sub }} · r/{{ .PrefetchStatus.L2Sub }}{{ end }}{{ if .PrefetchStatus.L2Pending }} ({{ .PrefetchStatus.L2Pending }} pending){{ end }}</td>
+						<td class="ps-label">{{ T "error.phase" }}</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.L2Phase "—" }}</span>{{ if .PrefetchStatus.L2Sub }} · r/{{ .PrefetchStatus.L2Sub }}{{ end }}{{ if .PrefetchStatus.L2Pending }} {{ T "error.pending" .PrefetchStatus.L2Pending }}{{ end }}</td>
+					</tr>
+					<tr><td colspan="2" class="ps-divider">L5 — Audio Remux</td></tr>
+					<tr>
+						<td class="ps-label">{{ T "error.phase" }}</td>
+						<td><span class="ps-phase">{{ or .PrefetchStatus.L5Phase "—" }}</span>{{ if .PrefetchStatus.L5Current }} · {{ .PrefetchStatus.L5Current }}{{ end }}{{ if .PrefetchStatus.L5Pending }} {{ T "error.pending" .PrefetchStatus.L5Pending }}{{ end }}</td>
 					</tr>
 				</table>
 			</div>
@@ -112,8 +117,8 @@
 			{{ if .PrefetchEvents }}
 			<div class="error-diagnostics prefetch-log-section">
 				<div class="prefetch-log-header">
-					<h4>Prefetch Event Log ({{ len .PrefetchEvents }} entries, newest first)</h4>
-					<button class="prefetch-copy-btn" onclick="copyPrefetchLog()" title="Copy to clipboard">
+					<h4>{{ T "error.event_log" (len .PrefetchEvents) }}</h4>
+					<button class="prefetch-copy-btn" onclick="copyPrefetchLog()" title="{{ T "error.copy_title" }}">
 						<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
 					</button>
 				</div>
@@ -121,10 +126,10 @@
 					<table class="prefetch-log-table">
 						<thead>
 							<tr>
-								<th class="pl-time">Time</th>
-								<th class="pl-level">Level</th>
-								<th class="pl-phase">Phase</th>
-								<th class="pl-msg">Message</th>
+								<th class="pl-time">{{ T "error.th_time" }}</th>
+								<th class="pl-level">{{ T "error.th_level" }}</th>
+								<th class="pl-phase">{{ T "error.th_phase" }}</th>
+								<th class="pl-msg">{{ T "error.th_message" }}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -151,7 +156,7 @@
 				var text = lines.join('\n');
 				navigator.clipboard.writeText(text).then(function() {
 					var btn = document.querySelector('.prefetch-copy-btn');
-					btn.textContent = 'Copied!';
+					btn.textContent = '{{ T "error.copied" }}';
 					setTimeout(function() { btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'; }, 1500);
 				});
 			}
@@ -210,11 +215,11 @@
 	var budget = parseInt(el.dataset.tokenBudget, 10);
 	var msg = document.getElementById('error-message');
 	if (budget <= 0) {
-		msg.textContent = "Using Memo only 😭";
+		msg.textContent = "{{ T "error.budget_empty" }}";
 	} else if (budget < 50) {
-		msg.textContent = "We're running out of ammo 🤕";
+		msg.textContent = "{{ T "error.budget_low" }}";
 	} else {
-		msg.textContent = "All right 😎";
+		msg.textContent = "{{ T "error.budget_ok" }}";
 	}
 })();
 </script>

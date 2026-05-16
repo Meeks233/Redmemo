@@ -258,6 +258,11 @@ Log "Watch mode active | Ctrl+R to redeploy | Ctrl+C to exit | CC turn-end auto-
 
 function Invoke-Redeploy {
     param([string]$Reason)
+    # Reset before every attempt; set to $true only when the build + recreate
+    # actually succeed. The watch loop reads this to decide whether to advance
+    # $LastBuiltMtime — a failed build must NOT advance it, otherwise the next
+    # CC turn end sees "no changes" and never retries the transient failure.
+    $script:LastRedeployOk = $false
     Log "=== Redeploying ($Reason) ==="
     Start-TitleSpinner "redmemo: rebuilding"
 
@@ -287,11 +292,16 @@ function Invoke-Redeploy {
         if ($check.Trim() -eq "ok") {
             Log "Redeploy succeeded!"
             Stop-TitleSpinner -FinalTitle "redmemo: $([char]0x2713) idle"
+            $script:LastRedeployOk = $true
             return
         }
     }
     Warn "Health check pending after redeploy"
     Stop-TitleSpinner -FinalTitle "redmemo: $([char]0x26A0) unhealthy"
+    # Build + container recreate succeeded; only the HTTP probe is lagging.
+    # Treat as success so we don't loop-rebuild a container that is merely
+    # slow to start — rebuilding cannot fix a runtime-only stall.
+    $script:LastRedeployOk = $true
 }
 
 [Console]::TreatControlCAsInput = $true
@@ -305,7 +315,11 @@ try {
             }
             if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'R') {
                 Invoke-Redeploy -Reason "manual Ctrl+R"
-                $LastBuiltMtime = Get-CodeMaxMtime
+                if ($script:LastRedeployOk) {
+                    $LastBuiltMtime = Get-CodeMaxMtime
+                } else {
+                    Warn "Redeploy failed — last-built marker kept; retry with Ctrl+R or it will retry on the next CC turn end"
+                }
                 Log "Watch mode active | Ctrl+R to redeploy | Ctrl+C to exit | CC turn-end auto-redeploy armed"
             }
         }
@@ -316,9 +330,18 @@ try {
             Start-Sleep -Milliseconds 1500
             Remove-Item $TurnMarker -Force -ErrorAction SilentlyContinue
             $currentMtime = Get-CodeMaxMtime
+            # Rebuild when files are newer than the last *successful* build.
+            # Because a failed Invoke-Redeploy leaves $LastBuiltMtime untouched,
+            # the failing (but still-newer) files keep this condition true, so
+            # every subsequent CC turn end automatically retries until a build
+            # succeeds — even if no further file changes were made.
             if ($currentMtime -gt $LastBuiltMtime) {
                 Invoke-Redeploy -Reason "CC turn end + code change detected"
-                $LastBuiltMtime = Get-CodeMaxMtime
+                if ($script:LastRedeployOk) {
+                    $LastBuiltMtime = Get-CodeMaxMtime
+                } else {
+                    Warn "Redeploy failed — keeping last-built marker so the next CC turn end (or Ctrl+R) retries automatically"
+                }
             } else {
                 Log "CC turn ended; no build-relevant changes since last deploy, skipping"
             }

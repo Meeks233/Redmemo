@@ -44,11 +44,11 @@
 				.then(function(d) {
 					btn.classList.remove('spinning');
 					if (d.ok) location.reload();
-					else alert(d.error || 'Refresh failed');
+					else alert(d.error || '{{ T "post.refresh_failed" }}');
 				})
 				.catch(function() {
 					btn.classList.remove('spinning');
-					alert('Network error');
+					alert('{{ T "post.network_error" }}');
 				});
 		}
 		</script>
@@ -56,33 +56,33 @@
 
 		<div id="commentQueryForms">
 			<form id="sort">
-				<p id="comment_count">{{ index .Post.Comments 0 }} {{ commentsWord (index .Post.Comments 1) }} <span id="sorted_by">sorted by </span></p>
-				<select name="sort" title="Sort comments by" id="commentSortSelect">
+				<p id="comment_count">{{ index .Post.Comments 0 }} {{ commentsWord (index .Post.Comments 1) }} <span id="sorted_by">{{ T "comments.sorted_by" }}</span></p>
+				<select name="sort" title="{{ T "comments.sort_title" }}" id="commentSortSelect">
 					{{ $sorts := list "confidence" "top" "new" "controversial" "old" }}
 					{{ range $sorts }}
-						<option value="{{ . }}" {{ if eq . $.Sort }}selected{{ end }}>{{ capitalize . }}</option>
+						<option value="{{ . }}" {{ if eq . $.Sort }}selected{{ end }}>{{ T (concat "sort." .) }}</option>
 					{{ end }}
 				</select>
 				<button id="sort_submit" class="submit">{{ template "submit_svg" }}</button>
 			</form>
 			<form id="sort">
-				<input id="search" class="commentQuery" type="search" name="q" value="{{ .CommentQuery }}" placeholder="Search comments">
+				<input id="search" class="commentQuery" type="search" name="q" value="{{ .CommentQuery }}" placeholder="{{ T "comments.search_placeholder" }}">
 				<input type="hidden" name="type" value="comment">
 			</form>
 		</div>
 
 		<div>
 		{{ if .CommentQuery }}
-		Comments containing "{{ .CommentQuery }}"&nbsp;|&nbsp;<a id="allCommentsLink" href="{{ .URLWithoutQuery }}">All comments</a>
+		{{ T "comments.containing" .CommentQuery }}&nbsp;|&nbsp;<a id="allCommentsLink" href="{{ .URLWithoutQuery }}">{{ T "comments.all" }}</a>
 		{{ end }}
 		</div>
 
 		{{ range .Comments }}
 		<div class="thread">
 			{{ if $.SingleThread }}
-			<p class="thread_nav"><a href="{{ $.Post.Permalink }}">View all comments</a></p>
+			<p class="thread_nav"><a href="{{ $.Post.Permalink }}">{{ T "comments.view_all" }}</a></p>
 			{{ if eq .ParentKind "t1" }}
-			<p class="thread_nav"><a href="?context=9999">Show parent comments</a></p>
+			<p class="thread_nav"><a href="?context=9999">{{ T "comments.show_parent" }}</a></p>
 			{{ end }}
 			{{ end }}
 			{{ template "comment_tree" . }}

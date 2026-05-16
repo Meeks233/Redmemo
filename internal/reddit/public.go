@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -120,23 +121,26 @@ func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, aft
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
+	// query must be URL-encoded: multi-word searches contain spaces and other
+	// reserved characters that would otherwise produce a malformed request.
+	eq := url.QueryEscape(query)
 	var path string
 	if sub != "" {
-		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&limit=%d&q=%s", sub, limit, query)
+		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&limit=%d&q=%s", sub, limit, eq)
 		if restrictSR {
 			path += "&restrict_sr=on"
 		}
 	} else {
-		path = fmt.Sprintf("/search.json?raw_json=1&limit=%d&q=%s", limit, query)
+		path = fmt.Sprintf("/search.json?raw_json=1&limit=%d&q=%s", limit, eq)
 	}
 	if sort != "" {
-		path += "&sort=" + sort
+		path += "&sort=" + url.QueryEscape(sort)
 	}
 	if t != "" {
-		path += "&t=" + t
+		path += "&t=" + url.QueryEscape(t)
 	}
 	if after != "" {
-		path += "&after=" + after
+		path += "&after=" + url.QueryEscape(after)
 	}
 	data, err := c.fetch(ctx, path)
 	if err != nil {

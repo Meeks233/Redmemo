@@ -1,6 +1,34 @@
-{{ define "title" }}{{ .BrandName }}: search results - {{ .Params.Query }}{{ end }}
+{{ define "title" }}{{ T "search.page_title" .BrandName .Params.Query }}{{ end }}
 
 {{ define "subscriptions" }}{{ template "sub_list" dict "Prefs" .Prefs "Current" "" }}{{ end }}
+
+{{/* search_post_list renders the search results. Shared by the full page and
+     the "Load More" button's partial=1 fragment requests. Expects a dict with
+     "Posts" and "Prefs". */}}
+{{ define "search_post_list" }}
+	{{ range .Posts }}
+		{{ if and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") }}
+		{{ else if .Title }}
+			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs "LazyMedia" $.LazyMedia }}
+		{{ else }}
+			<div class="comment">
+				<div class="comment_left">
+					<p class="comment_score" title="{{ index .Score 1 }}">
+						{{ if ne $.Prefs.HideScore "on" }}{{ index .Score 0 }}{{ else }}&#x2022;{{ end }}
+					</p>
+					<div class="line"></div>
+				</div>
+				<details class="comment_right" open>
+					<summary class="comment_data">
+						<a class="comment_link" href="{{ .Permalink }}">{{ T "search.comment_link" }}</a>
+						<span class="created" title="{{ .Created }}">{{ .RelTime }}</span>
+					</summary>
+					<p class="comment_body">{{ .Body }}</p>
+				</details>
+			</div>
+		{{ end }}
+	{{ end }}
+{{ end }}
 
 {{ template "base" . }}
 
@@ -10,26 +38,26 @@
 	<div id="column_one">
 		<form id="search_sort">
 			<div class="search_widget_divider_box">
-				<input id="search" type="text" name="q" placeholder="Search" value="{{ .Params.Query }}" title="Search">
+				<input id="search" type="text" name="q" placeholder="{{ T "search.placeholder" }}" value="{{ .Params.Query }}" title="{{ T "search.placeholder" }}">
 				<div class="search_widget_divider_box">
 					{{ if .Sub }}
 					<div id="inside">
 						<input type="checkbox" name="restrict_sr" id="restrict_sr" {{ if .Params.RestrictSR }}checked{{ end }}>
-						<label for="restrict_sr" class="search_label">in r/{{ .Sub }}</label>
+						<label for="restrict_sr" class="search_label">{{ T "search.in" (concat "r/" .Sub) }}</label>
 					</div>
 					{{ end }}
 					{{ if eq .Params.Type "sr_user" }}<input type="hidden" name="type" value="sr_user">{{ end }}
-					<select id="sort_options" name="sort" title="Sort results by">
+					<select id="sort_options" name="sort" title="{{ T "search.sort_title" }}">
 						{{ $sorts := list "relevance" "hot" "top" "new" "comments" }}
 						{{ range $sorts }}
-							<option value="{{ . }}" {{ if eq . $.Params.Sort }}selected{{ end }}>{{ capitalize . }}</option>
+							<option value="{{ . }}" {{ if eq . $.Params.Sort }}selected{{ end }}>{{ T (concat "sort." .) }}</option>
 						{{ end }}
 					</select>
 					{{ if ne .Params.Sort "new" }}
 					<select id="timeframe" name="t" title="Timeframe">
 						{{ $timeframes := list "hour" "day" "week" "month" "year" "all" }}
 						{{ range $timeframes }}
-							<option value="{{ . }}" {{ if eq . $.Params.Timeframe }}selected{{ end }}>{{ capitalize . }}</option>
+							<option value="{{ . }}" {{ if eq . $.Params.Timeframe }}selected{{ end }}>{{ T (concat "time." .) }}</option>
 						{{ end }}
 					</select>
 					{{ end }}
@@ -42,63 +70,44 @@
 			{{ if or .Subreddits (eq .Params.Type "sr_user") }}
 			<div id="search_subreddits">
 				{{ if eq .Params.Type "sr_user" }}
-				<a href="?q={{ .Params.Query }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}" class="search_subreddit" id="more_subreddits">&larr; Back to post/comment results</a>
+				<a href="?q={{ .Params.Query }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}" class="search_subreddit" id="more_subreddits">&larr; {{ T "search.back_results" }}</a>
 				{{ end }}
 				{{ range .Subreddits }}
 				<a href="/r/{{ .Name }}" class="search_subreddit">
-					<div class="search_subreddit_left">{{ if .Icon }}<img loading="lazy" src="{{ .Icon }}" alt="r/{{ .Name }} icon">{{ end }}</div>
+					<div class="search_subreddit_left">{{ if .Icon }}<img loading="lazy" src="{{ .Icon }}" alt="{{ T "search.sr_icon_alt" .Name }}">{{ end }}</div>
 					<div class="search_subreddit_right">
 						<p class="search_subreddit_header">
 							<span class="search_subreddit_name">r/{{ .Name }}</span>
 							<span class="dot">&bull;</span>
-							<span class="search_subreddit_members" title="{{ index .Members 1 }} Members">{{ index .Members 0 }} Members</span>
+							<span class="search_subreddit_members" title="{{ T "search.members" (index .Members 1) }}">{{ T "search.members" (index .Members 0) }}</span>
 						</p>
 						<p class="search_subreddit_description">{{ .Description }}</p>
 					</div>
 				</a>
 				{{ end }}
 				{{ if ne .Params.Type "sr_user" }}
-				<a href="?q={{ .Params.Query }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}&type=sr_user" class="search_subreddit" id="more_subreddits">More subreddit results &rarr;</a>
+				<a href="?q={{ .Params.Query }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}&type=sr_user" class="search_subreddit" id="more_subreddits">{{ T "search.more_subreddits" }} &rarr;</a>
 				{{ end }}
 			</div>
 			{{ end }}
 		{{ end }}
 
 		{{ if .AllPostsHiddenNSFW }}
-		<span class="listing_warn">All posts are hidden because they are NSFW. Enable "Show NSFW posts" in settings to view.</span>
+		<span class="listing_warn">{{ T "listing.all_nsfw" }}</span>
 		{{ end }}
 
 		{{ if .NoPosts }}
-			<center>No posts were found.</center>
+			<center>{{ T "listing.no_posts" }}</center>
 		{{ end }}
 
 		{{ if .AllPostsFiltered }}
-			<span class="listing_warn">(All content on this page has been filtered)</span>
+			<span class="listing_warn">{{ T "listing.all_filtered" }}</span>
 		{{ else if .IsFiltered }}
-			<span class="listing_warn">(Content from r/{{ .Sub }} has been filtered)</span>
+			<span class="listing_warn">{{ T "listing.filtered_from" (concat "r/" .Sub) }}</span>
 		{{ else if ne .Params.Type "sr_user" }}
-			{{ range .Posts }}
-				{{ if and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") }}
-				{{ else if .Title }}
-					{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
-				{{ else }}
-					<div class="comment">
-						<div class="comment_left">
-							<p class="comment_score" title="{{ index .Score 1 }}">
-								{{ if ne $.Prefs.HideScore "on" }}{{ index .Score 0 }}{{ else }}&#x2022;{{ end }}
-							</p>
-							<div class="line"></div>
-						</div>
-						<details class="comment_right" open>
-							<summary class="comment_data">
-								<a class="comment_link" href="{{ .Permalink }}">COMMENT</a>
-								<span class="created" title="{{ .Created }}">{{ .RelTime }}</span>
-							</summary>
-							<p class="comment_body">{{ .Body }}</p>
-						</details>
-					</div>
-				{{ end }}
-			{{ end }}
+			<div id="search_results">
+				{{ template "search_post_list" dict "Posts" .Posts "Prefs" .Prefs "LazyMedia" (and (eq .Prefs.LazyMedia "on") (not .IsOffline)) }}
+			</div>
 		{{ end }}
 
 		{{ if eq .Prefs.UseHLS "on" }}
@@ -106,15 +115,91 @@
 		<script src="/playHLSVideo.js"></script>
 		{{ end }}
 
-		{{ if ne .Params.Type "sr_user" }}
-		<footer>
-			{{ if .Params.Before }}
-			<a href="?q={{ .Params.Query }}&restrict_sr={{ if .Params.RestrictSR }}on{{ end }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}&before={{ .Params.Before }}" accesskey="P">PREV</a>
-			{{ end }}
-			{{ if .Params.After }}
-			<a href="?q={{ .Params.Query }}&restrict_sr={{ if .Params.RestrictSR }}on{{ end }}&sort={{ .Params.Sort }}&t={{ .Params.Timeframe }}&after={{ .Params.After }}" accesskey="N">NEXT</a>
-			{{ end }}
+		{{ if and (ne .Params.Type "sr_user") (not .NoPosts) .Params.After }}
+		<footer id="search_more_footer">
+			<button type="button" id="search_load_more" class="load-more-btn"
+				data-q="{{ .Params.Query }}"
+				data-sub="{{ .Sub }}"
+				data-sort="{{ .Params.Sort }}"
+				data-t="{{ .Params.Timeframe }}"
+				data-after="{{ .Params.After }}"
+				accesskey="N">
+				<span class="load-more-spinner" aria-hidden="true">
+					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
+				</span>
+				<span class="load-more-label">{{ T "loadmore.label" }}</span>
+			</button>
+			<span id="search_more_msg" class="listing_warn" style="display:none"></span>
 		</footer>
+		<script>
+		(function() {
+			var btn = document.getElementById('search_load_more');
+			var msg = document.getElementById('search_more_msg');
+			var results = document.getElementById('search_results');
+			if (!btn || !results) return;
+			var label = btn.querySelector('.load-more-label');
+			var loading = false;
+
+			function finish(text) {
+				msg.textContent = text;
+				msg.style.display = '';
+				btn.style.display = 'none';
+			}
+
+			function reset() {
+				btn.classList.remove('loading');
+				btn.disabled = false;
+				label.textContent = '{{ T "loadmore.label" }}';
+				loading = false;
+			}
+
+			btn.addEventListener('click', function() {
+				if (loading) return;
+				loading = true;
+				btn.disabled = true;
+				btn.classList.add('loading');
+				label.textContent = '{{ T "loadmore.loading" }}';
+
+				var d = btn.dataset;
+				var base = d.sub ? '/r/' + encodeURIComponent(d.sub) + '/search' : '/search';
+				var url = base + '?partial=1'
+					+ '&q=' + encodeURIComponent(d.q)
+					+ '&sort=' + encodeURIComponent(d.sort || '')
+					+ '&t=' + encodeURIComponent(d.t || '')
+					+ '&after=' + encodeURIComponent(d.after || '');
+
+				fetch(url).then(function(r) {
+					var degraded = r.headers.get('X-Degraded');
+					var next = r.headers.get('X-Next-After') || '';
+					return r.text().then(function(html) {
+						return { degraded: degraded, next: next, html: html };
+					});
+				}).then(function(res) {
+					if (res.degraded) {
+						finish('{{ T "loadmore.quota" }}');
+						return;
+					}
+					if (!res.html.trim()) {
+						finish('{{ T "loadmore.no_more" }}');
+						return;
+					}
+					var tmp = document.createElement('div');
+					tmp.innerHTML = res.html;
+					while (tmp.firstChild) results.appendChild(tmp.firstChild);
+					if (!res.next) {
+						finish('{{ T "loadmore.no_more" }}');
+						return;
+					}
+					btn.dataset.after = res.next;
+					reset();
+				}).catch(function() {
+					msg.textContent = '{{ T "loadmore.failed" }}';
+					msg.style.display = '';
+					reset();
+				});
+			});
+		})();
+		</script>
 		{{ end }}
 	</div>
 {{ end }}

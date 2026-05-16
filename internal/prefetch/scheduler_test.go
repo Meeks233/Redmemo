@@ -294,19 +294,35 @@ func (ts *toggleSettings) Set(key, value string) error {
 }
 
 type mockPool struct {
+	mu        sync.Mutex
 	resetAt   time.Time
 	capacity  int
 	remaining int
 }
 
 func (m *mockPool) WindowInfo() (time.Time, int, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.resetAt, m.capacity, m.remaining
 }
 
+// setBudget updates the window state under lock, for tests that mutate the
+// pool concurrently with a running dispatchLoop.
+func (m *mockPool) setBudget(resetAt time.Time, remaining int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resetAt = resetAt
+	m.remaining = remaining
+}
+
 type mockDownloader struct {
-	mu    sync.Mutex
-	calls []string
-	err   error
+	mu         sync.Mutex
+	calls      []string
+	err        error
+	failedURLs   []string
+	remuxCalls   []string
+	remuxErr     error
+	remuxOutcome string
 }
 
 func (m *mockDownloader) DownloadMedia(_ context.Context, url string) error {
@@ -314,6 +330,28 @@ func (m *mockDownloader) DownloadMedia(_ context.Context, url string) error {
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, url)
 	return m.err
+}
+
+func (m *mockDownloader) ListFailedAudio(limit int) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if limit < len(m.failedURLs) {
+		return append([]string(nil), m.failedURLs[:limit]...), nil
+	}
+	return append([]string(nil), m.failedURLs...), nil
+}
+
+func (m *mockDownloader) RetryMuxAudio(_ context.Context, videoURL string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.remuxCalls = append(m.remuxCalls, videoURL)
+	if m.remuxErr != nil {
+		return "", m.remuxErr
+	}
+	if m.remuxOutcome != "" {
+		return m.remuxOutcome, nil
+	}
+	return "recovered", nil
 }
 
 func (m *mockDownloader) getCalls() []string {
@@ -480,8 +518,7 @@ func TestSubmit_BudgetWait(t *testing.T) {
 	go func() {
 		// Restore budget and push resetAt forward so waitForBudget sees remaining > reserved
 		time.Sleep(100 * time.Millisecond)
-		pool.remaining = 100
-		pool.resetAt = time.Now().Add(time.Hour)
+		pool.setBudget(time.Now().Add(time.Hour), 100)
 	}()
 
 	go s.dispatchLoop(ctx)
@@ -516,12 +553,16 @@ func TestSubmit_UserPause(t *testing.T) {
 		pool:   &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
 		Events: NewEventLog(50),
 		queue:  make(chan *workItem, 1),
+		// Pin the user-active pause to a tiny, deterministic value — the
+		// production 25–40s randomized delay would otherwise race the test
+		// deadline and flake intermittently.
+		userActivePause: func() time.Duration { return 50 * time.Millisecond },
 	}
 
 	// Set user activity 29s ago (just within the 30s window)
 	s.lastUserReq.Store(time.Now().Add(-29 * time.Second).Unix())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	go s.dispatchLoop(ctx)

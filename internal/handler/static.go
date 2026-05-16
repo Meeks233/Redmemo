@@ -92,6 +92,28 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	h.mediaProxy.ServeMedia(w, r)
 }
 
+// handleAudioStatus reports the audio-mux state of a v.redd.it video for the
+// page's audioSync.js poller. The "src" query param is the video element's
+// own /vid/... URL. A pending state also kicks the background mux so a video
+// the user merely loaded gets its audio fetched promptly.
+func (h *Handler) handleAudioStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+
+	src := r.URL.Query().Get("src")
+	u, err := url.Parse(src)
+	if err != nil || !strings.HasPrefix(u.Path, "/vid/") || !media.IsMuxableVideoSegment(u.Path) {
+		io.WriteString(w, `{"state":"unsupported"}`)
+		return
+	}
+
+	upstream := "https://v.redd.it/" + strings.TrimPrefix(u.Path, "/vid/")
+	if u.RawQuery != "" {
+		upstream += "?" + u.RawQuery
+	}
+	fmt.Fprintf(w, `{"state":%q}`, h.mediaProxy.AudioStatus(upstream))
+}
+
 func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstream string) {
 	req, err := http.NewRequestWithContext(r.Context(), "GET", upstream, nil)
 	if err != nil {
@@ -121,7 +143,7 @@ func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstr
 }
 
 func (h *Handler) handleWiki(w http.ResponseWriter, r *http.Request) {
-	h.renderer.RenderError(w, "Wiki page is currently unavailable", http.StatusServiceUnavailable)
+	h.renderer.RenderError(w, h.readPreferences(r).Lang, "Wiki page is currently unavailable", http.StatusServiceUnavailable)
 }
 
 func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
@@ -343,6 +365,9 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L2Phase:     ps.L2Phase,
 			L2Sub:       ps.L2Sub,
 			L2Pending:   ps.L2Pending,
+			L5Phase:     ps.L5Phase,
+			L5Current:   ps.L5Current,
+			L5Pending:   ps.L5Pending,
 			NPPhase:     ps.NPPhase,
 			NPCurrent:   ps.NPCurrent,
 			QueueLen:    ps.QueueLen,

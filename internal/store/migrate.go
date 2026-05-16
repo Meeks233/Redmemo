@@ -155,6 +155,26 @@ var migrations = []string{
 	// missing, network 5xx) never write this column — the next request retries.
 	`ALTER TABLE media_index ADD COLUMN IF NOT EXISTS audio_state TEXT
 		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent'));`,
+
+	// v14: 'failed' audio verdict. When audio probing transiently fails 3x in
+	// a row the row is parked as 'failed' (no cached file) so user requests
+	// serve the silent intermediate immediately while the L5 background layer
+	// re-attempts the mux. A successful retry overwrites it with the real
+	// 'has_audio'/'silent' verdict.
+	`ALTER TABLE media_index DROP CONSTRAINT IF EXISTS media_index_audio_state_check;
+	 ALTER TABLE media_index ADD CONSTRAINT media_index_audio_state_check
+		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent','failed'));`,
+
+	// v15: bounded audio-retry tracking. audio_fail_count counts failed mux
+	// attempts; once it crosses the abandon threshold the row moves to the
+	// 'abandoned' state and L5 stops actively retrying it (a later user view
+	// revives it with a fresh budget). last_audio_attempt_at gates retry
+	// cooldown so a popular broken video does not storm ffmpeg.
+	`ALTER TABLE media_index ADD COLUMN IF NOT EXISTS audio_fail_count INT NOT NULL DEFAULT 0;
+	 ALTER TABLE media_index ADD COLUMN IF NOT EXISTS last_audio_attempt_at TIMESTAMPTZ;
+	 ALTER TABLE media_index DROP CONSTRAINT IF EXISTS media_index_audio_state_check;
+	 ALTER TABLE media_index ADD CONSTRAINT media_index_audio_state_check
+		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent','failed','abandoned'));`,
 }
 
 func RunMigrations(db *sql.DB) error {

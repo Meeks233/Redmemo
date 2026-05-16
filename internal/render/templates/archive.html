@@ -1,4 +1,4 @@
-{{ define "title" }}Archive: r/{{ .Sub }}{{ end }}
+{{ define "title" }}{{ T "archive.page_title" .Sub }}{{ end }}
 
 {{ define "subscriptions" }}{{ end }}
 {{ define "search" }}{{ end }}
@@ -9,21 +9,21 @@
 <main>
 <div id="column_one">
 	<div id="sort_options" style="display:flex;align-items:center;gap:0.5em;padding:0.5em 0;margin-bottom:1em;">
-		<a href="/archive">&larr; Archive</a>
+		<a href="/archive">&larr; {{ T "archive.back" }}</a>
 		<span style="opacity:0.5;">|</span>
 		<strong>r/{{ .Sub }}</strong>
-		<span style="opacity:0.5;">&mdash; {{ .TotalPosts }} archived posts</span>
+		<span style="opacity:0.5;">&mdash; {{ T "archive.posts_count" .TotalPosts }}</span>
 	</div>
 
 	{{ if eq (len .Posts) 0 }}
-	<center style="padding:2em;">No archived posts for this subreddit.</center>
+	<center style="padding:2em;">{{ T "archive.no_posts" }}</center>
 	{{ else }}
 	<div id="posts">
 	{{ if .AllPostsHiddenNSFW }}
 	<div class="archive-nsfw-notice">
-		<p class="nsfw-notice-title">NSFW filter is on</p>
-		<p>There are posts here, but they are all hidden by your NSFW filter.</p>
-		<p>Go to <a href="/settings">Settings</a> and enable "Show NSFW posts" to view them.</p>
+		<p class="nsfw-notice-title">{{ T "archive.nsfw_title" }}</p>
+		<p>{{ T "archive.nsfw_body" }}</p>
+		<p>{{ T "archive.nsfw_hint_pre" }}<a href="/settings">{{ T "archive.nsfw_settings" }}</a>{{ T "archive.nsfw_hint_post" }}</p>
 	</div>
 	{{ else }}
 	{{ range .Posts }}
@@ -41,10 +41,10 @@
 
 	<footer>
 		{{ if .HasPrev }}
-		<a href="/archive/r/{{ .Sub }}?page={{ sub .Page 1 }}" accesskey="P">PREV</a>
+		<a href="/archive/r/{{ .Sub }}?page={{ sub .Page 1 }}" accesskey="P">{{ T "nav.prev" }}</a>
 		{{ end }}
 		{{ if .HasNext }}
-		<a href="/archive/r/{{ .Sub }}?page={{ add .Page 1 }}" accesskey="N">NEXT</a>
+		<a href="/archive/r/{{ .Sub }}?page={{ add .Page 1 }}" accesskey="N">{{ T "nav.next" }}</a>
 		{{ end }}
 	</footer>
 	{{ end }}

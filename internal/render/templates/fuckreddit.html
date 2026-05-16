@@ -1,4 +1,4 @@
-{{ define "title" }}{{ if .Reason }}Unavailable{{ else }}All right{{ end }} — {{ .BrandName }}{{ end }}
+{{ define "title" }}{{ if .Reason }}{{ T "fr.unavailable" }}{{ else }}{{ T "fr.allright" }}{{ end }} — {{ .BrandName }}{{ end }}
 
 {{ template "base" . }}
 
@@ -7,7 +7,7 @@
 	<div class="prefs">
 		<fieldset>
 			{{ if .Reason }}
-			<legend>All sources exhausted</legend>
+			<legend>{{ T "fr.exhausted" }}</legend>
 			<div class="error-icon">
 				<svg class="heart-broken lucide-heart-crack" xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
 					<g class="heart-half left">
@@ -22,33 +22,33 @@
 			</div>
 			<p id="fr-reason-text">
 				{{- if eq .Reason "quota_exhausted" -}}
-					Reddit OAuth quota fully exhausted: too many upstream requests within the past 10 minutes.
+					{{ T "fr.quota_exhausted" }}
 				{{- else if eq .Reason "hr_l1" -}}
-					HR rate limit L1 triggered: too many upstream requests within the past 5 seconds.
+					{{ T "fr.hr_l1" }}
 				{{- else if eq .Reason "hr_l2" -}}
-					HR rate limit L2 triggered: too many upstream requests within the past 30 seconds.
+					{{ T "fr.hr_l2" }}
 				{{- else if eq .Reason "hr_l3" -}}
-					HR rate limit L3 triggered: too many upstream requests within the past 5 minutes.
+					{{ T "fr.hr_l3" }}
 				{{- end -}}
 			</p>
-			<p>Reset at: <span id="fr-countdown" data-from="{{ .From }}"{{ if .Freeze }} data-freeze="1"{{ end }}>{{ if .Freeze }}99:99{{ else }}--:--{{ end }}</span></p>
+			<p>{{ T "fr.reset_at" }} <span id="fr-countdown" data-from="{{ .From }}"{{ if .Freeze }} data-freeze="1"{{ end }}>{{ if .Freeze }}99:99{{ else }}--:--{{ end }}</span></p>
 			{{ if .From }}
 			<div class="fr-actions">
-				<a class="fr-go-reddit" href="https://www.reddit.com{{ .From }}" target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm="Access Reddit directly">
+				<a class="fr-go-reddit" href="https://www.reddit.com{{ .From }}" target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm="{{ T "fr.access_directly" }}">
 					<span class="fr-go-reddit-emoji" aria-hidden="true">😈</span>
-					<span>Access Reddit directly</span>
+					<span>{{ T "fr.access_directly" }}</span>
 				</a>
 			</div>
 			{{ end }}
 			{{ else }}
-			<legend>All right</legend>
+			<legend>{{ T "fr.allright" }}</legend>
 			<div class="error-icon">
 				<svg class="heart-alive" xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
 					<path class="heart-shape" d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" stroke="#22c55e" fill="rgba(34,197,94,0.15)"/>
 					<path class="ecg-line" d="M3 12h2l2 -3l3 6l2 -3h3" stroke="#22c55e" fill="none"/>
 				</svg>
 			</div>
-			<p>Congrats — Reddit hasn't sanctioned you yet&hellip; or has it?</p>
+			<p>{{ T "fr.congrats" }}</p>
 			{{ end }}
 		</fieldset>
 	</div>
@@ -77,10 +77,10 @@
 	var fromPath = el.getAttribute('data-from') || '';
 
 	var REASON_TEXTS = {
-		'quota_exhausted': 'Reddit OAuth quota fully exhausted: too many upstream requests within the past 10 minutes.',
-		'hr_l1': 'HR rate limit L1 triggered: too many upstream requests within the past 5 seconds.',
-		'hr_l2': 'HR rate limit L2 triggered: too many upstream requests within the past 30 seconds.',
-		'hr_l3': 'HR rate limit L3 triggered: too many upstream requests within the past 5 minutes.'
+		'quota_exhausted': '{{ T "fr.quota_exhausted" }}',
+		'hr_l1': '{{ T "fr.hr_l1" }}',
+		'hr_l2': '{{ T "fr.hr_l2" }}',
+		'hr_l3': '{{ T "fr.hr_l3" }}'
 	};
 
 	function fmt(s) {

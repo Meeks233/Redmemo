@@ -20,7 +20,9 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Engine struct {
-	pages map[string]*template.Template
+	// pages is indexed by language code, then by page name. Each language has
+	// its own fully-parsed template set with a FuncMap bound to that locale.
+	pages map[string]map[string]*template.Template
 	cfg   config.RenderConfig
 }
 
@@ -45,16 +47,27 @@ var pageTemplates = map[string]string{
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
-	pages := make(map[string]*template.Template, len(pageTemplates))
-	for name, pagePath := range pageTemplates {
-		files := make([]string, 0, len(sharedTemplates)+1)
-		files = append(files, sharedTemplates...)
-		files = append(files, pagePath)
-		tmpl, err := template.New("").Funcs(templateFuncs()).ParseFS(templateFS, files...)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", name, err)
+	locales, err := loadLocales()
+	if err != nil {
+		return nil, err
+	}
+	defaultLoc := locales[DefaultLang]
+
+	pages := make(map[string]map[string]*template.Template, len(SupportedLangs))
+	for _, lang := range SupportedLangs {
+		funcs := templateFuncs(locales[lang], defaultLoc, lang)
+		langPages := make(map[string]*template.Template, len(pageTemplates))
+		for name, pagePath := range pageTemplates {
+			files := make([]string, 0, len(sharedTemplates)+1)
+			files = append(files, sharedTemplates...)
+			files = append(files, pagePath)
+			tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, files...)
+			if err != nil {
+				return nil, fmt.Errorf("parse %s [%s]: %w", name, lang, err)
+			}
+			langPages[name] = tmpl
 		}
-		pages[name] = tmpl
+		pages[lang] = langPages
 	}
 	return &Engine{pages: pages, cfg: cfg}, nil
 }
@@ -224,8 +237,17 @@ func (e *Engine) basePage(url string, prefs reddit.Preferences) BasePage {
 	}
 }
 
-func (e *Engine) renderPage(w io.Writer, name string, data any) error {
-	tmpl, ok := e.pages[name]
+// pageSet returns the template set for lang, falling back to DefaultLang when
+// lang is unknown (e.g. an empty or stale cookie value).
+func (e *Engine) pageSet(lang string) map[string]*template.Template {
+	if set, ok := e.pages[lang]; ok {
+		return set
+	}
+	return e.pages[DefaultLang]
+}
+
+func (e *Engine) renderPage(w io.Writer, lang, name string, data any) error {
+	tmpl, ok := e.pageSet(lang)[name]
 	if !ok {
 		return fmt.Errorf("template %q not found", name)
 	}
@@ -236,11 +258,11 @@ func (e *Engine) RenderSubreddit(w io.Writer, data SubredditPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "subreddit.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "subreddit.html", data)
 }
 
 func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
-	tmpl := e.pages["subreddit.html"]
+	tmpl := e.pageSet(prefs.Lang)["subreddit.html"]
 	if tmpl == nil {
 		return fmt.Errorf("subreddit template not found")
 	}
@@ -248,7 +270,7 @@ func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.P
 		if i > 0 {
 			io.WriteString(w, `<hr class="sep" />`)
 		}
-		data := map[string]any{"Post": p, "Prefs": prefs}
+		data := map[string]any{"Post": p, "Prefs": prefs, "LazyMedia": prefs.LazyMedia == "on"}
 		if err := tmpl.ExecuteTemplate(w, "post_in_list", data); err != nil {
 			return err
 		}
@@ -260,42 +282,54 @@ func (e *Engine) RenderPost(w io.Writer, data PostPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "post.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "post.html", data)
 }
 
 func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "search.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "search.html", data)
+}
+
+// RenderSearchPostList renders just the search post-list fragment (the same
+// markup the full search page produces for its results), used by the
+// "Load More" button's partial=1 requests.
+func (e *Engine) RenderSearchPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
+	tmpl := e.pageSet(prefs.Lang)["search.html"]
+	if tmpl == nil {
+		return fmt.Errorf("search template not found")
+	}
+	data := map[string]any{"Posts": posts, "Prefs": prefs, "LazyMedia": prefs.LazyMedia == "on"}
+	return tmpl.ExecuteTemplate(w, "search_post_list", data)
 }
 
 func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "user.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "user.html", data)
 }
 
 func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "archive_hub.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "archive_hub.html", data)
 }
 
 func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "archive.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "archive.html", data)
 }
 
 func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, "settings.html", data)
+	return e.renderPage(w, data.Prefs.Lang, "settings.html", data)
 }
 
 type PrefetchStatusView struct {
@@ -309,6 +343,9 @@ type PrefetchStatusView struct {
 	L2Phase     string
 	L2Sub       string
 	L2Pending   int
+	L5Phase     string
+	L5Current   string
+	L5Pending   int
 	NPPhase     string
 	NPCurrent   string
 	QueueLen    int
@@ -339,32 +376,34 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, prefs reddit.Preferences, 
 		PrefetchStatus: d.PrefetchStatus,
 		PrefetchEvents: d.PrefetchEvents,
 	}
-	e.renderPage(w, "error.html", data)
+	e.renderPage(w, prefs.Lang, "error.html", data)
 }
 
-func (e *Engine) RenderRateLimit(w http.ResponseWriter, resetSeconds int, details []string) {
+func (e *Engine) RenderRateLimit(w http.ResponseWriter, lang string, resetSeconds int, details []string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusTooManyRequests)
+	prefs := reddit.Preferences{Lang: lang}
 	data := ErrorPageData{
-		BasePage:     e.basePage("", reddit.Preferences{}),
+		BasePage:     e.basePage("", prefs),
 		Message:      "All upstreams are rate-limited, please try again later",
 		StatusCode:   http.StatusTooManyRequests,
 		Details:      details,
 		ResetSeconds: resetSeconds,
 	}
-	e.renderPage(w, "error.html", data)
+	e.renderPage(w, lang, "error.html", data)
 }
 
-func (e *Engine) RenderError(w http.ResponseWriter, msg string, statusCode int, details ...string) {
+func (e *Engine) RenderError(w http.ResponseWriter, lang, msg string, statusCode int, details ...string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(statusCode)
+	prefs := reddit.Preferences{Lang: lang}
 	data := ErrorPageData{
-		BasePage:   e.basePage("", reddit.Preferences{}),
+		BasePage:   e.basePage("", prefs),
 		Message:    msg,
 		StatusCode: statusCode,
 		Details:    details,
 	}
-	e.renderPage(w, "error.html", data)
+	e.renderPage(w, lang, "error.html", data)
 }
 
 type FuckRedditPageData struct {
@@ -395,7 +434,7 @@ func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preference
 		From:         from,
 		Freeze:       freeze,
 	}
-	e.renderPage(w, "fuckreddit.html", data)
+	e.renderPage(w, prefs.Lang, "fuckreddit.html", data)
 }
 
 func AvailableThemes() []string {

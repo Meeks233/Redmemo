@@ -114,6 +114,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /subPicker.js", static)
 	mux.Handle("GET /videoAutoplay.js", static)
 	mux.Handle("GET /videoPreload.js", static)
+	mux.Handle("GET /lazyMedia.js", static)
+	mux.Handle("GET /audioSync.js", static)
 	mux.Handle("GET /redditModal.js", static)
 
 	// Media proxy
@@ -158,6 +160,7 @@ func (h *Handler) Routes() http.Handler {
 	// Lightweight status check
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)
+	mux.HandleFunc("GET /api/audio_status", h.handleAudioStatus)
 
 	// Legacy countdown redirect
 	mux.HandleFunc("GET /countdown", func(w http.ResponseWriter, r *http.Request) {

@@ -15,19 +15,19 @@
 		<form id="sort">
 			<div id="sort_options">
 				{{ if .HomepageSort }}
-					<a {{ if eq .HomepageSort "new" }}class="selected"{{ end }} href="/?sort=new" onclick="return switchSort(this,'new')">New</a>
-					<a {{ if eq .HomepageSort "new_archive" }}class="selected"{{ end }} href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">Archive</a>
-					<a {{ if eq .HomepageSort "top" }}class="selected"{{ end }} href="/?sort=top" onclick="return switchSort(this,'top')">Top</a>
-					<a {{ if eq .HomepageSort "notorious" }}class="selected"{{ end }} href="/?sort=notorious" onclick="return switchSort(this,'notorious')">Notorious</a>
+					<a {{ if eq .HomepageSort "new" }}class="selected"{{ end }} href="/?sort=new" onclick="return switchSort(this,'new')">{{ T "sort.new" }}</a>
+					<a {{ if eq .HomepageSort "new_archive" }}class="selected"{{ end }} href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">{{ T "sort.archive" }}</a>
+					<a {{ if eq .HomepageSort "top" }}class="selected"{{ end }} href="/?sort=top" onclick="return switchSort(this,'top')">{{ T "sort.top" }}</a>
+					<a {{ if eq .HomepageSort "notorious" }}class="selected"{{ end }} href="/?sort=notorious" onclick="return switchSort(this,'notorious')">{{ T "sort.notorious" }}</a>
 				{{ else }}
 					{{ $methods := list "hot" "new" "top" "rising" "controversial" }}
 					{{ if .Sub.Name }}
 						{{ range $methods }}
-							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/r/{{ $.Sub.Name }}/{{ . }}">{{ capitalize . }}</a>
+							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/r/{{ $.Sub.Name }}/{{ . }}">{{ T (concat "sort." .) }}</a>
 						{{ end }}
 					{{ else }}
 						{{ range $methods }}
-							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/{{ . }}">{{ capitalize . }}</a>
+							<a {{ if eq . (index $.Sort 0) }}class="selected"{{ end }} href="/{{ . }}">{{ T (concat "sort." .) }}</a>
 						{{ end }}
 					{{ end }}
 				{{ end }}
@@ -36,7 +36,7 @@
 			<select id="timeframe" name="t" title="Timeframe">
 				{{ $timeframes := list "hour" "day" "week" "month" "year" "all" }}
 				{{ range $timeframes }}
-					<option value="{{ . }}" {{ if eq . (index $.Sort 1) }}selected{{ end }}>{{ capitalize . }}</option>
+					<option value="{{ . }}" {{ if eq . (index $.Sort 1) }}selected{{ end }}>{{ T (concat "time." .) }}</option>
 				{{ end }}
 			</select>
 			<button id="sort_submit" class="submit">{{ template "submit_svg" }}</button>
@@ -44,7 +44,7 @@
 		</form>
 
 		{{ if and .AllPostsHiddenNSFW (not .Sub.NSFW) }}
-		<center>All posts are hidden because they are NSFW. Enable "Show NSFW posts" in settings to view.</center>
+		<center>{{ T "listing.all_nsfw" }}</center>
 		{{ end }}
 
 		{{ if .NoPosts }}
@@ -52,25 +52,25 @@
 			<div class="empty-state">
 				{{ if .HasOAuth }}
 				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/></svg>
-				<p>Try searching for something? No posts this month.</p>
+				<p>{{ T "empty.no_posts_month" }}</p>
 				{{ else }}
 				<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.114 4.462A14.5 14.5 0 0 1 12 2a10 10 0 0 1 9.313 13.643"/><path d="M15.557 15.556A14.5 14.5 0 0 1 12 22 10 10 0 0 1 4.929 4.929"/><path d="M15.892 10.234A14.5 14.5 0 0 0 12 2a10 10 0 0 0-3.643.687"/><path d="M17.656 12H22"/><path d="M19.071 19.071A10 10 0 0 1 12 22 14.5 14.5 0 0 1 8.44 8.45"/><path d="M2 12h10"/><path d="m2 2 20 20"/></svg>
-				<p>Oops... Reddit blocked us. So, reddit, fuck you!</p>
+				<p>{{ T "empty.reddit_blocked" }}</p>
 				{{ end }}
 			</div>
 			{{ else }}
-			<center>No posts were found.</center>
+			<center>{{ T "listing.no_posts" }}</center>
 			{{ end }}
 		{{ end }}
 
 		{{ if .AllPostsFiltered }}
-			<center>(All content on this page has been filtered)</center>
+			<center>{{ T "listing.all_filtered" }}</center>
 		{{ else }}
 		<div id="posts">
 		{{ range .Posts }}
 			{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") (not $.Sub.NSFW)) }}
 			<hr class="sep" />
-			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
+			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs "LazyMedia" (and (eq $.Prefs.LazyMedia "on") (not $.IsOffline)) }}
 			{{ end }}
 		{{ end }}
 		{{ if eq .Prefs.UseHLS "on" }}
@@ -85,16 +85,16 @@
 			<div id="load-spinner" style="display:none;text-align:center;padding:1em;">
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1.5s linear infinite"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
 			</div>
-			<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">No more posts</div>
+			<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">{{ T "scroll.no_more" }}</div>
 		</div>
 		<script src="/infiniteScroll.js"></script>
 		{{ else }}
 		<footer>
 			{{ if index .Ends 0 }}
-			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&before={{ index .Ends 0 }}" accesskey="P">PREV</a>
+			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&before={{ index .Ends 0 }}" accesskey="P">{{ T "nav.prev" }}</a>
 			{{ end }}
 			{{ if index .Ends 1 }}
-			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&after={{ index .Ends 1 }}" accesskey="N">NEXT</a>
+			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&after={{ index .Ends 1 }}" accesskey="N">{{ T "nav.next" }}</a>
 			{{ end }}
 		</footer>
 		{{ end }}
@@ -104,44 +104,44 @@
 	{{ if or .IsFiltered (and .Sub.Name (ne .Sub.Name "all") (ne .Sub.Name "popular") (not (contains .Sub.Name "+")) (ne .Prefs.HideSidebarAndSummary "on")) }}
 	<aside>
 		{{ if .IsFiltered }}
-			<center>(Content from r/{{ .Sub.Name }} has been filtered)</center>
+			<center>{{ T "listing.filtered_from" (concat "r/" .Sub.Name) }}</center>
 		{{ end }}
 		{{ if and .Sub.Name (ne .Sub.Name "all") (ne .Sub.Name "popular") (not (contains .Sub.Name "+")) }}
 		<details class="panel" id="subreddit" open>
-			<summary id="subreddit_label">Subreddit</summary>
+			<summary id="subreddit_label">{{ T "sidebar.subreddit" }}</summary>
 			{{ if .Sub.Wiki }}
 			<div id="top">
-				<div>Posts</div>
-				<a href="/r/{{ .Sub.Name }}/wiki/index">Wiki</a>
+				<div>{{ T "sidebar.posts" }}</div>
+				<a href="/r/{{ .Sub.Name }}/wiki/index">{{ T "sidebar.wiki" }}</a>
 			</div>
 			{{ end }}
 			<div id="sub_meta">
-				<img loading="lazy" id="sub_icon" src="{{ .Sub.Icon }}" alt="Icon for r/{{ .Sub.Name }}">
+				<img loading="lazy" id="sub_icon" src="{{ .Sub.Icon }}" alt="{{ T "sidebar.icon_alt" .Sub.Name }}">
 				<h1 id="sub_title">{{ .Sub.Title }}</h1>
 				<p id="sub_name">r/{{ .Sub.Name }}</p>
 				<p id="sub_description">{{ .Sub.Description }}</p>
 				<div id="sub_details">
-					<label>Members</label>
-					<label>Active</label>
+					<label>{{ T "sidebar.members" }}</label>
+					<label>{{ T "sidebar.active" }}</label>
 					<div title="{{ index .Sub.Members 1 }}">{{ index .Sub.Members 0 }}</div>
 					<div title="{{ index .Sub.Active 1 }}">{{ index .Sub.Active 0 }}</div>
 				</div>
 				<div id="sub_actions">
 					<div id="sub_subscription">
 						<form action="/r/{{ .Sub.Name }}/subscribe?redirect={{ .RedirectURL }}" method="POST">
-							<button class="subscribe">Subscribe</button>
+							<button class="subscribe">{{ T "sidebar.subscribe" }}</button>
 						</form>
 					</div>
 					<div id="sub_filter">
 						<form action="/r/{{ .Sub.Name }}/filter?redirect={{ .RedirectURL }}" method="POST">
-							<button class="filter">Filter</button>
+							<button class="filter">{{ T "sidebar.filter" }}</button>
 						</form>
 					</div>
 				</div>
 			</div>
 		</details>
 		<details class="panel" id="sidebar">
-			<summary id="sidebar_label">Sidebar</summary>
+			<summary id="sidebar_label">{{ T "sidebar.sidebar" }}</summary>
 			<div id="sidebar_contents">{{ .Sub.Info }}</div>
 		</details>
 		{{ end }}

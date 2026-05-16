@@ -1,4 +1,4 @@
-{{ define "title" }}{{ .User.Name }} (u/{{ .User.Name }}) - {{ .BrandName }}{{ end }}
+{{ define "title" }}{{ T "user.page_title" .User.Name .User.Name .BrandName }}{{ end }}
 
 {{ define "subscriptions" }}{{ template "sub_list" dict "Prefs" .Prefs "Current" "" }}{{ end }}
 
@@ -15,20 +15,20 @@
 			<div id="listing_options">
 				{{ $listings := list "overview" "comments" "submitted" }}
 				{{ range $listings }}
-					<a {{ if eq . $.Listing }}class="selected"{{ end }} href="/user/{{ $.User.Name }}/{{ . }}">{{ capitalize . }}</a>
+					<a {{ if eq . $.Listing }}class="selected"{{ end }} href="/user/{{ $.User.Name }}/{{ . }}">{{ T (concat "listing." .) }}</a>
 				{{ end }}
 			</div>
 			<select id="sort_select" name="sort">
 				{{ $sorts := list "hot" "new" "top" "controversial" }}
 				{{ range $sorts }}
-					<option value="{{ . }}" {{ if eq . (index $.Sort 0) }}selected{{ end }}>{{ capitalize . }}</option>
+					<option value="{{ . }}" {{ if eq . (index $.Sort 0) }}selected{{ end }}>{{ T (concat "sort." .) }}</option>
 				{{ end }}
 			</select>
 			{{ if or (eq (index .Sort 0) "top") (eq (index .Sort 0) "controversial") }}
 			<select id="timeframe" name="t">
 				{{ $timeframes := list "hour" "day" "week" "month" "year" "all" }}
 				{{ range $timeframes }}
-					<option value="{{ . }}" {{ if eq . (index $.Sort 1) }}selected{{ end }}>{{ capitalize . }}</option>
+					<option value="{{ . }}" {{ if eq . (index $.Sort 1) }}selected{{ end }}>{{ T (concat "time." .) }}</option>
 				{{ end }}
 			</select>
 			{{ end }}
@@ -36,21 +36,21 @@
 		</form>
 
 		{{ if .AllPostsHiddenNSFW }}
-		<center>All posts are hidden because they are NSFW. Enable "Show NSFW posts" in settings to view.</center>
+		<center>{{ T "listing.all_nsfw" }}</center>
 		{{ end }}
 
 		{{ if .NoPosts }}
-		<center>No posts were found.</center>
+		<center>{{ T "listing.no_posts" }}</center>
 		{{ end }}
 
 		{{ if .AllPostsFiltered }}
-		<center>(All content on this page has been filtered)</center>
+		<center>{{ T "listing.all_filtered" }}</center>
 		{{ else }}
 		<div id="posts">
 			{{ range .Posts }}
 				{{ if and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") }}
 				{{ else if .Title }}
-					{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
+					{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs "LazyMedia" (eq $.Prefs.LazyMedia "on") }}
 				{{ else }}
 				<div class="comment user-comment">
 					<div class="comment_left">
@@ -63,7 +63,7 @@
 						<summary class="comment_data">
 							<a class="comment_link" href="{{ .Permalink }}#{{ .ID }}" title="{{ .LinkTitle }}">{{ .LinkTitle }}</a>
 							<div class="user_comment_data_divider">
-								<span class="created-in">&nbsp;in&nbsp;</span>
+								<span class="created-in">&nbsp;{{ T "user.in" }}&nbsp;</span>
 								<a class="comment_subreddit" href="/r/{{ .Community }}">r/{{ .Community }}</a>
 								<span class="dot">&bull;</span>
 								<span class="created" title="{{ .Created }}">&nbsp;{{ .RelTime }}</span>
@@ -83,10 +83,10 @@
 
 		<footer>
 			{{ if index .Ends 0 }}
-			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&before={{ index .Ends 0 }}" accesskey="P">PREV</a>
+			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&before={{ index .Ends 0 }}" accesskey="P">{{ T "nav.prev" }}</a>
 			{{ end }}
 			{{ if index .Ends 1 }}
-			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&after={{ index .Ends 1 }}" accesskey="N">NEXT</a>
+			<a href="?sort={{ index .Sort 0 }}&t={{ index .Sort 1 }}&after={{ index .Ends 1 }}" accesskey="N">{{ T "nav.next" }}</a>
 			{{ end }}
 		</footer>
 	</div>
@@ -94,16 +94,16 @@
 
 	<aside>
 		{{ if .IsFiltered }}
-		<center>(Content from u/{{ .User.Name }} has been filtered)</center>
+		<center>{{ T "listing.filtered_from" (concat "u/" .User.Name) }}</center>
 		{{ end }}
 		<div class="panel" id="user">
-			<img loading="lazy" id="user_icon" src="{{ .User.Icon }}" alt="User icon" />
+			<img loading="lazy" id="user_icon" src="{{ .User.Icon }}" alt="{{ T "user.icon_alt" }}" />
 			<h1 id="user_title">{{ .User.Title }}</h1>
 			<p id="user_name">u/{{ .User.Name }}</p>
 			<div id="user_description">{{ .User.Description }}</div>
 			<div id="user_details">
-				<label>Karma</label>
-				<label>Created</label>
+				<label>{{ T "user.karma" }}</label>
+				<label>{{ T "user.created" }}</label>
 				<div>{{ .User.Karma }}</div>
 				<div>{{ .User.Created }}</div>
 			</div>

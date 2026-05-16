@@ -29,6 +29,28 @@ oauth:
     - client_id: "ohXpoqrZYub1kg"
       backend: "mobile_spoof"
 
+# Android User-Agent spoofing (mobile_spoof backend).
+#
+# RedMemo ships a small curated list of recent, verified Reddit Android
+# releases as the default. Reddit's own policy discourages a stale/fake
+# User-Agent, and an outdated version is itself a detectable fingerprint —
+# so it is RECOMMENDED to keep these current via environment variables.
+# Look up the latest "Version X/Build Y" on APKMirror's Reddit page.
+#
+#   REDMEMO_ANDROID_APP_VERSION  Comma-separated "Version YYYY.WW.X/Build NNNNNNN"
+#                                entries; one is picked at random per token.
+#                                e.g. "Version 2026.07.0/Build 2607141,Version 2026.06.0/Build 2606110"
+#   REDMEMO_ANDROID_APP_DATE     A date (YYYY-MM-DD) auto-translated to a version
+#                                string + synthesized build number — use this if
+#                                you don't want to look up exact codes yourself.
+#                                e.g. "2026-02-20". Ignored if APP_VERSION is set.
+#   REDMEMO_ANDROID_OS_VERSION   Android major version: "14" (fixed) or "12-15" (range).
+#   REDMEMO_ANDROID_USER_AGENT   Full UA string used verbatim — highest priority,
+#                                disables all randomization. e.g.
+#                                "Reddit/Version 2026.07.0/Build 2607141/Android 14"
+#
+# Priority for the app version: USER_AGENT > APP_VERSION > APP_DATE > built-in default.
+
 ratelimit:
   window_size: 500                     # total budget per window (conservative)
   window_duration: 10m

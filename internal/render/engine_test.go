@@ -28,15 +28,20 @@ func TestNewEngine(t *testing.T) {
 	if e.pages == nil {
 		t.Fatal("pages should not be nil")
 	}
-	if len(e.pages) != len(pageTemplates) {
-		t.Errorf("pages count = %d, want %d", len(e.pages), len(pageTemplates))
+	if len(e.pages) != len(SupportedLangs) {
+		t.Errorf("language sets = %d, want %d", len(e.pages), len(SupportedLangs))
+	}
+	for _, lang := range SupportedLangs {
+		if len(e.pages[lang]) != len(pageTemplates) {
+			t.Errorf("pages[%s] count = %d, want %d", lang, len(e.pages[lang]), len(pageTemplates))
+		}
 	}
 }
 
 func TestRenderError(t *testing.T) {
 	e := newTestEngine(t)
 	w := httptest.NewRecorder()
-	e.RenderError(w, "Something went wrong", 500)
+	e.RenderError(w, "en", "Something went wrong", 500)
 
 	resp := w.Result()
 	if resp.StatusCode != 500 {
@@ -58,7 +63,7 @@ func TestRenderError(t *testing.T) {
 func TestRenderError404(t *testing.T) {
 	e := newTestEngine(t)
 	w := httptest.NewRecorder()
-	e.RenderError(w, "Not Found", 404)
+	e.RenderError(w, "en", "Not Found", 404)
 
 	if w.Result().StatusCode != 404 {
 		t.Errorf("status = %d, want 404", w.Result().StatusCode)

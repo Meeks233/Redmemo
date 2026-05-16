@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,57 @@ import (
 	"github.com/redmemo/redmemo/internal/store"
 )
 
-var partialLastReq sync.Map
+const (
+	// partialEntryTTL is how long an idle client IP stays tracked before it is
+	// eligible for sweeping; partialSweepInterval is the minimum gap between
+	// sweeps. Together they bound partialThrottle's memory under long uptime.
+	partialEntryTTL      = 10 * time.Minute
+	partialSweepInterval = 5 * time.Minute
+)
+
+// partialThrottle rate-limits infinite-scroll partial requests per client IP.
+// Stale entries are swept opportunistically inside allow(), so the map can
+// never grow without bound regardless of how long the process runs.
+type partialThrottle struct {
+	mu        sync.Mutex
+	seen      map[string]time.Time
+	lastSweep time.Time
+}
+
+var partialReq = &partialThrottle{seen: make(map[string]time.Time)}
+
+// allow reports whether a request from ip is permitted given the caller's
+// minimum spacing, recording the request time when it is.
+func (t *partialThrottle) allow(ip string, minGap time.Duration) bool {
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if now.Sub(t.lastSweep) > partialSweepInterval {
+		for k, last := range t.seen {
+			if now.Sub(last) > partialEntryTTL {
+				delete(t.seen, k)
+			}
+		}
+		t.lastSweep = now
+	}
+
+	if last, ok := t.seen[ip]; ok && now.Sub(last) < minGap {
+		return false
+	}
+	t.seen[ip] = now
+	return true
+}
+
+// clientIP returns the request's source IP without the ephemeral port. Keying
+// the throttle on the bare IP keeps it stable across the client's separate TCP
+// connections (each of which carries a different RemoteAddr port).
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
 
 func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
@@ -69,15 +120,10 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 		if n, err := strconv.Atoi(prefs.ScrollInterval); err == nil && n > 0 {
 			interval = n
 		}
-		ip := r.RemoteAddr
-		now := time.Now()
-		if last, ok := partialLastReq.Load(ip); ok {
-			if now.Sub(last.(time.Time)) < time.Duration(interval)*time.Second {
-				w.WriteHeader(http.StatusTooManyRequests)
-				return
-			}
+		if !partialReq.allow(clientIP(r), time.Duration(interval)*time.Second) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
 		}
-		partialLastReq.Store(ip, now)
 		h.renderHomepagePartial(w, posts, prefs)
 		return
 	}
@@ -130,8 +176,8 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
 
-	// 1. Cache
-	if cached, _ := h.cache.GetHTML(r.Context(), urlPath+"?after="+after); cached != nil {
+	// 1. Cache — language-prefixed, see handlePost.
+	if cached, _ := h.cache.GetHTML(r.Context(), prefs.Lang+":"+urlPath+"?after="+after); cached != nil {
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(cached)

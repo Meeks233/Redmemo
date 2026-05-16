@@ -6,7 +6,7 @@ import (
 )
 
 func TestSafe(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	safeFn := fns["safe"].(func(string) template.HTML)
 	got := safeFn("<b>bold</b>")
 	if got != "<b>bold</b>" {
@@ -15,7 +15,7 @@ func TestSafe(t *testing.T) {
 }
 
 func TestSafeAttr(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["safeAttr"].(func(string) template.HTMLAttr)
 	got := fn(`class="active"`)
 	if got != `class="active"` {
@@ -24,7 +24,7 @@ func TestSafeAttr(t *testing.T) {
 }
 
 func TestSafeURL(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["safeURL"].(func(string) template.URL)
 	got := fn("https://example.com")
 	if got != "https://example.com" {
@@ -33,7 +33,7 @@ func TestSafeURL(t *testing.T) {
 }
 
 func TestAdd(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["add"].(func(int, int) int)
 	tests := []struct{ a, b, want int }{
 		{1, 2, 3},
@@ -49,7 +49,7 @@ func TestAdd(t *testing.T) {
 }
 
 func TestSub(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["sub"].(func(int, int) int)
 	if got := fn(10, 3); got != 7 {
 		t.Errorf("sub(10, 3) = %d, want 7", got)
@@ -57,7 +57,7 @@ func TestSub(t *testing.T) {
 }
 
 func TestMul(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["mul"].(func(int, int) int)
 	if got := fn(4, 5); got != 20 {
 		t.Errorf("mul(4, 5) = %d, want 20", got)
@@ -65,7 +65,7 @@ func TestMul(t *testing.T) {
 }
 
 func TestSlice(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["slice"].(func(string, int, int) string)
 
 	tests := []struct {
@@ -89,7 +89,7 @@ func TestSlice(t *testing.T) {
 }
 
 func TestConcat(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["concat"].(func(...string) string)
 
 	if got := fn("a", "b", "c"); got != "abc" {
@@ -101,7 +101,7 @@ func TestConcat(t *testing.T) {
 }
 
 func TestCommentsWord(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["commentsWord"].(func(string) string)
 
 	if got := fn("1"); got != "comment" {
@@ -116,7 +116,7 @@ func TestCommentsWord(t *testing.T) {
 }
 
 func TestFeedPath(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["feedPath"].(func(string) string)
 
 	if got := fn("golang"); got != "r/golang" {
@@ -128,7 +128,7 @@ func TestFeedPath(t *testing.T) {
 }
 
 func TestCommunityPath(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["communityPath"].(func(string) string)
 
 	if got := fn("pics"); got != "r/pics" {
@@ -140,7 +140,7 @@ func TestCommunityPath(t *testing.T) {
 }
 
 func TestDict(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["dict"].(func(...any) map[string]any)
 
 	m := fn("key1", "val1", "key2", 42)
@@ -164,7 +164,7 @@ func TestDict(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	fns := templateFuncs()
+	fns := templateFuncs(Locale{}, Locale{}, "en")
 	fn := fns["list"].(func(...string) []string)
 
 	got := fn("a", "b", "c")

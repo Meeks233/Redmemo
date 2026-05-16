@@ -1,10 +1,10 @@
 {{- define "base" -}}
 <!DOCTYPE html>
-<html lang="en" class="{{ if eq .Prefs.FixedNavbar "on" }}fixed_navbar{{ end }}">
+<html lang="{{ lang }}" class="{{ if eq .Prefs.FixedNavbar "on" }}fixed_navbar{{ end }}">
 	<head>
 		<title>{{ block "title" . }}{{ .BrandName }}{{ end }}</title>
 		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-		<meta name="description" content="View on {{ .BrandName }}, an alternative private front-end to Reddit.">
+		<meta name="description" content="{{ T "meta.description" .BrandName }}">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<meta name="robots" content="noindex, nofollow">
 		<meta name="theme-color" content="#1F1F1F">
@@ -13,7 +13,7 @@
 		<meta name="apple-mobile-web-app-status-bar-style" content="default">
 		<meta name="mobile-web-app-capable" content="yes">
 		<link href="/apple-touch-icon.png" rel="apple-touch-icon">
-		<link rel="search" type="application/opensearchdescription+xml" title="Search {{ .BrandName }}" href="/opensearch.xml">
+		<link rel="search" type="application/opensearchdescription+xml" title="{{ T "meta.search_title" .BrandName }}" href="/opensearch.xml">
 		<link rel="manifest" type="application/json" href="/manifest.json">
 		<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
 		<link rel="stylesheet" type="text/css" href="/style.css?v={{ .Version }}">
@@ -38,20 +38,20 @@
 				{{ if eq .Prefs.EnableDebug "on" }}
 				<a id="debug_link" href="/debug">
 					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bug-icon lucide-bug">
-						<title>debug</title>
+						<title>{{ T "nav.debug" }}</title>
 						<path d="M12 20v-9"/><path d="M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z"/><path d="M14.12 3.88 16 2"/><path d="M21 21a4 4 0 0 0-3.81-4"/><path d="M21 5a4 4 0 0 1-3.55 3.97"/><path d="M22 13h-4"/><path d="M3 21a4 4 0 0 1 3.81-4"/><path d="M3 5a4 4 0 0 0 3.55 3.97"/><path d="M6 13H2"/><path d="m8 2 1.88 1.88"/><path d="M9 7.13V6a3 3 0 1 1 6 0v1.13"/>
 					</svg>
 				</a>
 				{{ end }}
 				<a id="archive_link" href="/archive">
 					<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<title>archive</title>
+						<title>{{ T "nav.archive" }}</title>
 						<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>
 					</svg>
 				</a>
 				<a id="settings_link" href="/settings">
 					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<title>settings</title>
+						<title>{{ T "nav.settings" }}</title>
 						<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
 					</svg>
 				</a>
@@ -67,13 +67,15 @@
 		{{ block "footer" . }}
 		<footer>
 			<div class="footer-buttons">
-				<p><span id="version">v{{ .Version }}&emsp;</span><a href="https://github.com/CanglanXYA/redmemo" title="View code on GitHub">&lt;&gt; Code</a></p>
+				<p><span id="version">v{{ .Version }}&emsp;</span><a href="https://github.com/CanglanXYA/redmemo" title="{{ T "footer.code_title" }}">{{ T "footer.code" }}</a></p>
 			</div>
 		</footer>
 		{{ end }}
 		<script src="/quotaRing.js"></script>
 		<script src="/videoAutoplay.js"></script>
 		<script src="/videoPreload.js"></script>
+		<script src="/lazyMedia.js"></script>
+		<script src="/audioSync.js"></script>
 		<script src="/redditModal.js"></script>
 	</body>
 </html>

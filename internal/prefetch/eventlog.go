@@ -54,6 +54,11 @@ func NewEventLog(capacity int) *EventLog {
 func (l *EventLog) Add(level EventLevel, phase, msg string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// A non-positive capacity log discards everything. Without this guard the
+	// eviction branch below would index l.events[-1] and panic.
+	if l.cap <= 0 {
+		return
+	}
 	e := Event{
 		Time:    time.Now(),
 		Level:   level,

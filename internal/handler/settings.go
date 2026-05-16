@@ -13,7 +13,7 @@ import (
 const cookieMaxAge = 52 * 7 * 24 * 60 * 60 // 52 weeks in seconds
 
 var settingsKeys = []string{
-	"theme", "front_page_subs", "front_page_subs_mode", "show_all_subs", "layout", "wide",
+	"theme", "lang", "front_page_subs", "front_page_subs_mode", "show_all_subs", "layout", "wide",
 	"blur_spoiler", "show_nsfw", "blur_nsfw",
 	"hide_hls_notification", "video_quality",
 	"hide_sidebar_and_summary", "use_hls",
@@ -23,7 +23,7 @@ var settingsKeys = []string{
 	"hide_awards", "hide_score", "remove_default_feeds",
 	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
-	"prefetch_threshold", "scroll_interval",
+	"prefetch_threshold", "scroll_interval", "lazy_media",
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +182,17 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "theme",
 			Value:    theme,
+			Path:     "/",
+			MaxAge:   cookieMaxAge,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
+
+	if lang := updates["lang"]; lang != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "lang",
+			Value:    lang,
 			Path:     "/",
 			MaxAge:   cookieMaxAge,
 			HttpOnly: true,

@@ -36,8 +36,14 @@ type MediaMeta struct {
 	AccessCount  int64
 	// AudioState is only meaningful for muxed video rows (key prefix "muxed:").
 	// nil = never checked, "has_audio" = mux succeeded, "silent" = no audio
-	// track exists on Reddit, skip mux on future requests.
+	// track exists on Reddit (skip mux), "failed" = audio mux failing and in
+	// the L5 retry queue, "abandoned" = retries exhausted, no longer actively
+	// retried. "failed"/"abandoned" rows carry an emergency silent copy.
 	AudioState *string
+	// AudioFailCount counts failed mux attempts; LastAudioAttemptAt is when
+	// the most recent attempt finished. Both only meaningful for muxed rows.
+	AudioFailCount     int
+	LastAudioAttemptAt *time.Time
 }
 
 type StoredToken struct {

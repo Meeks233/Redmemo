@@ -1,0 +1,315 @@
+package oauth
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/redmemo/redmemo/internal/store"
+)
+
+// --- helpers ---
+
+// authRewriteTransport routes the auth client's www.reddit.com requests to a
+// local httptest server. No request ever reaches Reddit.
+type authRewriteTransport struct {
+	scheme string
+	host   string
+}
+
+func (t *authRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = t.scheme
+	req.URL.Host = t.host
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// newClientToServer builds an oauth.Client whose HTTP traffic is pinned to srv.
+func newClientToServer(t *testing.T, srv *httptest.Server) *Client {
+	t.Helper()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server url: %v", err)
+	}
+	return &Client{
+		httpClient: &http.Client{
+			Timeout:   2 * time.Second,
+			Transport: &authRewriteTransport{scheme: u.Scheme, host: u.Host},
+		},
+	}
+}
+
+// rlResp builds a bare response carrying only rate-limit headers.
+func rlResp(remaining, reset string) *http.Response {
+	h := http.Header{}
+	if remaining != "" {
+		h.Set("X-Ratelimit-Remaining", remaining)
+	}
+	if reset != "" {
+		h.Set("X-Ratelimit-Reset", reset)
+	}
+	return &http.Response{Header: h}
+}
+
+// --- concurrency / stress ---
+
+// TestPool_ConcurrentAccess drives every locked Pool accessor from many
+// goroutines at once. Run with -race to catch data races between the RWMutex
+// readers and the GetBestToken/OnRequestComplete writers. Quota is kept high
+// so the low-quota refresh path (which would spawn background goroutines) is
+// never triggered — this isolates pure lock contention.
+func TestPool_ConcurrentAccess(t *testing.T) {
+	mt := &ManagedToken{
+		StoredToken:   store.StoredToken{ID: 1},
+		RateRemaining: 500,
+		RateResetAt:   time.Now().Add(10 * time.Minute),
+	}
+	p := newTestPool(mt)
+
+	const goroutines = 64
+	const iters = 400
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < iters; i++ {
+				switch (g + i) % 7 {
+				case 0:
+					p.GetBestToken()
+				case 1:
+					// remaining stays well above the low-quota threshold
+					p.OnRequestComplete(1, rlResp("500.0", "600"))
+				case 2:
+					p.HasAvailableTokens()
+				case 3:
+					if _, err := p.RemainingBudget(ctx); err != nil {
+						t.Errorf("RemainingBudget: %v", err)
+					}
+				case 4:
+					p.WindowInfo()
+				case 5:
+					p.EarliestReset()
+				case 6:
+					p.TokenStatuses()
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	if got := p.GetBestToken(); got == nil {
+		t.Fatal("token should still be available after concurrent access")
+	}
+}
+
+// --- WindowInfo boundaries ---
+
+func TestWindowInfo_Boundaries(t *testing.T) {
+	t.Run("future reset keeps remaining", func(t *testing.T) {
+		reset := time.Now().Add(5 * time.Minute)
+		p := newTestPool(&ManagedToken{RateRemaining: 30, RateResetAt: reset})
+		got, capacity, rem := p.WindowInfo()
+		if capacity != 99 {
+			t.Errorf("capacity = %d, want 99", capacity)
+		}
+		if rem != 30 {
+			t.Errorf("remaining = %d, want 30", rem)
+		}
+		if !got.Equal(reset) {
+			t.Errorf("resetAt = %v, want %v", got, reset)
+		}
+	})
+
+	t.Run("past reset rolls window forward", func(t *testing.T) {
+		// 25 min in the past spans more than two 10-min windows.
+		p := newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(-25 * time.Minute)})
+		got, _, rem := p.WindowInfo()
+		if rem != 99 {
+			t.Errorf("remaining = %d, want 99 after rollover", rem)
+		}
+		if !got.After(time.Now()) {
+			t.Errorf("rolled resetAt %v is not in the future", got)
+		}
+	})
+
+	t.Run("exhausted with future reset reports zero", func(t *testing.T) {
+		p := newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(5 * time.Minute)})
+		_, _, rem := p.WindowInfo()
+		if rem != 0 {
+			t.Errorf("remaining = %d, want 0", rem)
+		}
+	})
+
+	t.Run("nil active", func(t *testing.T) {
+		p := newTestPool(nil)
+		got, capacity, rem := p.WindowInfo()
+		if !got.IsZero() || capacity != 0 || rem != 0 {
+			t.Errorf("nil active: got resetAt=%v capacity=%d remaining=%d", got, capacity, rem)
+		}
+	})
+}
+
+// --- EarliestReset boundaries ---
+
+func TestEarliestReset_Boundaries(t *testing.T) {
+	t.Run("future reset", func(t *testing.T) {
+		p := newTestPool(&ManagedToken{RateResetAt: time.Now().Add(3 * time.Minute)})
+		secs, windowSec := p.EarliestReset()
+		if windowSec != 600 {
+			t.Errorf("windowSec = %d, want 600", windowSec)
+		}
+		if secs < 150 || secs > 190 {
+			t.Errorf("secs = %d, want ~180", secs)
+		}
+	})
+
+	t.Run("past reset rolls forward into a future window", func(t *testing.T) {
+		p := newTestPool(&ManagedToken{RateResetAt: time.Now().Add(-90 * time.Minute)})
+		secs, _ := p.EarliestReset()
+		if secs < 0 || secs > 600 {
+			t.Errorf("secs = %d, want within (0,600]", secs)
+		}
+	})
+
+	t.Run("nil active", func(t *testing.T) {
+		p := newTestPool(nil)
+		secs, windowSec := p.EarliestReset()
+		if secs != 0 || windowSec != 600 {
+			t.Errorf("nil active: secs=%d windowSec=%d", secs, windowSec)
+		}
+	})
+}
+
+// --- OnRequestComplete header parsing boundaries ---
+
+func TestOnRequestComplete_MalformedHeaders(t *testing.T) {
+	t.Run("non-numeric remaining is ignored", func(t *testing.T) {
+		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 88}
+		p := newTestPool(mt)
+		p.OnRequestComplete(1, rlResp("not-a-number", ""))
+		if mt.RateRemaining != 88 {
+			t.Errorf("RateRemaining = %d, want 88 (unchanged)", mt.RateRemaining)
+		}
+	})
+
+	t.Run("whitespace around values is trimmed", func(t *testing.T) {
+		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 88}
+		p := newTestPool(mt)
+		p.OnRequestComplete(1, rlResp("  42.0  ", "  300  "))
+		if mt.RateRemaining != 42 {
+			t.Errorf("RateRemaining = %d, want 42", mt.RateRemaining)
+		}
+		if d := time.Until(mt.RateResetAt); d < 290*time.Second || d > 310*time.Second {
+			t.Errorf("RateResetAt delta = %v, want ~300s", d)
+		}
+	})
+
+	t.Run("non-numeric reset leaves resetAt unchanged", func(t *testing.T) {
+		orig := time.Now().Add(7 * time.Minute)
+		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50, RateResetAt: orig}
+		p := newTestPool(mt)
+		p.OnRequestComplete(1, rlResp("40.0", "garbage"))
+		if !mt.RateResetAt.Equal(orig) {
+			t.Error("RateResetAt changed despite an unparseable reset header")
+		}
+	})
+}
+
+// --- forceRefresh behaviour (all auth traffic goes to a local server) ---
+
+func TestForceRefresh_FailureIncrementsConsecutive(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p.client = newClientToServer(t, srv)
+	p.backend = "mobile_spoof"
+
+	p.forceRefresh("test")
+
+	if atomic.LoadInt32(&hits) == 0 {
+		t.Fatal("auth endpoint was never reached")
+	}
+	if p.consecutiveFail != 1 {
+		t.Errorf("consecutiveFail = %d, want 1 after one failed refresh", p.consecutiveFail)
+	}
+}
+
+func TestForceRefresh_SwitchesBackendAfterMaxFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p.client = newClientToServer(t, srv)
+	p.backend = "mobile_spoof"
+	p.consecutiveFail = maxConsecutiveFails - 1 // one more failure trips the switch
+
+	p.forceRefresh("test")
+
+	if p.backend != "generic_web" {
+		t.Errorf("backend = %q, want generic_web after %d consecutive failures", p.backend, maxConsecutiveFails)
+	}
+	if p.consecutiveFail != 0 {
+		t.Errorf("consecutiveFail = %d, want 0 (reset on backend switch)", p.consecutiveFail)
+	}
+}
+
+func TestForceRefresh_RespectsCooldown(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p.client = newClientToServer(t, srv)
+	p.backend = "mobile_spoof"
+	p.lastRefreshAt = time.Now() // still inside the cooldown window
+
+	p.forceRefresh("test")
+
+	if h := atomic.LoadInt32(&hits); h != 0 {
+		t.Errorf("auth endpoint hit %d times despite an active cooldown", h)
+	}
+}
+
+// TestOnRequestComplete_LowQuotaTriggersRefresh verifies that a critically low
+// remaining count (below the threshold of 2) kicks off an async refresh.
+func TestOnRequestComplete_LowQuotaTriggersRefresh(t *testing.T) {
+	hit := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case hit <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p.client = newClientToServer(t, srv)
+	p.backend = "mobile_spoof"
+
+	p.OnRequestComplete(1, rlResp("1.0", "600")) // remaining 1 < threshold 2
+
+	select {
+	case <-hit:
+		// a refresh attempt was made — expected
+	case <-time.After(3 * time.Second):
+		t.Fatal("low quota did not trigger a background refresh")
+	}
+}

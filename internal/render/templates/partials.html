@@ -3,7 +3,7 @@
 {{ if .IsOffline }}
 <div class="offline-banner">
 	<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
-	<span>You are viewing a local offline backup. Live data is currently unavailable.</span>
+	<span>{{ T "banner.offline" }}</span>
 </div>
 {{ end }}
 {{ end }}
@@ -13,7 +13,7 @@
 {{ if .DegradedReason }}
 <a class="degraded-banner" href="/fuckreddit?reason={{ .DegradedReason }}">
 	<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-	<span>You are browsing archived content</span>
+	<span>{{ T "banner.degraded" }}</span>
 </a>
 {{ end }}
 {{ end }}
@@ -22,12 +22,12 @@
 {{ define "visit_reddit_confirmation" }}
 <div class="modal-overlay" id="reddit-modal">
 	<div class="modal-box">
-		<h2>You are about to leave this site</h2>
-		<p>Do you want to continue?</p>
+		<h2>{{ T "modal.leave_title" }}</h2>
+		<p>{{ T "modal.leave_body" }}</p>
 		<p class="modal-url">https://www.reddit.com{{ . }}</p>
 		<div class="modal-actions">
-			<button class="modal-cancel" type="button" data-modal-close>No, go back</button>
-			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" target="_blank" rel="nofollow noopener noreferrer" data-modal-close>Yes, take me to Reddit</a>
+			<button class="modal-cancel" type="button" data-modal-close>{{ T "modal.leave_cancel" }}</button>
+			<a class="modal-confirm" href="https://www.reddit.com{{ . }}" target="_blank" rel="nofollow noopener noreferrer" data-modal-close>{{ T "modal.leave_confirm" }}</a>
 		</div>
 	</div>
 </div>
@@ -47,11 +47,11 @@
 {{/* Search box */}}
 {{ define "searchbox" }}
 <form action="{{ if and .Root (ne .Root "/r/") }}{{ .Root }}{{ end }}/search" id="searchbox">
-	<input id="search" type="text" name="q" placeholder="Search" title="Search" value="{{ .Query }}">
+	<input id="search" type="text" name="q" placeholder="{{ T "search.placeholder" }}" title="{{ T "search.placeholder" }}" value="{{ .Query }}">
 	{{ if and .Root (ne .Root "/r/") }}
 	<div id="inside">
 		<input type="checkbox" name="restrict_sr" id="restrict_sr" checked>
-		<label for="restrict_sr" class="search_label" title="Restrict search to this subreddit">in {{ .Root }}</label>
+		<label for="restrict_sr" class="search_label" title="{{ T "search.restrict_title" }}">{{ T "search.in" .Root }}</label>
 	</div>
 	{{ end }}
 	<button class="submit">
@@ -93,6 +93,11 @@
 {{ define "post_in_list" }}
 {{ $post := .Post }}
 {{ $prefs := .Prefs }}
+{{/* LazyMedia is set by online listings only; archived/offline views omit it
+     so their locally-cached media still loads eagerly. When true, media URLs
+     are emitted as data-src/data-poster and hydrated by lazyMedia.js once the
+     post scrolls near the viewport. */}}
+{{ $lazy := .LazyMedia }}
 {{ $blurred := or (and $post.Flags.NSFW (eq $prefs.BlurNSFW "on")) (and $post.Flags.Spoiler (eq $prefs.BlurSpoiler "on")) }}
 <div class="post{{ if $post.Flags.Stickied }} stickied{{ end }}{{ if $blurred }} post_blurred{{ end }}" id="{{ $post.ID }}">
 	<p class="post_header">
@@ -103,7 +108,7 @@
 		<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
 		{{ if $post.ArchivedRelTime }}
 			<span class="dot">&bull;</span>
-			<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
+			<span class="archived" title="{{ $post.ArchivedTime }}">{{ T "post.archived" $post.ArchivedRelTime }}</span>
 		{{ end }}
 		{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
 			{{ range $post.Awards }}
@@ -120,28 +125,35 @@
 				style="color:{{ $post.Flair.ForegroundColor }}; background:{{ $post.Flair.BackgroundColor }};"
 				dir="ltr">{{ template "render_flair" $post.Flair.FlairParts }}</a>
 		{{ end }}
-		<a href="{{ $post.Permalink }}">{{ $post.Title }}</a>{{ if $post.Flags.NSFW }} <small class="nsfw">NSFW</small>{{ end }}{{ if $post.Flags.Spoiler }} <small class="spoiler">Spoiler</small>{{ end }}
+		<a href="{{ $post.Permalink }}">{{ $post.Title }}</a>{{ if $post.Flags.NSFW }} <small class="nsfw">{{ T "flag.nsfw" }}</small>{{ end }}{{ if $post.Flags.Spoiler }} <small class="spoiler">{{ T "flag.spoiler" }}</small>{{ end }}
 	</h2>
 
 	{{ if or (eq $prefs.Layout "") (eq $prefs.Layout "card") }}
 		{{ if eq $post.PostType "image" }}
 		<div class="post_media_content">
 			<a href="{{ $post.Media.URL }}" class="post_media_image">
-				{{ if or (eq $post.Media.Height 0) (eq $post.Media.Width 0) }}
-				<img width="100%" height="100%" loading="lazy" alt="Post image" src="{{ $post.Media.URL }}"/>
+				{{ if $lazy }}
+				<img class="lazy-media"{{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }} width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ else }} width="100%" height="100%"{{ end }} alt="{{ T "alt.post_image" }}" data-src="{{ $post.Media.URL }}"/>
+				{{ else if or (eq $post.Media.Height 0) (eq $post.Media.Width 0) }}
+				<img width="100%" height="100%" loading="lazy" alt="{{ T "alt.post_image" }}" src="{{ $post.Media.URL }}"/>
 				{{ else }}
 				<svg width="{{ $post.Media.Width }}px" height="{{ $post.Media.Height }}px" xmlns="http://www.w3.org/2000/svg">
 					<image width="100%" height="100%" href="{{ $post.Media.URL }}"/>
-					<desc><img loading="lazy" alt="Post image" src="{{ $post.Media.URL }}"/></desc>
+					<desc><img loading="lazy" alt="{{ T "alt.post_image" }}" src="{{ $post.Media.URL }}"/></desc>
 				</svg>
 				{{ end }}
 			</a>
 		</div>
 		{{ else if or (eq $post.PostType "gif") (eq $post.PostType "video") }}
-			{{ $asGif := or (eq $post.PostType "gif") (lef $post.Media.Duration 3.0) }}
+			{{/* The GIF widget (autoplay/loop/muted, no controls) is only fit for
+			     very short clips. Reddit flags even long soundless videos as
+			     is_gif, so cap it by duration — a clip longer than 3s falls
+			     through to the normal <video controls> widget. Unknown duration
+			     (0) stays as a GIF, e.g. animated-image variants. */}}
+			{{ $asGif := or (and (eq $post.PostType "gif") (not (gtf $post.Media.Duration 3.0))) (lef $post.Media.Duration 3.0) }}
 			{{ if $asGif }}
 			<div class="post_media_content">
-				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} autoplay loop muted playsinline preload="auto"></video>
+				<video class="post_media_video short{{ if $lazy }} lazy-media{{ end }}" {{ if $lazy }}data-src="{{ $post.Media.URL }}"{{ else }}src="{{ $post.Media.URL }}"{{ end }} {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} autoplay loop muted playsinline preload="auto"></video>
 			</div>
 			{{ else if and (eq $prefs.UseHLS "on") $post.Media.AltURL }}
 			<div class="post_media_content">
@@ -152,7 +164,7 @@
 			</div>
 			{{ else }}
 			<div class="post_media_content">
-				<video class="post_media_video short" src="{{ $post.Media.URL }}" {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} poster="{{ $post.Media.Poster }}" preload="metadata" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }}><a href="{{ $post.Media.URL }}">Video</a></video>
+				<video class="post_media_video short{{ if $lazy }} lazy-media{{ end }}" {{ if $lazy }}data-src="{{ $post.Media.URL }}" data-poster="{{ $post.Media.Poster }}"{{ else }}src="{{ $post.Media.URL }}" poster="{{ $post.Media.Poster }}"{{ end }} {{ if and (gt $post.Media.Width 0) (gt $post.Media.Height 0) }}width="{{ $post.Media.Width }}" height="{{ $post.Media.Height }}"{{ end }} preload="metadata" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }}><a href="{{ $post.Media.URL }}">{{ T "media.video" }}</a></video>
 			</div>
 			{{ end }}
 		{{ end }}
@@ -165,7 +177,7 @@
 			<div style="max-width:{{ $post.Thumbnail.Width }}px;max-height:{{ $post.Thumbnail.Height }}px;">
 				<svg width="{{ $post.Thumbnail.Width }}px" height="{{ $post.Thumbnail.Height }}px" xmlns="http://www.w3.org/2000/svg">
 					<image width="100%" height="100%" href="{{ $post.Thumbnail.URL }}"/>
-					<desc><img loading="lazy" alt="Thumbnail" src="{{ $post.Thumbnail.URL }}"/></desc>
+					<desc><img loading="lazy" alt="{{ T "alt.thumbnail" }}" src="{{ $post.Thumbnail.URL }}"/></desc>
 				</svg>
 			</div>
 			{{ end }}
@@ -176,7 +188,7 @@
 
 	<div class="post_score" title="{{ index $post.Score 1 }}">
 		{{ if ne $prefs.HideScore "on" }}{{ index $post.Score 0 }}{{ else }}&#x2022;{{ end }}
-		<span class="label"> Upvotes</span>
+		<span class="label"> {{ T "post.upvotes" }}</span>
 	</div>
 	<div class="post_body post_preview">{{ $post.Body }}</div>
 
@@ -207,7 +219,7 @@
 			<span class="created" title="{{ $post.Created }}">{{ $post.RelTime }}</span>
 			{{ if $post.ArchivedRelTime }}
 				<span class="dot">&bull;</span>
-				<span class="archived" title="{{ $post.ArchivedTime }}">archived {{ $post.ArchivedRelTime }}</span>
+				<span class="archived" title="{{ $post.ArchivedTime }}">{{ T "post.archived" $post.ArchivedRelTime }}</span>
 			{{ end }}
 			{{ if and $post.Awards (ne $prefs.HideAwards "on") }}
 			<span class="dot">&bull;</span>
@@ -223,25 +235,25 @@
 		</p>
 		<div class="post_header_actions">
 			{{ if $hasOAuth }}
-			<button id="refresh_post" class="post-action-btn" title="Re-fetch this post from Reddit" onclick="refreshPost('{{ $post.Community }}','{{ $post.ID }}')">
+			<button id="refresh_post" class="post-action-btn" title="{{ T "post.refetch_title" }}" onclick="refreshPost('{{ $post.Community }}','{{ $post.ID }}')">
 				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
-				<span>Refresh</span>
+				<span>{{ T "post.refresh" }}</span>
 			</button>
 			{{ else }}
-			<button id="refresh_post" class="post-action-btn disabled" title="No session tokens available" onclick="alert('No session tokens available on this instance')">
+			<button id="refresh_post" class="post-action-btn disabled" title="{{ T "post.no_tokens_title" }}" onclick="alert('{{ T "post.no_tokens_alert" }}')">
 				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8L18.74 5.74A9.75 9.75 0 0 0 12 3C11 3 10.03 3.16 9.13 3.47"/><path d="M8 16H3v5"/><path d="M3 12C3 9.51 4 7.26 5.64 5.64"/><path d="m3 16 2.26 2.26A9.75 9.75 0 0 0 12 21c2.49 0 4.74-1 6.36-2.64"/><path d="M21 12c0 1-.16 1.97-.47 2.87"/><path d="M21 3v5h-5"/><path d="M22 22 2 2"/></svg>
-				<span>Refresh</span>
+				<span>{{ T "post.refresh" }}</span>
 			</button>
 			{{ end }}
 			{{ if eq $prefs.DisableVisitRedditConfirmation "on" }}
-			<a class="post-action-btn" title="Go to Reddit" href="https://www.reddit.com{{ $post.Permalink }}" target="_blank" rel="nofollow noopener noreferrer">
+			<a class="post-action-btn" title="{{ T "post.goto_reddit" }}" href="https://www.reddit.com{{ $post.Permalink }}" target="_blank" rel="nofollow noopener noreferrer">
 				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
-				<span>Reddit</span>
+				<span>{{ T "post.reddit" }}</span>
 			</a>
 			{{ else }}
-			<a class="post-action-btn" title="Go to Reddit" href="https://www.reddit.com{{ $post.Permalink }}" target="_blank" rel="nofollow noopener noreferrer" data-leave-modal>
+			<a class="post-action-btn" title="{{ T "post.goto_reddit" }}" href="https://www.reddit.com{{ $post.Permalink }}" target="_blank" rel="nofollow noopener noreferrer" data-leave-modal>
 				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
-				<span>Reddit</span>
+				<span>{{ T "post.reddit" }}</span>
 			</a>
 			{{ template "visit_reddit_confirmation" $post.Permalink }}
 			{{ end }}
@@ -254,19 +266,19 @@
 				style="color:{{ $post.Flair.ForegroundColor }}; background:{{ $post.Flair.BackgroundColor }};">{{ template "render_flair" $post.Flair.FlairParts }}</a>
 		{{ end }}
 		{{ $post.Title }}
-		{{ if $post.Flags.NSFW }} <small class="nsfw">NSFW</small>{{ end }}
-		{{ if $post.Flags.Spoiler }} <small class="spoiler">Spoiler</small>{{ end }}
+		{{ if $post.Flags.NSFW }} <small class="nsfw">{{ T "flag.nsfw" }}</small>{{ end }}
+		{{ if $post.Flags.Spoiler }} <small class="spoiler">{{ T "flag.spoiler" }}</small>{{ end }}
 	</h1>
 
 	{{ if eq $post.PostType "image" }}
 	<div class="post_media_content">
 		<a href="{{ $post.Media.URL }}" class="post_media_image">
 			{{ if or (eq $post.Media.Height 0) (eq $post.Media.Width 0) }}
-			<img width="100%" height="100%" loading="lazy" alt="Post image" src="{{ $post.Media.URL }}"/>
+			<img width="100%" height="100%" loading="lazy" alt="{{ T "alt.post_image" }}" src="{{ $post.Media.URL }}"/>
 			{{ else }}
 			<svg width="{{ $post.Media.Width }}px" height="{{ $post.Media.Height }}px" xmlns="http://www.w3.org/2000/svg">
 				<image width="100%" height="100%" href="{{ $post.Media.URL }}"/>
-				<desc><img loading="lazy" alt="Post image" src="{{ $post.Media.URL }}"/></desc>
+				<desc><img loading="lazy" alt="{{ T "alt.post_image" }}" src="{{ $post.Media.URL }}"/></desc>
 			</svg>
 			{{ end }}
 		</a>
@@ -283,14 +295,14 @@
 		<script src="/playHLSVideo.js"></script>
 		{{ else }}
 		<div class="post_media_content">
-			<video class="post_media_video" src="{{ $post.Media.URL }}" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} loop><a href="{{ $post.Media.URL }}">Video</a></video>
+			<video class="post_media_video" src="{{ $post.Media.URL }}" controls {{ if eq $prefs.AutoplayVideos "on" }}data-viewport-autoplay{{ end }} loop><a href="{{ $post.Media.URL }}">{{ T "media.video" }}</a></video>
 		</div>
 		{{ end }}
 	{{ else if eq $post.PostType "gallery" }}
 	<div class="gallery">
 		{{ range $post.Gallery }}
 		<figure>
-			<a href="{{ .URL }}"><img loading="lazy" alt="Gallery image" src="{{ .URL }}"/></a>
+			<a href="{{ .URL }}"><img loading="lazy" alt="{{ T "alt.gallery_image" }}" src="{{ .URL }}"/></a>
 			<figcaption>
 				<p>{{ .Caption }}</p>
 				{{ if .OutboundURL }}
@@ -310,31 +322,28 @@
 	</div>
 	<div class="post_score" title="{{ index $post.Score 1 }}">
 		{{ if ne $prefs.HideScore "on" }}{{ index $post.Score 0 }}{{ else }}&#x2022;{{ end }}
-		<span class="label"> Upvotes</span>
+		<span class="label"> {{ T "post.upvotes" }}</span>
 	</div>
 	<div class="post_footer">
 		<ul id="post_links">
-			<li><a href="{{ $post.Permalink }}"><span class="desktop_item">perma</span>link</a></li>
+			<li><a href="{{ $post.Permalink }}"><span class="desktop_item">{{ T "post.permalink" }}</span><span class="mobile_item">{{ T "post.permalink_short" }}</span></a></li>
 			{{ if gt $post.NumDuplicates 0 }}
-			<li><a href="/r/{{ $post.Community }}/duplicates/{{ $post.ID }}">dup<span class="desktop_item">licat</span>es</a></li>
+			<li><a href="/r/{{ $post.Community }}/duplicates/{{ $post.ID }}"><span class="desktop_item">{{ T "post.duplicates" }}</span><span class="mobile_item">{{ T "post.duplicates_short" }}</span></a></li>
 			{{ end }}
 			{{ if eq $post.PostType "link" }}
-			<li class="desktop_item"><a target="_blank" href="https://archive.is/latest/{{ $post.Media.URL }}">archive.is</a></li>
-			<li class="mobile_item"><a target="_blank" href="https://archive.is/latest/{{ $post.Media.URL }}">archive</a></li>
+			<li class="desktop_item"><a target="_blank" href="https://archive.is/latest/{{ $post.Media.URL }}">{{ T "post.archiveis" }}</a></li>
+			<li class="mobile_item"><a target="_blank" href="https://archive.is/latest/{{ $post.Media.URL }}">{{ T "post.archive_short" }}</a></li>
 			{{ end }}
-			<li>
-				<a href="https://reddit.com{{ $post.Permalink }}" rel="nofollow">reddit</a>
-			</li>
 			{{ if $post.Media.DownloadName }}
 			<li>
 				<a href="{{ $post.Media.URL }}" download="{{ $post.Media.DownloadName }}">
-					<span class="mobile_item">dl</span>
-					<span class="desktop_item">download</span>
+					<span class="mobile_item">{{ T "post.download_short" }}</span>
+					<span class="desktop_item">{{ T "post.download" }}</span>
 				</a>
 			</li>
 			{{ end }}
 		</ul>
-		<p>{{ $post.UpvoteRatio }}%<span id="upvoted"> Upvoted</span></p>
+		<p>{{ $post.UpvoteRatio }}%<span id="upvoted"> {{ T "post.upvoted" }}</span></p>
 	</div>
 </div>
 {{ end }}
@@ -343,7 +352,7 @@
 {{ define "poll" }}
 {{ if . }}
 <div class="post_poll">
-	<span>{{ .TotalVoteCount }} votes,</span>
+	<span>{{ T "poll.votes" .TotalVoteCount }}</span>
 	<span title="{{ index .VotingEndTimestamp 1 }}">{{ index .VotingEndTimestamp 0 }}</span>
 	{{ range .Options }}
 	<div class="poll_option">

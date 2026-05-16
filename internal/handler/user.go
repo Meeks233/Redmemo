@@ -18,8 +18,8 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	after := r.URL.Query().Get("after")
 	urlPath := r.URL.Path
 
-	// 1. Cache
-	cacheKey := urlPath + "?" + r.URL.RawQuery
+	// 1. Cache — language-prefixed, see handlePost.
+	cacheKey := prefs.Lang + ":" + urlPath + "?" + r.URL.RawQuery
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

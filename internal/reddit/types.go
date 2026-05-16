@@ -160,6 +160,7 @@ type User struct {
 type Preferences struct {
 	AvailableThemes                []string // derived from embedded CSS filenames
 	Theme                          string
+	Lang                           string // UI language code (e.g. "en", "zh")
 	FrontPage                      string
 	FrontPageSubs                  string
 	FrontPageSubsMode              string
@@ -189,6 +190,7 @@ type Preferences struct {
 	PrefetchSubs                   string
 	PrefetchThreshold              string
 	ScrollInterval                 string
+	LazyMedia                      string // default "on" — defer media requests until the post enters the viewport
 }
 
 // Params holds common query parameters for listing endpoints.

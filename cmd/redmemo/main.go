@@ -142,6 +142,10 @@ func main() {
 	evictor.Start(ctx)
 	prefetcher.Start(ctx)
 
+	// One-off cleanup: drop legacy silent video-only cache entries that a
+	// muxed (audio) copy has since superseded.
+	go mediaProxy.SweepSupersededPlainRows()
+
 	// 12. Register routes, start HTTP server
 	h := handler.New(
 		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,

@@ -7,8 +7,13 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 )
 
-func templateFuncs() template.FuncMap {
+// templateFuncs builds the FuncMap for one language's template set. The "T"
+// and "lang" funcs are bound to that language at parse time, so a rendered
+// template never has to thread locale through nested partials.
+func templateFuncs(loc, defaultLoc Locale, lang string) template.FuncMap {
 	return template.FuncMap{
+		"T":          translator(loc, defaultLoc),
+		"lang":       func() string { return htmlLang(lang) },
 		"capitalize": reddit.Capitalize,
 		"contains":   strings.Contains,
 		"hasPrefix":  strings.HasPrefix,

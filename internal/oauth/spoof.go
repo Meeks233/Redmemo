@@ -2,7 +2,12 @@ package oauth
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redmemo/redmemo/internal/useragent"
@@ -14,11 +19,156 @@ type SpoofIdentity struct {
 	Headers   map[string]string
 }
 
+// androidUA holds the resolved Android User-Agent configuration. It is built
+// once at package init from REDMEMO_ANDROID_* environment variables, falling
+// back to a small curated list of recent (verified) Reddit Android releases.
+//
+// Operators are STRONGLY encouraged to override these via env vars so the
+// spoofed User-Agent tracks a current, real Reddit Android client — a stale
+// hardcoded version is itself a fingerprint. See config.example.yaml.
+var androidUA = resolveAndroidUA()
+
+type androidUASettings struct {
+	fullUA      string   // verbatim override; when set, takes full precedence
+	appVersions []string // "Version YYYY.WW.X/Build NNNNNNN" entries
+	osMin       int      // inclusive Android major-version lower bound
+	osMax       int      // inclusive Android major-version upper bound
+}
+
+// defaultAndroidAppVersions are recent Reddit Android releases verified on
+// APKMirror (build numbers included). Deliberately "recent but not latest"
+// (~Feb 2026 builds) to balance authenticity against server-side version
+// checks. Override with REDMEMO_ANDROID_APP_VERSION to keep this current.
+var defaultAndroidAppVersions = []string{
+	"Version 2026.05.0/Build 2605040",
+	"Version 2026.05.1/Build 2605051",
+	"Version 2026.06.0/Build 2606110",
+	"Version 2026.07.0/Build 2607141",
+}
+
+const (
+	defaultAndroidOSMin = 12
+	defaultAndroidOSMax = 15
+)
+
+// resolveAndroidUA reads the REDMEMO_ANDROID_* environment variables once.
+//
+//	REDMEMO_ANDROID_USER_AGENT  — full UA string, used verbatim (highest priority)
+//	REDMEMO_ANDROID_APP_VERSION — comma-separated "Version .../Build ..." entries
+//	REDMEMO_ANDROID_APP_DATE    — a date (YYYY-MM-DD) auto-translated to a version
+//	REDMEMO_ANDROID_OS_VERSION  — "13" (fixed) or "12-15" (inclusive range)
+//
+// Precedence for the app version: USER_AGENT > APP_VERSION > APP_DATE > default.
+func resolveAndroidUA() androidUASettings {
+	s := androidUASettings{
+		appVersions: defaultAndroidAppVersions,
+		osMin:       defaultAndroidOSMin,
+		osMax:       defaultAndroidOSMax,
+	}
+
+	if ua := strings.TrimSpace(os.Getenv("REDMEMO_ANDROID_USER_AGENT")); ua != "" {
+		s.fullUA = ua
+		log.Printf("oauth: using fixed Android User-Agent from REDMEMO_ANDROID_USER_AGENT")
+		return s
+	}
+
+	versionsSet := false
+	if raw := os.Getenv("REDMEMO_ANDROID_APP_VERSION"); raw != "" {
+		var versions []string
+		for _, part := range strings.Split(raw, ",") {
+			if v := strings.TrimSpace(part); v != "" {
+				versions = append(versions, v)
+			}
+		}
+		if len(versions) > 0 {
+			s.appVersions = versions
+			versionsSet = true
+			log.Printf("oauth: using %d Android app version(s) from REDMEMO_ANDROID_APP_VERSION", len(versions))
+		}
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("REDMEMO_ANDROID_APP_DATE")); raw != "" {
+		switch {
+		case versionsSet:
+			log.Printf("oauth: REDMEMO_ANDROID_APP_DATE ignored — REDMEMO_ANDROID_APP_VERSION takes precedence")
+		default:
+			if v, ok := deriveAppVersionFromDate(raw); ok {
+				s.appVersions = []string{v}
+				log.Printf("oauth: derived Android app version %q from REDMEMO_ANDROID_APP_DATE=%s", v, raw)
+			} else {
+				log.Printf("oauth: invalid REDMEMO_ANDROID_APP_DATE %q (want YYYY-MM-DD), using default versions", raw)
+			}
+		}
+	}
+
+	if raw := strings.TrimSpace(os.Getenv("REDMEMO_ANDROID_OS_VERSION")); raw != "" {
+		if lo, hi, ok := parseOSRange(raw); ok {
+			s.osMin, s.osMax = lo, hi
+		} else {
+			log.Printf("oauth: invalid REDMEMO_ANDROID_OS_VERSION %q, using default %d-%d", raw, s.osMin, s.osMax)
+		}
+	}
+
+	return s
+}
+
+// parseOSRange parses "13" or "12-15" into an inclusive [lo,hi] range.
+func parseOSRange(raw string) (lo, hi int, ok bool) {
+	if loStr, hiStr, found := strings.Cut(raw, "-"); found {
+		l, err1 := strconv.Atoi(strings.TrimSpace(loStr))
+		h, err2 := strconv.Atoi(strings.TrimSpace(hiStr))
+		if err1 != nil || err2 != nil || l < 1 || h < l {
+			return 0, 0, false
+		}
+		return l, h, true
+	}
+	v, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || v < 1 {
+		return 0, 0, false
+	}
+	return v, v, true
+}
+
+// deriveAppVersionFromDate translates a calendar date (YYYY-MM-DD) into a
+// plausible Reddit Android "Version .../Build ..." string, following Reddit's
+// year.week scheme and the 2026-era build-number encoding: a 7-digit build of
+// YY (2) + WW (2) + serial (3).
+//
+// IMPORTANT: the 3-digit build serial is an internal Reddit CI counter that
+// cannot be computed from a date — it is synthesized here to be structurally
+// plausible (correct length and YYWW prefix). Reddit does not appear to
+// validate the build number, but for a guaranteed-authentic version/build
+// pair, set REDMEMO_ANDROID_APP_VERSION to a value verified on APKMirror.
+//
+// The week is the ISO-8601 week of the given date; Reddit's own numbering can
+// be off by a week or so, so the derived version is approximate by design.
+func deriveAppVersionFromDate(raw string) (string, bool) {
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return "", false
+	}
+	year, week := t.ISOWeek()
+	serial := (week * 20) % 1000
+	return fmt.Sprintf("Version %d.%02d.0/Build %02d%02d%03d",
+		year, week, year%100, week, serial), true
+}
+
+// buildUA renders a single Android User-Agent from the resolved settings.
+func (s androidUASettings) buildUA() string {
+	if s.fullUA != "" {
+		return s.fullUA
+	}
+	version := s.appVersions[rand.IntN(len(s.appVersions))]
+	androidVer := s.osMin
+	if s.osMax > s.osMin {
+		androidVer += rand.IntN(s.osMax - s.osMin + 1)
+	}
+	return fmt.Sprintf("Reddit/%s/Android %d", version, androidVer)
+}
+
 func GenerateIdentity() SpoofIdentity {
 	deviceID := uuid.New().String()
-	version := androidAppVersions[rand.IntN(len(androidAppVersions))]
-	androidVer := rand.IntN(6) + 9 // 9..14
-	ua := fmt.Sprintf("Reddit/%s/Android %d", version, androidVer)
+	ua := androidUA.buildUA()
 
 	qos := float64(rand.IntN(99001)+1000) / 1000.0
 
@@ -28,7 +178,7 @@ func GenerateIdentity() SpoofIdentity {
 	}
 
 	headers := map[string]string{
-		"User-Agent":             ua,
+		"User-Agent":            ua,
 		"x-reddit-retry":        "algo=no-retries",
 		"x-reddit-compression":  "1",
 		"x-reddit-qos":          fmt.Sprintf("%.3f", qos),
@@ -71,157 +221,4 @@ func GenerateWebIdentity(uaPool *useragent.Pool) SpoofIdentity {
 			"User-Agent": ua,
 		},
 	}
-}
-
-var androidAppVersions = []string{
-	"Version 2024.22.1/Build 1652272",
-	"Version 2024.23.1/Build 1665606",
-	"Version 2024.24.1/Build 1682520",
-	"Version 2024.25.0/Build 1693595",
-	"Version 2024.25.2/Build 1700401",
-	"Version 2024.25.3/Build 1703490",
-	"Version 2024.26.0/Build 1710470",
-	"Version 2024.26.1/Build 1717435",
-	"Version 2024.28.0/Build 1737665",
-	"Version 2024.28.1/Build 1741165",
-	"Version 2024.30.0/Build 1770787",
-	"Version 2024.31.0/Build 1786202",
-	"Version 2024.32.0/Build 1809095",
-	"Version 2024.32.1/Build 1813258",
-	"Version 2024.33.0/Build 1819908",
-	"Version 2024.34.0/Build 1837909",
-	"Version 2024.35.0/Build 1861437",
-	"Version 2024.36.0/Build 1875012",
-	"Version 2024.37.0/Build 1888053",
-	"Version 2024.38.0/Build 1902791",
-	"Version 2024.39.0/Build 1916713",
-	"Version 2024.40.0/Build 1928580",
-	"Version 2024.41.0/Build 1941199",
-	"Version 2024.41.1/Build 1947805",
-	"Version 2024.42.0/Build 1952440",
-	"Version 2024.43.0/Build 1972250",
-	"Version 2024.44.0/Build 1988458",
-	"Version 2024.45.0/Build 2001943",
-	"Version 2024.46.0/Build 2012731",
-	"Version 2024.47.0/Build 2029755",
-	"Version 2023.48.0/Build 1319123",
-	"Version 2023.49.0/Build 1321715",
-	"Version 2023.49.1/Build 1322281",
-	"Version 2023.50.0/Build 1332338",
-	"Version 2023.50.1/Build 1345844",
-	"Version 2024.02.0/Build 1368985",
-	"Version 2024.03.0/Build 1379408",
-	"Version 2024.04.0/Build 1391236",
-	"Version 2024.05.0/Build 1403584",
-	"Version 2024.06.0/Build 1418489",
-	"Version 2024.07.0/Build 1429651",
-	"Version 2024.08.0/Build 1439531",
-	"Version 2024.10.0/Build 1470045",
-	"Version 2024.10.1/Build 1478645",
-	"Version 2024.11.0/Build 1480707",
-	"Version 2024.12.0/Build 1494694",
-	"Version 2024.13.0/Build 1505187",
-	"Version 2024.14.0/Build 1520556",
-	"Version 2024.15.0/Build 1536823",
-	"Version 2024.16.0/Build 1551366",
-	"Version 2024.17.0/Build 1568106",
-	"Version 2024.18.0/Build 1577901",
-	"Version 2024.18.1/Build 1585304",
-	"Version 2024.19.0/Build 1593346",
-	"Version 2024.20.0/Build 1612800",
-	"Version 2024.20.1/Build 1615586",
-	"Version 2024.20.2/Build 1624969",
-	"Version 2024.20.3/Build 1624970",
-	"Version 2024.21.0/Build 1631686",
-	"Version 2024.22.0/Build 1645257",
-	"Version 2023.21.0/Build 956283",
-	"Version 2023.22.0/Build 968223",
-	"Version 2023.23.0/Build 983896",
-	"Version 2023.24.0/Build 998541",
-	"Version 2023.25.0/Build 1014750",
-	"Version 2023.25.1/Build 1018737",
-	"Version 2023.26.0/Build 1019073",
-	"Version 2023.27.0/Build 1031923",
-	"Version 2023.28.0/Build 1046887",
-	"Version 2023.29.0/Build 1059855",
-	"Version 2023.30.0/Build 1078734",
-	"Version 2023.31.0/Build 1091027",
-	"Version 2023.32.0/Build 1109919",
-	"Version 2023.32.1/Build 1114141",
-	"Version 2023.33.1/Build 1129741",
-	"Version 2023.34.0/Build 1144243",
-	"Version 2023.35.0/Build 1157967",
-	"Version 2023.36.0/Build 1168982",
-	"Version 2023.37.0/Build 1182743",
-	"Version 2023.38.0/Build 1198522",
-	"Version 2023.39.0/Build 1211607",
-	"Version 2023.39.1/Build 1221505",
-	"Version 2023.40.0/Build 1221521",
-	"Version 2023.41.0/Build 1233125",
-	"Version 2023.41.1/Build 1239615",
-	"Version 2023.42.0/Build 1245088",
-	"Version 2023.43.0/Build 1257426",
-	"Version 2023.44.0/Build 1268622",
-	"Version 2023.45.0/Build 1281371",
-	"Version 2023.47.0/Build 1303604",
-	"Version 2022.42.0/Build 638508",
-	"Version 2022.43.0/Build 648277",
-	"Version 2022.44.0/Build 664348",
-	"Version 2022.45.0/Build 677985",
-	"Version 2023.01.0/Build 709875",
-	"Version 2023.02.0/Build 717912",
-	"Version 2023.03.0/Build 729220",
-	"Version 2023.04.0/Build 744681",
-	"Version 2023.05.0/Build 755453",
-	"Version 2023.06.0/Build 775017",
-	"Version 2023.07.0/Build 788827",
-	"Version 2023.07.1/Build 790267",
-	"Version 2023.08.0/Build 798718",
-	"Version 2023.09.0/Build 812015",
-	"Version 2023.09.1/Build 816833",
-	"Version 2023.10.0/Build 821148",
-	"Version 2023.11.0/Build 830610",
-	"Version 2023.12.0/Build 841150",
-	"Version 2023.13.0/Build 852246",
-	"Version 2023.14.0/Build 861593",
-	"Version 2023.14.1/Build 864826",
-	"Version 2023.15.0/Build 870628",
-	"Version 2023.16.0/Build 883294",
-	"Version 2023.16.1/Build 886269",
-	"Version 2023.17.0/Build 896030",
-	"Version 2023.17.1/Build 900542",
-	"Version 2023.18.0/Build 911877",
-	"Version 2023.19.0/Build 927681",
-	"Version 2023.20.0/Build 943980",
-	"Version 2023.20.1/Build 946732",
-	"Version 2022.20.0/Build 487703",
-	"Version 2022.21.0/Build 492436",
-	"Version 2022.22.0/Build 498700",
-	"Version 2022.23.0/Build 502374",
-	"Version 2022.23.1/Build 506606",
-	"Version 2022.24.0/Build 510950",
-	"Version 2022.24.1/Build 513462",
-	"Version 2022.25.0/Build 515072",
-	"Version 2022.25.1/Build 516394",
-	"Version 2022.25.2/Build 519915",
-	"Version 2022.26.0/Build 521193",
-	"Version 2022.27.0/Build 527406",
-	"Version 2022.27.1/Build 529687",
-	"Version 2022.28.0/Build 533235",
-	"Version 2022.30.0/Build 548620",
-	"Version 2022.31.0/Build 556666",
-	"Version 2022.31.1/Build 562612",
-	"Version 2022.32.0/Build 567875",
-	"Version 2022.33.0/Build 572600",
-	"Version 2022.34.0/Build 579352",
-	"Version 2022.35.0/Build 588016",
-	"Version 2022.35.1/Build 589034",
-	"Version 2022.36.0/Build 593102",
-	"Version 2022.37.0/Build 601691",
-	"Version 2022.38.0/Build 607460",
-	"Version 2022.39.0/Build 615385",
-	"Version 2022.39.1/Build 619019",
-	"Version 2022.40.0/Build 624782",
-	"Version 2022.41.0/Build 630468",
-	"Version 2022.41.1/Build 634168",
 }

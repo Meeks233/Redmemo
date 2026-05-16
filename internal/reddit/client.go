@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -150,23 +151,27 @@ func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after str
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
+	// query must be URL-encoded: multi-word searches ("linux video") contain
+	// spaces and other reserved characters that would otherwise produce a
+	// malformed request line and fail upstream.
+	eq := url.QueryEscape(query)
 	var path string
 	if sub != "" {
-		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", sub, limit, query)
+		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", sub, limit, eq)
 		if restrictSR {
 			path += "&restrict_sr=on"
 		}
 	} else {
-		path = fmt.Sprintf("/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", limit, query)
+		path = fmt.Sprintf("/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", limit, eq)
 	}
 	if sort != "" {
-		path += "&sort=" + sort
+		path += "&sort=" + url.QueryEscape(sort)
 	}
 	if t != "" {
-		path += "&t=" + t
+		path += "&t=" + url.QueryEscape(t)
 	}
 	if after != "" {
-		path += "&after=" + after
+		path += "&after=" + url.QueryEscape(after)
 	}
 
 	data, _, err := c.doRequest(ctx, path)
@@ -202,7 +207,15 @@ func (c *Client) Probe(ctx context.Context) (*RateLimitInfo, error) {
 // Matches redlib: opts in to quarantined and gated subreddits via cookie.
 const quarantineCookie = `_options=%7B%22pref_quarantine_optin%22%3A%20true%2C%20%22pref_gated_sr_optin%22%3A%20true%7D`
 
+// maxRedirects caps how many upstream 3xx hops doRequest will follow before
+// giving up, so a redirect loop can't recurse until the stack overflows.
+const maxRedirects = 5
+
 func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Response, error) {
+	return c.doRequestDepth(ctx, path, 0)
+}
+
+func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]byte, *http.Response, error) {
 	token := c.pool.GetBestToken()
 	if token == nil {
 		return nil, nil, ErrNoTokenAvailable
@@ -249,6 +262,9 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 	if resp.StatusCode >= 301 && resp.StatusCode <= 399 {
 		location := resp.Header.Get("Location")
 		if location != "" {
+			if depth >= maxRedirects {
+				return nil, resp, fmt.Errorf("too many redirects (>%d) starting at %s", maxRedirects, path)
+			}
 			newPath := location
 			newPath = strings.TrimPrefix(newPath, redditAPIBase)
 			newPath = strings.TrimPrefix(newPath, "https://www.reddit.com")
@@ -260,7 +276,7 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 					newPath += "?raw_json=1"
 				}
 			}
-			return c.doRequest(ctx, newPath)
+			return c.doRequestDepth(ctx, newPath, depth+1)
 		}
 	}
 

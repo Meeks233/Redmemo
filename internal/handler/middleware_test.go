@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/redmemo/redmemo/internal/reddit"
 )
 
 func TestPathNormalize_DoubleSlash(t *testing.T) {
@@ -159,6 +161,40 @@ func TestRecovery_HandlerPanics(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("recovery status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
+}
+
+func nsfwPost() reddit.Post {
+	var p reddit.Post
+	p.Flags.NSFW = true
+	return p
+}
+
+func TestAllPostsNSFW(t *testing.T) {
+	sfw := reddit.Post{}
+	nsfw := nsfwPost()
+	hide := reddit.Preferences{ShowNSFW: "off"}
+	show := reddit.Preferences{ShowNSFW: "on"}
+
+	t.Run("empty list is never all-NSFW", func(t *testing.T) {
+		if allPostsNSFW(nil, hide) {
+			t.Error("empty list should return false")
+		}
+	})
+	t.Run("ShowNSFW on short-circuits to false", func(t *testing.T) {
+		if allPostsNSFW([]reddit.Post{nsfw, nsfw}, show) {
+			t.Error("with ShowNSFW=on the result must be false")
+		}
+	})
+	t.Run("all NSFW while hiding", func(t *testing.T) {
+		if !allPostsNSFW([]reddit.Post{nsfw, nsfw}, hide) {
+			t.Error("all-NSFW list with ShowNSFW=off should return true")
+		}
+	})
+	t.Run("mixed list is not all-NSFW", func(t *testing.T) {
+		if allPostsNSFW([]reddit.Post{nsfw, sfw}, hide) {
+			t.Error("a list with one SFW post should return false")
+		}
+	})
 }
 
 func TestLogging_SetsStatusCode(t *testing.T) {

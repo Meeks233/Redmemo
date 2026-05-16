@@ -26,7 +26,14 @@ func pathNormalize(next http.Handler) http.Handler {
 
 		// Remove trailing slash (except root)
 		if len(path) > 1 && strings.HasSuffix(path, "/") {
-			http.Redirect(w, r, strings.TrimRight(path, "/")+r.URL.RawQuery, http.StatusMovedPermanently)
+			target := strings.TrimRight(path, "/")
+			if target == "" {
+				target = "/"
+			}
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
 			return
 		}
 
@@ -95,6 +102,8 @@ var prefDefaults = map[string]string{
 	"prefetch_subs":           "",
 	"prefetch_threshold":      "50",
 	"scroll_interval":         "2",
+	"lazy_media":              "on",
+	"lang":                    render.DefaultLang,
 }
 
 func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
@@ -111,6 +120,16 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 		p.Theme = c.Value
 	} else {
 		p.Theme = pref("theme")
+	}
+
+	// Language: an explicit `lang` cookie wins; otherwise resolve from the
+	// Accept-Language header, falling back to the configured default. The
+	// result is always a SupportedLangs value so the HTML cache key stays
+	// discrete.
+	if c, err := r.Cookie("lang"); err == nil {
+		p.Lang = render.ResolveLang(c.Value, r.Header.Get("Accept-Language"))
+	} else {
+		p.Lang = render.ResolveLang("", r.Header.Get("Accept-Language"))
 	}
 
 	p.FrontPage = pref("front_page")
@@ -147,6 +166,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.PrefetchSubs = pref("prefetch_subs")
 	p.PrefetchThreshold = pref("prefetch_threshold")
 	p.ScrollInterval = pref("scroll_interval")
+	p.LazyMedia = pref("lazy_media")
 
 	p.AvailableThemes = render.AvailableThemes()
 

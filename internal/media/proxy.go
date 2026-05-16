@@ -46,14 +46,14 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 	meta, err := p.mediaStore.Resolve(originalURL)
 	if err != nil {
 		log.Printf("media: resolve error for %s: %v", originalURL, err)
-		p.reverseProxy(w, r, originalURL)
+		p.reverseProxy(w, r, originalURL, false)
 		return
 	}
 
 	if meta != nil && meta.FilePath != nil {
 		if _, err := os.Stat(*meta.FilePath); err == nil {
 			p.cache.RecordMediaAccess(r.Context(), originalURL)
-			p.serve(w, r, meta)
+			p.serve(w, r, meta, false)
 			return
 		}
 	}
@@ -61,11 +61,11 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 	meta, err = p.Download(r.Context(), originalURL)
 	if err != nil {
 		log.Printf("media: download failed for %s: %v", originalURL, err)
-		p.reverseProxy(w, r, originalURL)
+		p.reverseProxy(w, r, originalURL, false)
 		return
 	}
 
-	p.serve(w, r, meta)
+	p.serve(w, r, meta, false)
 }
 
 // loaderSVG is an animated spinner served in place of an empty/broken image
@@ -84,9 +84,16 @@ func serveLoader(w http.ResponseWriter, status int) {
 	io.WriteString(w, loaderSVG)
 }
 
-func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaMeta) {
+// serve writes a cached media file. noStore marks the response uncacheable —
+// used for the silent stand-in of a video whose audio is still being muxed, so
+// a page reload re-requests and picks up the finished audio copy.
+func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaMeta, noStore bool) {
 	w.Header().Set("Content-Type", meta.MIMEType)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	if noStore {
+		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 
 	if p.useNginx {
 		w.Header().Set("X-Accel-Redirect", NginxPath(meta.Hash))
@@ -153,7 +160,19 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	return meta, nil
 }
 
+// DownloadMedia caches a media URL for background callers (prefetch L2,
+// archive). A muxable v.redd.it DASH segment is routed through the audio-mux
+// pipeline so the cache holds the audio version — never a silent video-only
+// file that would later be served soundless.
 func (p *Proxy) DownloadMedia(ctx context.Context, originalURL string) error {
+	if isMuxableVRedditURL(originalURL) {
+		key := muxCacheKey(originalURL)
+		if meta, _ := p.mediaStore.Resolve(key); meta != nil && meta.FilePath != nil {
+			return nil // already muxed (or has an emergency copy)
+		}
+		_, err := p.muxOnce(ctx, originalURL, key, false)
+		return err
+	}
 	_, err := p.Download(ctx, originalURL)
 	return err
 }
@@ -168,7 +187,9 @@ func (p *Proxy) DownloadAsync(originalURL string) {
 	}()
 }
 
-func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string) {
+// reverseProxy streams targetURL straight through to the client. noStore
+// strips upstream caching headers and marks the response uncacheable.
+func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool) {
 	req, err := http.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
 	if err != nil {
 		serveLoader(w, http.StatusAccepted)
@@ -195,9 +216,18 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 	}
 
 	for k, vs := range resp.Header {
+		if noStore {
+			switch http.CanonicalHeaderKey(k) {
+			case "Cache-Control", "Expires", "Etag", "Last-Modified", "Age":
+				continue
+			}
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
+	}
+	if noStore {
+		w.Header().Set("Cache-Control", "no-store")
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)

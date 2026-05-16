@@ -19,6 +19,11 @@ import (
 
 type MediaDownloader interface {
 	DownloadMedia(ctx context.Context, url string) error
+	// ListFailedAudio returns v.redd.it URLs whose audio mux exhausted its
+	// retry budget, oldest first. RetryMuxAudio re-attempts one. Together they
+	// back the L5 background audio-remux layer.
+	ListFailedAudio(limit int) ([]string, error)
+	RetryMuxAudio(ctx context.Context, videoURL string) (outcome string, err error)
 }
 
 type WindowInfoProvider interface {
@@ -87,6 +92,11 @@ type Scheduler struct {
 	queue       chan *workItem
 	lastUserReq atomic.Int64
 
+	// userActivePause yields the dispatch-loop pause applied when a user
+	// request arrived recently. When nil the default randomized 25–40s
+	// applies; tests override it for deterministic, fast runs.
+	userActivePause func() time.Duration
+
 	// Observable state for debug page
 	statusMu    sync.RWMutex
 	l1Phase     string
@@ -98,6 +108,9 @@ type Scheduler struct {
 	l2Phase     string
 	l2Sub       string
 	l2Pending   int
+	l5Phase     string
+	l5Current   string
+	l5Pending   int
 	npPhase     string
 	npCurrent   string
 }
@@ -149,7 +162,7 @@ func (s *Scheduler) NotifyUserRequest() {
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L3/L4 + NP dispatch)")
+	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L5 + NP dispatch)")
 	go s.dispatchLoop(ctx)
 	go s.producerLoop(ctx)
 	go s.iconLoop(ctx)
@@ -201,6 +214,16 @@ func (s *Scheduler) clearCycleState() {
 // NP Dispatch Loop — the single gateway for all outgoing requests (FIFO)
 // ---------------------------------------------------------------------------
 
+// userPauseDuration is the delay applied before dispatching when a user has
+// been active recently. It is injectable via s.userActivePause so tests can
+// pin it instead of waiting out the production 25–40s randomized delay.
+func (s *Scheduler) userPauseDuration() time.Duration {
+	if s.userActivePause != nil {
+		return s.userActivePause()
+	}
+	return time.Duration(25+rand.Intn(15)) * time.Second
+}
+
 func (s *Scheduler) dispatchLoop(ctx context.Context) {
 	for {
 		s.setNPStatus("idle", "")
@@ -220,7 +243,7 @@ func (s *Scheduler) dispatchLoop(ctx context.Context) {
 		}
 
 		if s.userRequestedRecently() {
-			pause := time.Duration(25+rand.Intn(15)) * time.Second
+			pause := s.userPauseDuration()
 			s.setNPStatus("paused (user active)", item.label)
 			s.Events.Addf(LevelInfo, "NP", "user active, pausing %s before: %s", formatDur(pause), item.label)
 			if err := sleep(ctx, pause); err != nil {
@@ -492,6 +515,12 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			}
 		}
 
+		// L5 trails L2: once this round's listing + media work is queued,
+		// drain any videos whose audio mux earlier exhausted its retries.
+		if err := s.submitL5(ctx); err != nil {
+			return err
+		}
+
 		if round > 0 && activeSubs == 0 {
 			s.Events.Add(LevelInfo, "L1", "all subs exhausted pages, ending cycle early")
 			break
@@ -614,6 +643,91 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 }
 
 // ---------------------------------------------------------------------------
+// L5: Audio remux retry — drains the failed-audio FCFS queue through NP
+// ---------------------------------------------------------------------------
+
+const l5BatchSize = 25
+
+// submitL5 re-attempts the audio mux for videos parked as 'failed'. It mirrors
+// L2: each retry is a CDN-only request (no OAuth budget) submitted through the
+// NP queue, so it trails L2 under the same FIFO dispatch and randomized
+// pacing. The failed-audio queue is drained oldest-first (FCFS).
+func (s *Scheduler) submitL5(ctx context.Context) error {
+	if s.media == nil {
+		return nil
+	}
+
+	failed, err := s.media.ListFailedAudio(l5BatchSize)
+	if err != nil {
+		s.Events.Addf(LevelError, "L5", "query failed-audio queue: %v", err)
+		return nil
+	}
+
+	if len(failed) == 0 {
+		s.setL5Status("idle", "", 0)
+		return nil
+	}
+
+	s.setL5Status("remuxing", "", len(failed))
+	s.Events.Addf(LevelInfo, "L5", "%d videos awaiting audio remux -- submitting to NP queue", len(failed))
+
+	recovered := 0
+	for _, videoURL := range failed {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		u := videoURL
+		short := shortURL(u)
+		var outcome string
+		var muxErr error
+		s.setL5Status("remuxing", short, len(failed))
+
+		err := s.submit(ctx, fmt.Sprintf("L5 audio-remux %s", short), false, func(ctx context.Context) {
+			outcome, muxErr = s.media.RetryMuxAudio(ctx, u)
+			switch {
+			case muxErr != nil:
+				s.Events.Addf(LevelError, "L5", "%s: remux error: %v", short, muxErr)
+			case outcome == "recovered":
+				s.Events.Addf(LevelOK, "L5", "%s: audio recovered", short)
+			case outcome == "skipped":
+				s.Events.Addf(LevelInfo, "L5", "%s: skipped (resolved or recently retried)", short)
+			default:
+				s.Events.Addf(LevelWarn, "L5", "%s: audio still unavailable", short)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		if outcome == "recovered" {
+			recovered++
+		}
+	}
+
+	if recovered > 0 {
+		s.Events.Addf(LevelOK, "L5", "audio recovered for %d/%d videos", recovered, len(failed))
+	}
+	s.setL5Status("idle", "", 0)
+	return nil
+}
+
+// shortURL trims a CDN URL down to host-relative path (no scheme, no query)
+// for compact event-log labels.
+func shortURL(u string) string {
+	s := u
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[i+1:]
+	}
+	if i := strings.IndexByte(s, '?'); i >= 0 {
+		s = s[:i]
+	}
+	return s
+}
+
+// ---------------------------------------------------------------------------
 // Shared utilities
 // ---------------------------------------------------------------------------
 
@@ -705,6 +819,9 @@ type PrefetchStatus struct {
 	L2Phase     string
 	L2Sub       string
 	L2Pending   int
+	L5Phase     string
+	L5Current   string
+	L5Pending   int
 	NPPhase     string
 	NPCurrent   string
 	QueueLen    int
@@ -743,6 +860,9 @@ func (s *Scheduler) Status() PrefetchStatus {
 		L2Phase:     s.l2Phase,
 		L2Sub:       s.l2Sub,
 		L2Pending:   s.l2Pending,
+		L5Phase:     s.l5Phase,
+		L5Current:   s.l5Current,
+		L5Pending:   s.l5Pending,
 		NPPhase:     s.npPhase,
 		NPCurrent:   s.npCurrent,
 		QueueLen:    len(s.queue),
@@ -773,6 +893,14 @@ func (s *Scheduler) setL2Status(phase, sub string, pending int) {
 	s.l2Phase = phase
 	s.l2Sub = sub
 	s.l2Pending = pending
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) setL5Status(phase, current string, pending int) {
+	s.statusMu.Lock()
+	s.l5Phase = phase
+	s.l5Current = current
+	s.l5Pending = pending
 	s.statusMu.Unlock()
 }
 
