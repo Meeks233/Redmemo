@@ -1,19 +1,117 @@
 (function () {
   if (!("IntersectionObserver" in window)) return;
 
+  // All observed videos currently intersecting the viewport at all.
+  // Eligibility + centermost decisions are made geometrically in
+  // updatePlayback() — relying on intersectionRatio === 1.0 is flaky
+  // (subpixel rounding reports 0.999…) and also wrongly excludes videos
+  // that are taller than the viewport or only partly on-screen at first
+  // load, which is exactly the homepage case that wasn't autoplaying.
+  var candidates = new Set();
+  var scrollScheduled = false;
+
+  // A video must have at least this fraction of its height on-screen to
+  // be considered for autoplay.
+  var VISIBLE_FRACTION = 0.5;
+
+  function viewportHeight() {
+    return window.innerHeight || document.documentElement.clientHeight;
+  }
+
+  // Fraction of the video's height currently inside the viewport (0..1).
+  function visibleFraction(video) {
+    var rect = video.getBoundingClientRect();
+    if (rect.height <= 0) return 0;
+    var visible = Math.min(rect.bottom, viewportHeight()) - Math.max(rect.top, 0);
+    return Math.max(0, visible) / rect.height;
+  }
+
+  // Start playback, coping with the browser autoplay policy.
+  //
+  // The data-viewport-autoplay videos are NOT muted, so before the user
+  // has interacted with the page the browser rejects play() outright.
+  // That is why the first videos on a freshly loaded page never started,
+  // while videos reached after scrolling did: scrolling is itself a user
+  // gesture that grants the page sticky activation.
+  //
+  // Browsers always allow *muted* autoplay, so on rejection we retry with
+  // the video muted. The user keeps their native controls to unmute.
+  function tryPlay(video) {
+    var p = video.play();
+    if (p && typeof p.catch === "function") {
+      p.catch(function () {
+        video.muted = true;
+        video.play().catch(function () {});
+      });
+    }
+  }
+
+  function distanceToViewportCenter(video) {
+    var rect = video.getBoundingClientRect();
+    return Math.abs((rect.top + rect.bottom) / 2 - viewportHeight() / 2);
+  }
+
+  // Play only the fully-visible video closest to the viewport center.
+  function updatePlayback() {
+    if (document.visibilityState !== "visible") {
+      candidates.forEach(function (video) {
+        if (!video.paused) video.pause();
+      });
+      return;
+    }
+
+    var active = null;
+    var bestDistance = Infinity;
+    candidates.forEach(function (video) {
+      if (visibleFraction(video) < VISIBLE_FRACTION) return;
+      var d = distanceToViewportCenter(video);
+      if (d < bestDistance) {
+        bestDistance = d;
+        active = video;
+      }
+    });
+
+    candidates.forEach(function (video) {
+      if (video === active) {
+        tryPlay(video);
+      } else if (!video.paused) {
+        video.pause();
+      }
+    });
+  }
+
   var observer = new IntersectionObserver(
     function (entries) {
       entries.forEach(function (entry) {
-        var video = entry.target;
-        if (entry.intersectionRatio >= 1.0) {
-          video.play().catch(function () {});
+        if (entry.isIntersecting) {
+          candidates.add(entry.target);
         } else {
-          if (!video.paused) video.pause();
+          candidates.delete(entry.target);
+          if (!entry.target.paused) entry.target.pause();
         }
       });
+      updatePlayback();
     },
-    { threshold: 1.0 }
+    { threshold: [0, 0.25, 0.5, 0.75, 1.0] }
   );
+
+  // While scrolling, the centermost video changes even if several stay
+  // fully visible — re-evaluate on scroll (throttled via rAF).
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (scrollScheduled) return;
+      scrollScheduled = true;
+      window.requestAnimationFrame(function () {
+        scrollScheduled = false;
+        updatePlayback();
+      });
+    },
+    { passive: true }
+  );
+
+  // Pause when leaving the tab; re-evaluate on return.
+  document.addEventListener("visibilitychange", updatePlayback);
 
   function observeVideos() {
     document.querySelectorAll("video[data-viewport-autoplay]").forEach(function (v) {
@@ -25,6 +123,8 @@
   }
 
   observeVideos();
+  // Kick off playback for videos already on-screen at first load.
+  updatePlayback();
 
   if (window.MutationObserver) {
     new MutationObserver(function () { observeVideos(); })

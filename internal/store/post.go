@@ -312,6 +312,114 @@ func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
 	return scanPosts(rows)
 }
 
+// ArchiveSearchOpts filters the local posts archive for the /archive page's
+// purely-local search widget. All fields are optional; zero/empty values are
+// skipped so an all-empty opts set matches every archived post.
+type ArchiveSearchOpts struct {
+	Query    string     // title ILIKE %query%
+	After    *time.Time // created_utc >= After
+	Before   *time.Time // created_utc <= Before
+	NSFW     string     // "" (any) | "nsfw" | "sfw"
+	Media    string     // "" (any) | "image" | "video"
+	Subs     []string   // case-insensitive subreddit filter; empty = any
+	SubsMode string     // "whitelist" (default) | "blacklist" — only used when Subs is set
+	Sort     string     // "new" (default, created_utc) | "top" (score) | "all" (first_seen)
+	Score    *int       // score threshold; nil = any
+	ScoreOp  string     // "gt" (default, score > Score) | "lt" (score < Score)
+	Limit    int
+	Offset   int
+}
+
+// ArchiveSearch runs a purely-local search over the posts archive. It never
+// touches Reddit; it only queries PostgreSQL. It returns the requested page of
+// posts (newest first) plus the total number of matches for pagination.
+func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64, error) {
+	where := "1=1"
+	var args []any
+	argN := 1
+
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		where += fmt.Sprintf(" AND title ILIKE '%%' || $%d || '%%'", argN)
+		args = append(args, q)
+		argN++
+	}
+	if opts.After != nil {
+		where += fmt.Sprintf(" AND created_utc >= $%d", argN)
+		args = append(args, *opts.After)
+		argN++
+	}
+	if opts.Before != nil {
+		where += fmt.Sprintf(" AND created_utc <= $%d", argN)
+		args = append(args, *opts.Before)
+		argN++
+	}
+	switch opts.NSFW {
+	case "nsfw":
+		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = true"
+	case "sfw":
+		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = false"
+	}
+	switch opts.Media {
+	case "image":
+		where += " AND (json_data->>'PostType') IN ('image','gallery')"
+	case "video":
+		where += " AND (json_data->>'PostType') IN ('video','gif')"
+	}
+	if opts.Score != nil {
+		op := ">"
+		if opts.ScoreOp == "lt" {
+			op = "<"
+		}
+		where += fmt.Sprintf(" AND score %s $%d", op, argN)
+		args = append(args, *opts.Score)
+		argN++
+	}
+	if len(opts.Subs) > 0 {
+		lower := make([]string, len(opts.Subs))
+		for i, sub := range opts.Subs {
+			lower[i] = strings.ToLower(sub)
+		}
+		if opts.SubsMode == "blacklist" {
+			where += fmt.Sprintf(" AND LOWER(subreddit) != ALL($%d)", argN)
+		} else {
+			where += fmt.Sprintf(" AND LOWER(subreddit) = ANY($%d)", argN)
+		}
+		args = append(args, pq.Array(lower))
+		argN++
+	}
+
+	var total int64
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM posts WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("archive search count: %w", err)
+	}
+
+	orderBy := "created_utc DESC"
+	switch opts.Sort {
+	case "top":
+		orderBy = "score DESC"
+	case "all":
+		orderBy = "first_seen DESC"
+	}
+
+	limitN, offsetN := argN, argN+1
+	args = append(args, opts.Limit, opts.Offset)
+	q := fmt.Sprintf(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source, media_done
+		FROM posts
+		WHERE %s
+		ORDER BY %s
+		LIMIT $%d OFFSET $%d`, where, orderBy, limitN, offsetN)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("archive search: %w", err)
+	}
+	defer rows.Close()
+	posts, err := scanPosts(rows)
+	return posts, total, err
+}
+
 func (s *PostStore) CountBySubreddit(sub string) (int64, error) {
 	var count int64
 	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE LOWER(subreddit) = LOWER($1)`, sub).Scan(&count)

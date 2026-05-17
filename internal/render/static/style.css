@@ -3207,6 +3207,248 @@ th {
     padding: 2em;
 }
 
+/* Archive local search */
+#archive_search {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 1em;
+}
+
+.archive-search-bar {
+    display: flex;
+    align-items: stretch;
+    box-shadow: var(--shadow);
+    border-radius: 5px;
+}
+
+/* The field holds the source pills and the title query inline; it grows and
+   wraps internally while the toggle and submit stay fixed on the right. */
+.archive-search-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+    min-height: 38px;
+    padding: 4px 8px;
+    background: var(--highlighted);
+    border-right: 2px var(--outside) solid;
+    border-radius: 5px 0 0 5px;
+}
+
+#archive_q {
+    flex: 1;
+    min-width: 120px;
+    height: 26px;
+    padding: 0 2px;
+    border: none;
+    background: none;
+    color: var(--text);
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.archive-search-bar .submit {
+    background: var(--highlighted);
+    border: none;
+    cursor: pointer;
+    padding: 0 14px;
+    border-radius: 0 5px 5px 0;
+}
+
+.archive-search-bar .submit svg {
+    stroke: var(--accent);
+}
+
+.archive-search-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.archive-search-filter {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+}
+
+.archive-search-filter > span {
+    opacity: 0.7;
+}
+
+.archive-search-filter select {
+    height: 32px;
+    background: var(--highlighted);
+    border-radius: 5px;
+    color: var(--text);
+}
+
+/* Custom timeframe: two native date inputs shown right after the Time select.
+   Native inputs keep the browser calendar (with its handy month/year jumps)
+   and stay clickable, so the picker re-opens any number of times. */
+.archive-search-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+}
+
+.archive-search-range[hidden] {
+    display: none;
+}
+
+.archive-search-range-sep {
+    opacity: 0.5;
+}
+
+.archive-search-date {
+    height: 32px;
+    padding: 0 8px;
+    background: var(--highlighted);
+    color: var(--text);
+    border: none;
+    border-radius: 5px;
+}
+
+.archive-search-score {
+    width: 72px;
+    height: 32px;
+    padding: 0 6px;
+    background: var(--highlighted);
+    color: var(--text);
+    border: none;
+    border-radius: 5px;
+}
+
+#archive-search-results h1 {
+    font-size: 1.2em;
+    margin-bottom: 0.8em;
+    opacity: 0.8;
+}
+
+/* Archive search — source pills + suggestion dropdown inside the search box.
+   display:contents lets the pills flow as direct flex children of the field,
+   inline with the text query input. */
+.archive-source-tags {
+    display: contents;
+}
+
+/* Selected sub pills share the field's background, so give each a capsule
+   outline. The colour follows the active filter mode (whitelist / blacklist),
+   driven entirely by theme variables. */
+.archive-search-field .sub-tag {
+    border: 1px solid var(--outside);
+    transition: border-color 0.15s ease;
+}
+
+#archive_source_box.whitelist .sub-tag {
+    border-color: var(--green);
+}
+
+#archive_source_box.blacklist .sub-tag {
+    border-color: var(--accent);
+}
+
+/* A focused (keyboard-selected) pill — the next Backspace deletes it. */
+.archive-search-field .sub-tag:focus {
+    outline: none;
+    background: var(--accent);
+    color: #fff;
+}
+
+.archive-search-field .sub-tag:focus .sub-tag-remove {
+    color: #fff;
+}
+
+.archive-source-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--foreground);
+    border: var(--panel-border);
+    border-radius: 5px;
+    box-shadow: var(--shadow);
+    z-index: 20;
+}
+
+#archive_source_box.open .archive-source-dropdown {
+    display: block;
+}
+
+.archive-source-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 11px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.archive-source-option:hover {
+    background: var(--highlighted);
+}
+
+.archive-source-count {
+    opacity: 0.5;
+    font-size: 13px;
+}
+
+.archive-source-empty {
+    padding: 7px 11px;
+    font-size: 13px;
+    opacity: 0.5;
+}
+
+/* Whitelist / blacklist toggle embedded in the search bar, between the field
+   and the submit button. The label stays neutral; only the Lucide icon takes
+   the mode colour so the control blends with the theme instead of shouting. */
+.source-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    background: var(--highlighted);
+    border: none;
+    border-right: 2px var(--outside) solid;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.source-mode-icon {
+    display: none;
+    flex-shrink: 0;
+    transition: color 0.15s ease;
+}
+
+.source-mode-toggle.whitelist .icon-whitelist,
+.source-mode-toggle.blacklist .icon-blacklist {
+    display: block;
+}
+
+.source-mode-toggle.whitelist .icon-whitelist {
+    color: var(--green);
+}
+
+.source-mode-toggle.blacklist .icon-blacklist {
+    color: var(--accent);
+}
+
 #archive-sub-list {
     display: grid;
     grid-template-columns: repeat(2, 1fr);

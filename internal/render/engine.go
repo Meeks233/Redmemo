@@ -166,6 +166,20 @@ type ArchiveAlphaGroup struct {
 	Subs   []ArchiveHubEntry
 }
 
+// ArchiveSearchView holds the local-search form state for the /archive page.
+type ArchiveSearchView struct {
+	Query      string // free-text title query
+	Time       string // "" (any) | "hour" | "day" | "week" | "month" | "year" | "custom"
+	From       string // YYYY-MM-DD, used only when Time == "custom"
+	To         string // YYYY-MM-DD, used only when Time == "custom"
+	Type       string // "" (any) | "nsfw" | "sfw"
+	Media      string // "" (any) | "image" | "video"
+	Source     string // "+"-joined subreddit names; empty = any
+	SourceMode string // "whitelist" (default) | "blacklist"
+	Score      string // raw score threshold the user typed; empty = any
+	ScoreOp    string // "gt" (default) | "lt"
+}
+
 type ArchiveHubPageData struct {
 	BasePage
 	Sort        string // "new", "top", "all"
@@ -173,6 +187,18 @@ type ArchiveHubPageData struct {
 	AlphaGroups []ArchiveAlphaGroup // populated only when Sort == "all"
 	AlphaIndex  []string            // letters present, in display order (A-Z then "#")
 	MinPosts    int                 // threshold used for new/top
+
+	// Local archive search.
+	SearchParams ArchiveSearchView
+	PickerSubs   []SubredditStatView // archived subs (name + count), sorted by count, for the Source picker
+
+	// Populated only when a search is active.
+	Search      bool
+	SearchPosts []reddit.Post
+	SearchTotal int64
+	SearchPage  int
+	SearchPages int
+	SearchQS    string // URL-encoded query string (all filters, no page) for pagination links
 }
 
 type ArchivePageData struct {
