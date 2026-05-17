@@ -114,6 +114,28 @@ func (h *Handler) handleAudioStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"state":%q}`, h.mediaProxy.AudioStatus(upstream))
 }
 
+// handleMediaStatus reports whether a proxied image is cached and ready to
+// serve, for the page's imageReload.js poller. The "path" query param is the
+// image element's own proxy URL (e.g. /img/abc.jpg?width=640). A pending state
+// also kicks a background fetch, so an image that merely failed once gets
+// cached and can be reloaded in place without the viewer refreshing the page.
+func (h *Handler) handleMediaStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+
+	u, err := url.Parse(r.URL.Query().Get("path"))
+	if err != nil {
+		io.WriteString(w, `{"state":"unsupported"}`)
+		return
+	}
+	cdnURL := pathToCDNURL(u.Path, u.RawQuery)
+	if cdnURL == "" {
+		io.WriteString(w, `{"state":"unsupported"}`)
+		return
+	}
+	fmt.Fprintf(w, `{"state":%q}`, h.mediaProxy.MediaStatus(cdnURL))
+}
+
 func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstream string) {
 	req, err := http.NewRequestWithContext(r.Context(), "GET", upstream, nil)
 	if err != nil {

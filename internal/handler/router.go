@@ -115,6 +115,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /videoAutoplay.js", static)
 	mux.Handle("GET /videoPreload.js", static)
 	mux.Handle("GET /lazyMedia.js", static)
+	mux.Handle("GET /imageReload.js", static)
 	mux.Handle("GET /audioSync.js", static)
 	mux.Handle("GET /redditModal.js", static)
 
@@ -161,6 +162,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)
 	mux.HandleFunc("GET /api/audio_status", h.handleAudioStatus)
+	mux.HandleFunc("GET /api/media_status", h.handleMediaStatus)
 
 	// Legacy countdown redirect
 	mux.HandleFunc("GET /countdown", func(w http.ResponseWriter, r *http.Request) {

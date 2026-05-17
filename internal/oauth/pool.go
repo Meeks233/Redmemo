@@ -208,6 +208,20 @@ func (p *Pool) refreshLoop(ctx context.Context) {
 			return
 		}
 
+		// An out-of-band refresh (401 / low_quota) may have installed a fresh
+		// token while we slept. If so, the current token is nowhere near
+		// expiry — skip this tick and recompute the sleep against the new
+		// ExpiresAt, avoiding a needless token mint (extra device ID + UA).
+		p.mu.RLock()
+		var untilExpiry time.Duration
+		if p.active != nil && p.active.StoredToken.ExpiresAt != nil {
+			untilExpiry = time.Until(*p.active.StoredToken.ExpiresAt)
+		}
+		p.mu.RUnlock()
+		if untilExpiry > 150*time.Second {
+			continue
+		}
+
 		log.Printf("oauth: scheduled refresh (pre-expiry)")
 		p.forceRefresh("scheduled")
 	}
@@ -283,6 +297,15 @@ func (p *Pool) GetBestToken() *ManagedToken {
 	}
 
 	now := time.Now()
+
+	// Reject an expired access token instead of handing it out for a request
+	// that would only 401. Trigger a refresh so the next caller recovers.
+	if exp := p.active.StoredToken.ExpiresAt; exp != nil && now.After(*exp) {
+		log.Printf("oauth: active token expired, triggering refresh")
+		go p.forceRefresh("token_expired")
+		return nil
+	}
+
 	if now.After(p.active.RateResetAt) {
 		p.active.RateRemaining = 99
 		p.active.RateResetAt = now.Add(10 * time.Minute)
@@ -461,6 +484,10 @@ func (p *Pool) HasAvailableTokens() bool {
 	defer p.mu.RUnlock()
 
 	if p.active == nil {
+		return false
+	}
+	// An expired access token is not usable regardless of remaining quota.
+	if exp := p.active.StoredToken.ExpiresAt; exp != nil && time.Now().After(*exp) {
 		return false
 	}
 	if p.active.RateRemaining > 0 {

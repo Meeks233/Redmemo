@@ -319,6 +319,8 @@ type mockDownloader struct {
 	mu         sync.Mutex
 	calls      []string
 	err        error
+	cached       map[string]bool
+	fetching     map[string]bool
 	failedURLs   []string
 	remuxCalls   []string
 	remuxErr     error
@@ -330,6 +332,20 @@ func (m *mockDownloader) DownloadMedia(_ context.Context, url string) error {
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, url)
 	return m.err
+}
+
+// cached / fetching let a test drive L2's skip-and-freeze coordination; an
+// empty map keeps the default (download everything) behaviour.
+func (m *mockDownloader) IsCached(url string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cached[url]
+}
+
+func (m *mockDownloader) IsFetching(url string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.fetching[url]
 }
 
 func (m *mockDownloader) ListFailedAudio(limit int) ([]string, error) {

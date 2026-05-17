@@ -19,6 +19,12 @@ import (
 
 type MediaDownloader interface {
 	DownloadMedia(ctx context.Context, url string) error
+	// IsCached reports whether the media at url is already on disk; IsFetching
+	// whether an on-demand (foreground) download for it is in flight right now.
+	// L2 uses them to skip media the foreground path already has, and to freeze
+	// a duplicate task while the foreground path is still fetching it.
+	IsCached(url string) bool
+	IsFetching(url string) bool
 	// ListFailedAudio returns v.redd.it URLs whose audio mux exhausted its
 	// retry budget, oldest first. RetryMuxAudio re-attempts one. Together they
 	// back the L5 background audio-remux layer.
@@ -568,6 +574,21 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 // L2: Media download — submits CDN download tasks through the NP queue
 // ---------------------------------------------------------------------------
 
+// l2GraceWindow is how long L2 waits before re-checking media it froze because
+// the on-demand (foreground) path was already fetching it. After the wait, a
+// frozen item that became cached is dropped as a cancelled duplicate; one still
+// missing is downloaded by L2 itself.
+const l2GraceWindow = 35 * time.Second
+
+// frozenPost is an L2 post with media that was being fetched on-demand when L2
+// reached it. Its frozen items are re-checked after l2GraceWindow.
+type frozenPost struct {
+	urlPath string
+	postID  string
+	items   []mediaItem
+	okSoFar bool // whether the post's non-frozen items all downloaded cleanly
+}
+
 func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 	if s.postStore == nil || s.media == nil {
 		return nil
@@ -588,6 +609,8 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 	s.Events.Addf(LevelInfo, "L2", "r/%s: %d posts need media -- submitting to NP queue", sub, len(pending))
 
 	completed := 0
+	var frozen []frozenPost
+
 	for _, sp := range pending {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -605,33 +628,78 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 			continue
 		}
 
-		urlPath := sp.URLPath
-		postID := sp.PostID
 		allOK := true
-
-		for _, item := range mediaItems {
-			mi := item
-			var dlErr error
-			label := fmt.Sprintf("L2 r/%s post %s %s", sub, postID, mi.Kind)
-			err := s.submit(ctx, label, false, func(ctx context.Context) {
-				dlErr = s.media.DownloadMedia(ctx, mi.URL)
-				if dlErr != nil {
-					s.Events.Addf(LevelWarn, "L2", "r/%s post %s: %s download failed: %v", sub, postID, mi.Kind, dlErr)
+		var frozenItems []mediaItem
+		for _, mi := range mediaItems {
+			switch {
+			case s.media.IsCached(mi.URL):
+				// Already on disk — the on-demand path (or an earlier round)
+				// got it. Nothing to do.
+			case s.media.IsFetching(mi.URL):
+				// The on-demand (HR/foreground) path is fetching it right now.
+				// Freeze L2's duplicate task: defer it to the grace-window
+				// re-check instead of racing the foreground fetch.
+				frozenItems = append(frozenItems, mi)
+			default:
+				ok, ctxErr := s.l2Download(ctx, sub, sp.PostID, mi)
+				if ctxErr != nil {
+					return ctxErr
 				}
-			})
-			if err != nil {
-				return err
-			}
-			if dlErr != nil {
-				allOK = false
+				if !ok {
+					allOK = false
+				}
 			}
 		}
 
-		if allOK {
-			s.postStore.SetMediaDone(urlPath)
+		switch {
+		case len(frozenItems) > 0:
+			frozen = append(frozen, frozenPost{
+				urlPath: sp.URLPath,
+				postID:  sp.PostID,
+				items:   frozenItems,
+				okSoFar: allOK,
+			})
+		case allOK:
+			s.postStore.SetMediaDone(sp.URLPath)
 			completed++
-			kinds := mediaKindSummary(mediaItems)
-			s.Events.Addf(LevelOK, "L2", "r/%s post %s: %d media done (%s)", sub, postID, len(mediaItems), kinds)
+			s.Events.Addf(LevelOK, "L2", "r/%s post %s: %d media done (%s)",
+				sub, sp.PostID, len(mediaItems), mediaKindSummary(mediaItems))
+		}
+	}
+
+	// Frozen posts: wait out the grace window, then re-check. Media the
+	// on-demand path finished in the meantime is a cancelled duplicate; media
+	// it did not get, L2 downloads itself.
+	if len(frozen) > 0 {
+		s.Events.Addf(LevelInfo, "L2", "r/%s: %d posts frozen (media being fetched on-demand) -- rechecking in %s",
+			sub, len(frozen), formatDur(l2GraceWindow))
+		s.setL2Status("frozen (on-demand active)", sub, len(frozen))
+		if err := sleep(ctx, l2GraceWindow); err != nil {
+			return err
+		}
+		for _, fp := range frozen {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			allOK := fp.okSoFar
+			for _, mi := range fp.items {
+				if s.media.IsCached(mi.URL) {
+					s.Events.Addf(LevelOK, "L2", "r/%s post %s: %s fetched on-demand -- duplicate cancelled",
+						sub, fp.postID, mi.Kind)
+					continue
+				}
+				ok, ctxErr := s.l2Download(ctx, sub, fp.postID, mi)
+				if ctxErr != nil {
+					return ctxErr
+				}
+				if !ok {
+					allOK = false
+				}
+			}
+			if allOK {
+				s.postStore.SetMediaDone(fp.urlPath)
+				completed++
+			}
 		}
 	}
 
@@ -640,6 +708,23 @@ func (s *Scheduler) submitL2(ctx context.Context, sub string) error {
 	}
 	s.setL2Status("idle", "", 0)
 	return nil
+}
+
+// l2Download submits one media-download task through the NP queue. It returns
+// whether the download succeeded; a non-nil error means the context was
+// cancelled and the caller should unwind.
+func (s *Scheduler) l2Download(ctx context.Context, sub, postID string, mi mediaItem) (bool, error) {
+	var dlErr error
+	label := fmt.Sprintf("L2 r/%s post %s %s", sub, postID, mi.Kind)
+	if err := s.submit(ctx, label, false, func(ctx context.Context) {
+		dlErr = s.media.DownloadMedia(ctx, mi.URL)
+		if dlErr != nil {
+			s.Events.Addf(LevelWarn, "L2", "r/%s post %s: %s download failed: %v", sub, postID, mi.Kind, dlErr)
+		}
+	}); err != nil {
+		return false, err
+	}
+	return dlErr == nil, nil
 }
 
 // ---------------------------------------------------------------------------
