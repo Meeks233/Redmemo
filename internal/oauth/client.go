@@ -7,9 +7,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/config"
+	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/transport"
 	"github.com/redmemo/redmemo/internal/useragent"
 )
@@ -33,34 +35,63 @@ type TokenResult struct {
 type Client struct {
 	httpClient *http.Client
 	uaPool     *useragent.Pool
+
+	mu      sync.RWMutex
+	profile *store.DeviceProfile
 }
 
-func NewClient(uaPool *useragent.Pool) *Client {
+func NewClient(uaPool *useragent.Pool, profile *store.DeviceProfile) *Client {
 	return &Client{
 		httpClient: transport.NewSpoofedClient(authTimeout),
 		uaPool:     uaPool,
+		profile:    profile,
 	}
 }
 
-func (c *Client) Authenticate(cfg config.OAuthTokenConfig) (*TokenResult, error) {
+// DeviceIdentity returns a SpoofIdentity built from the pinned device profile.
+// A Client constructed without a profile (e.g. in tests) gets a generated one.
+func (c *Client) DeviceIdentity() SpoofIdentity {
+	c.mu.RLock()
+	p := c.profile
+	c.mu.RUnlock()
+	if p != nil {
+		return IdentityFromProfile(p)
+	}
+	return GenerateIdentity()
+}
+
+// Profile returns a copy of the current pinned device profile, or nil if the
+// Client was constructed without one.
+func (c *Client) Profile() *store.DeviceProfile {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.profile == nil {
+		return nil
+	}
+	cp := *c.profile
+	return &cp
+}
+
+// SetProfile swaps in a rotated device profile; subsequent auth requests mint
+// tokens with the new version identity.
+func (c *Client) SetProfile(p *store.DeviceProfile) {
+	c.mu.Lock()
+	c.profile = p
+	c.mu.Unlock()
+}
+
+// Authenticate mints a fresh access token. mobile_spoof is the only active
+// backend; the generic_web (browser) path is intentionally decoupled — see
+// genericWebAuth, kept as standby code for a future browser-emulation backend.
+func (c *Client) Authenticate(_ config.OAuthTokenConfig) (*TokenResult, error) {
 	var lastErr error
 
-	if cfg.Backend == "" || cfg.Backend == "mobile_spoof" {
-		for i := range maxRetries {
-			result, err := c.mobileSpoofAuth()
-			if err == nil {
-				return result, nil
-			}
-			lastErr = fmt.Errorf("mobile_spoof attempt %d: %w", i+1, err)
-		}
-	}
-
 	for i := range maxRetries {
-		result, err := c.genericWebAuth()
+		result, err := c.mobileSpoofAuth()
 		if err == nil {
 			return result, nil
 		}
-		lastErr = fmt.Errorf("generic_web attempt %d: %w", i+1, err)
+		lastErr = fmt.Errorf("mobile_spoof attempt %d: %w", i+1, err)
 	}
 
 	return nil, fmt.Errorf("all auth attempts failed: %w", lastErr)
@@ -71,7 +102,7 @@ func (c *Client) Refresh(cfg config.OAuthTokenConfig) (*TokenResult, error) {
 }
 
 func (c *Client) mobileSpoofAuth() (*TokenResult, error) {
-	identity := GenerateIdentity()
+	identity := c.DeviceIdentity()
 
 	body := `{"scopes":["*","email","pii"]}`
 	req, err := http.NewRequest("POST", mobileEndpoint, strings.NewReader(body))

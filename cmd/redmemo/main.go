@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
@@ -22,6 +23,7 @@ import (
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/useragent"
+	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
 func main() {
@@ -58,6 +60,7 @@ func main() {
 	commentStore := store.NewCommentStore(db)
 	mediaIndexStore := store.NewMediaIndexStore(db)
 	tokenStore := store.NewTokenStore(db)
+	deviceProfileStore := store.NewDeviceProfileStore(db)
 	subStore := store.NewSubredditStore(db)
 	subIconStore := store.NewSubIconStore(db)
 	settingsStore := store.NewSettingsStore(db)
@@ -104,8 +107,15 @@ func main() {
 	uaPool := useragent.NewPool(settingsStore)
 
 	// 8. Init OAuth
-	oauthClient := oauth.NewClient(uaPool)
-	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, redisCache, uaPool)
+	deviceProfile, err := oauth.ResolveDeviceProfile(deviceProfileStore)
+	if err != nil {
+		log.Fatalf("oauth: resolve device profile: %v", err)
+	}
+	log.Printf("oauth: pinned device profile (android=%d, app=%s, device=%s)",
+		deviceProfile.AndroidVersion, deviceProfile.AppVersion, deviceProfile.DeviceID)
+	oauthClient := oauth.NewClient(uaPool, deviceProfile)
+	versionTracker := versionintel.NewTracker(&http.Client{Timeout: 15 * time.Second})
+	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache, uaPool)
 
 	// 9. Init Reddit clients
 	redditAdapter := &oauthAdapter{holder: oauthHolder}

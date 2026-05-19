@@ -246,7 +246,9 @@ func TestForceRefresh_FailureIncrementsConsecutive(t *testing.T) {
 	}
 }
 
-func TestForceRefresh_SwitchesBackendAfterMaxFails(t *testing.T) {
+// The generic_web auto-switch is removed: repeated mobile_spoof failures keep
+// the backend on mobile_spoof and just accumulate the consecutive-fail count.
+func TestForceRefresh_DoesNotSwitchBackend(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -255,15 +257,15 @@ func TestForceRefresh_SwitchesBackendAfterMaxFails(t *testing.T) {
 	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
 	p.client = newClientToServer(t, srv)
 	p.backend = "mobile_spoof"
-	p.consecutiveFail = maxConsecutiveFails - 1 // one more failure trips the switch
+	p.consecutiveFail = maxConsecutiveFails - 1
 
 	p.forceRefresh("test")
 
-	if p.backend != "generic_web" {
-		t.Errorf("backend = %q, want generic_web after %d consecutive failures", p.backend, maxConsecutiveFails)
+	if p.backend != "mobile_spoof" {
+		t.Errorf("backend = %q, want mobile_spoof (generic_web auto-switch removed)", p.backend)
 	}
-	if p.consecutiveFail != 0 {
-		t.Errorf("consecutiveFail = %d, want 0 (reset on backend switch)", p.consecutiveFail)
+	if p.consecutiveFail != maxConsecutiveFails {
+		t.Errorf("consecutiveFail = %d, want %d", p.consecutiveFail, maxConsecutiveFails)
 	}
 }
 

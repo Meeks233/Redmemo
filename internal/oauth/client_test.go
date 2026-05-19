@@ -82,7 +82,9 @@ func TestAuthenticate_MobileSpoofSuccess(t *testing.T) {
 	}
 }
 
-func TestAuthenticate_FallsThroughToGenericWeb(t *testing.T) {
+// generic_web is decoupled: a failing mobile_spoof must NOT fall through to
+// the browser-spoof endpoint. It exhausts the mobile retry budget and errors.
+func TestAuthenticate_NoGenericWebFallthrough(t *testing.T) {
 	var mobileHits, genericHits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -99,18 +101,15 @@ func TestAuthenticate_FallsThroughToGenericWeb(t *testing.T) {
 	defer srv.Close()
 
 	c := newClientToServer(t, srv)
-	res, err := c.Authenticate(config.OAuthTokenConfig{Backend: "mobile_spoof"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.AccessToken != "web-tok" {
-		t.Errorf("AccessToken = %q, want web-tok (generic fallback)", res.AccessToken)
+	_, err := c.Authenticate(config.OAuthTokenConfig{Backend: "mobile_spoof"})
+	if err == nil {
+		t.Fatal("expected an error — generic_web fallthrough is decoupled")
 	}
 	if mobileHits != maxRetries {
 		t.Errorf("mobile attempts = %d, want %d (full retry budget)", mobileHits, maxRetries)
 	}
-	if genericHits == 0 {
-		t.Error("generic web endpoint was never reached")
+	if genericHits != 0 {
+		t.Errorf("generic web endpoint hit %d times, want 0 (decoupled)", genericHits)
 	}
 }
 

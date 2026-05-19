@@ -15,6 +15,7 @@ import (
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/useragent"
+	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
 type ManagedToken struct {
@@ -25,15 +26,17 @@ type ManagedToken struct {
 }
 
 type TokenHolder struct {
-	mu     sync.RWMutex
-	active *ManagedToken
-	client *Client
-	store  *store.TokenStore
-	cache  *cache.Cache
-	cfg    config.OAuthConfig
-	uaPool *useragent.Pool
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu          sync.RWMutex
+	active      *ManagedToken
+	client      *Client
+	store       *store.TokenStore
+	deviceStore *store.DeviceProfileStore
+	tracker     *versionintel.Tracker
+	cache       *cache.Cache
+	cfg         config.OAuthConfig
+	uaPool      *useragent.Pool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 
 	refreshMu       sync.Mutex
 	consecutiveFail int
@@ -46,14 +49,16 @@ const (
 	maxConsecutiveFails = 5
 )
 
-func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache, uaPool *useragent.Pool) *TokenHolder {
+func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache, uaPool *useragent.Pool) *TokenHolder {
 	return &TokenHolder{
-		client:  client,
-		store:   tokenStore,
-		cache:   c,
-		cfg:     cfg,
-		uaPool:  uaPool,
-		backend: "mobile_spoof",
+		client:      client,
+		store:       tokenStore,
+		deviceStore: deviceStore,
+		tracker:     tracker,
+		cache:       c,
+		cfg:         cfg,
+		uaPool:      uaPool,
+		backend:     "mobile_spoof",
 	}
 }
 
@@ -251,21 +256,48 @@ func (p *TokenHolder) forceRefresh(reason string) {
 	}
 	p.mu.RUnlock()
 
+	// Advance the long-term version rotation before minting a token, so the
+	// fresh token's spoofed identity tracks the real world. Blocking and
+	// bounded — failures degrade gracefully (see versionintel.Tracker).
+	p.rotateDeviceVersion()
+
 	result, err := p.client.Authenticate(tcfg)
 	if err != nil {
 		p.consecutiveFail++
 		log.Printf("oauth: refresh failed (%s): %v (consecutive=%d)", backend, err, p.consecutiveFail)
-
-		if p.consecutiveFail >= maxConsecutiveFails && backend == "mobile_spoof" {
-			log.Printf("oauth: mobile_spoof failed %d times, switching to generic_web", p.consecutiveFail)
-			p.backend = "generic_web"
-			p.consecutiveFail = 0
-			p.lastRefreshAt = time.Now()
-		}
+		// generic_web auto-switch is intentionally removed: mobile_spoof is the
+		// only active backend, so a failed refresh just retries mobile_spoof.
 		return
 	}
 
 	p.installToken(result, tcfg.ClientID, tcfg.ClientSecret, backend)
+}
+
+// rotateDeviceVersion runs the version-intel rotation gates and persists the
+// result. Most calls do no network work (the OS poll is monthly and the APK
+// rotation is gated by a token-refresh counter); when a gate trips it blocks
+// on a bounded external fetch. The updated profile is always persisted — even
+// a no-op call advances the rotation counters — and pushed into the auth
+// client so the next token is minted with the current identity.
+func (p *TokenHolder) rotateDeviceVersion() {
+	if p.tracker == nil || p.deviceStore == nil || p.client == nil {
+		return
+	}
+	current := p.client.Profile()
+	if current == nil {
+		return
+	}
+
+	updated, changed := p.tracker.Rotate(context.Background(), *current)
+	if err := p.deviceStore.Update(&updated); err != nil {
+		log.Printf("oauth: persist rotated device profile: %v", err)
+		return
+	}
+	p.client.SetProfile(&updated)
+	if changed {
+		log.Printf("oauth: device identity rotated (android=%d, app=%s, build=%s)",
+			updated.AndroidVersion, updated.AppVersion, updated.Build)
+	}
 }
 
 // NotifyUnauthorized is called when a 401 is received. Triggers re-auth.
@@ -532,9 +564,12 @@ func (p *TokenHolder) restoreIdentity(st *store.StoredToken) SpoofIdentity {
 		}
 	}
 
-	// Fallback: generate new identity based on backend.
-	log.Printf("oauth: no persisted identity for token %d, generating new", st.ID)
+	// Fallback: no persisted headers (token row predates identity persistence).
+	log.Printf("oauth: no persisted identity for token %d, using pinned device profile", st.ID)
 	if st.Backend == "mobile_spoof" || st.Backend == "" {
+		if p.client != nil {
+			return p.client.DeviceIdentity()
+		}
 		return GenerateIdentity()
 	}
 	return GenerateWebIdentity(p.uaPool)

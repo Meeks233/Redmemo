@@ -175,6 +175,51 @@ var migrations = []string{
 	 ALTER TABLE media_index DROP CONSTRAINT IF EXISTS media_index_audio_state_check;
 	 ALTER TABLE media_index ADD CONSTRAINT media_index_audio_state_check
 		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent','failed','abandoned'));`,
+
+	// v16: pinned device profile — a single, frozen Android device identity
+	// (device_id, UA, app version) reused for every mobile_spoof auth so the
+	// spoofed device fingerprint never drifts across token refreshes. The
+	// id = 1 CHECK enforces exactly one row.
+	`CREATE TABLE IF NOT EXISTS device_profile (
+		id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+		device_id       TEXT NOT NULL,
+		user_agent      TEXT NOT NULL,
+		android_version INTEGER NOT NULL,
+		app_version     TEXT NOT NULL,
+		build           TEXT NOT NULL,
+		created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+
+	// v17: long-term version rotation state on the (single) device_profile row.
+	// os_next_check_at gates the monthly StatCounter poll; os_adopt_delay_days
+	// is the persisted random 2-6 month delay applied to predicted Android
+	// releases; apk_refresh_remaining counts down per token refresh and triggers
+	// an app-version rotation when it hits zero. *_at columns are audit records.
+	`ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS os_next_check_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS os_adopt_delay_days INTEGER     NOT NULL DEFAULT 120;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS os_upgraded_at      TIMESTAMPTZ;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS apk_refresh_remaining INTEGER   NOT NULL DEFAULT 12;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS apk_checked_at      TIMESTAMPTZ;`,
+
+	// v18: version rotation is now pure offline derivation bound to each token
+	// mint (no StatCounter poll, no APKMirror, no refresh counter). Drop the
+	// columns that backed the old gated design — see docs/version-tracking.md.
+	`ALTER TABLE device_profile DROP COLUMN IF EXISTS os_next_check_at;
+	 ALTER TABLE device_profile DROP COLUMN IF EXISTS apk_refresh_remaining;
+	 ALTER TABLE device_profile DROP COLUMN IF EXISTS apk_checked_at;`,
+
+	// v19: two-tier rotation. The Android version is no longer derived: it is
+	// fixed for a device's life and only changes at a "major rotation" — every
+	// ~3 years, modelling the user replacing their phone (new device_id + new
+	// OS version). next_android_version is the version a monthly StatCounter
+	// poll has scheduled for that next rotation. device_born_at /
+	// device_lifespan_days track the current device's lifecycle.
+	`ALTER TABLE device_profile DROP COLUMN IF EXISTS os_adopt_delay_days;
+	 ALTER TABLE device_profile DROP COLUMN IF EXISTS os_upgraded_at;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS device_born_at       TIMESTAMPTZ NOT NULL DEFAULT NOW();
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS device_lifespan_days INTEGER     NOT NULL DEFAULT 1095;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS next_android_version INTEGER     NOT NULL DEFAULT 0;
+	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS os_next_check_at     TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
 }
 
 func RunMigrations(db *sql.DB) error {
