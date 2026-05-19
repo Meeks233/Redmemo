@@ -173,7 +173,7 @@ func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	debug := prefs.EnableDebug == "on"
 
-	reset, _ := h.oauthPool.EarliestReset()
+	reset, _ := h.oauthHolder.EarliestReset()
 	reason := q.Get("reason")
 
 	// Debug mode: query params are authoritative for previewing the page —
@@ -195,7 +195,7 @@ func (h *Handler) handleFuckReddit(w http.ResponseWriter, r *http.Request) {
 				reason = r2
 			}
 		}
-		if reason == "" && !h.oauthPool.HasAvailableTokens() {
+		if reason == "" && !h.oauthHolder.HasAvailableTokens() {
 			reason = "quota_exhausted"
 		}
 		// For HR cooldowns, override reset with the actual cooldown TTL —
@@ -244,8 +244,8 @@ func validateFromPath(from string) string {
 
 
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
-	budget, _ := h.oauthPool.RemainingBudget(r.Context())
-	reset, window := h.oauthPool.EarliestReset()
+	budget, _ := h.oauthHolder.RemainingBudget(r.Context())
+	reset, window := h.oauthHolder.EarliestReset()
 
 	// HR cooldown (most-severe active tier).
 	hrReset := 0
@@ -267,7 +267,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if hrReason != "" {
 		currentReason = hrReason
 		currentReset = hrReset
-	} else if !h.oauthPool.HasAvailableTokens() {
+	} else if !h.oauthHolder.HasAvailableTokens() {
 		currentReason = "quota_exhausted"
 		currentReset = reset
 	}
@@ -288,7 +288,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	var details []string
 
 	// OAuth tokens → structured view
-	statuses := h.oauthPool.TokenStatuses()
+	statuses := h.oauthHolder.TokenStatuses()
 	tokenViews := make([]render.TokenView, len(statuses))
 	for i, ts := range statuses {
 		kind := "static"
@@ -350,7 +350,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	details = append(details, fmt.Sprintf("Redis: %s", h.cfg.Redis.Addr))
 
 	// Total token budget
-	budget, _ := h.oauthPool.RemainingBudget(r.Context())
+	budget, _ := h.oauthHolder.RemainingBudget(r.Context())
 
 	var prefetchEvents []render.PrefetchEventView
 	var prefetchStatus render.PrefetchStatusView

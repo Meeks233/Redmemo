@@ -46,7 +46,7 @@ func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
 	var posts []reddit.Post
 	var err error
 
-	if h.oauthPool.HasAvailableTokens() {
+	if h.oauthHolder.HasAvailableTokens() {
 		_, posts, _, err = h.redditCli.FetchUser(ctx, name, listing, sort, after)
 	} else {
 		_, posts, _, err = h.publicCli.FetchUser(ctx, name, listing, sort, after)

@@ -13,38 +13,38 @@ import (
 
 // --- mock TokenProvider ---
 
-type mockPool struct {
+type mockTokenProvider struct {
 	mu              sync.Mutex
 	token           *TokenInfo
 	completeCalls   []int
 	unauthorizedCnt int
 }
 
-func (m *mockPool) GetBestToken() *TokenInfo {
+func (m *mockTokenProvider) Token() *TokenInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.token
 }
 
-func (m *mockPool) OnRequestComplete(tokenID int, _ *http.Response) {
+func (m *mockTokenProvider) OnRequestComplete(tokenID int, _ *http.Response) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.completeCalls = append(m.completeCalls, tokenID)
 }
 
-func (m *mockPool) NotifyUnauthorized() {
+func (m *mockTokenProvider) NotifyUnauthorized() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.unauthorizedCnt++
 }
 
-func (m *mockPool) completed() []int {
+func (m *mockTokenProvider) completed() []int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]int(nil), m.completeCalls...)
 }
 
-func (m *mockPool) unauthorized() int {
+func (m *mockTokenProvider) unauthorized() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.unauthorizedCnt
@@ -54,8 +54,10 @@ func defaultToken() *TokenInfo {
 	return &TokenInfo{
 		ID:          7,
 		AccessToken: "test-access-token",
-		UserAgent:   "test-ua/1.0",
-		Headers:     map[string]string{"X-Test-Extra": "yes"},
+		Headers: map[string]string{
+			"User-Agent":   "test-ua/1.0",
+			"X-Test-Extra": "yes",
+		},
 	}
 }
 
@@ -73,8 +75,8 @@ func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 // newTestClient builds a Client wired to a test server. The Client struct is
-// constructed directly (in-package) so no real OAuth pool or network is used.
-func newTestClient(t *testing.T, pool TokenProvider, handler http.Handler) *Client {
+// constructed directly (in-package) so no real OAuth tokens or network is used.
+func newTestClient(t *testing.T, tokens TokenProvider, handler http.Handler) *Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -91,7 +93,7 @@ func newTestClient(t *testing.T, pool TokenProvider, handler http.Handler) *Clie
 		},
 	}
 	return &Client{
-		pool:       pool,
+		tokens:     tokens,
 		httpClient: httpClient,
 		etags:      newETagCache(2000),
 	}
@@ -127,9 +129,9 @@ func TestCheckAPIError(t *testing.T) {
 // --- doRequest: token handling ---
 
 func TestDoRequest_NoToken(t *testing.T) {
-	pool := &mockPool{token: nil}
+	tokens := &mockTokenProvider{token: nil}
 	// Handler must never be reached.
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("server should not be hit when no token is available")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -138,15 +140,15 @@ func TestDoRequest_NoToken(t *testing.T) {
 	if err != ErrNoTokenAvailable {
 		t.Fatalf("err = %v, want ErrNoTokenAvailable", err)
 	}
-	if len(pool.completed()) != 0 {
-		t.Errorf("OnRequestComplete called %d times, want 0", len(pool.completed()))
+	if len(tokens.completed()) != 0 {
+		t.Errorf("OnRequestComplete called %d times, want 0", len(tokens.completed()))
 	}
 }
 
 func TestDoRequest_SetsAuthHeadersAndReportsCompletion(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	var gotAuth, gotUA, gotCookie, gotExtra string
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotUA = r.Header.Get("User-Agent")
 		gotCookie = r.Header.Get("Cookie")
@@ -173,7 +175,7 @@ func TestDoRequest_SetsAuthHeadersAndReportsCompletion(t *testing.T) {
 	if gotExtra != "yes" {
 		t.Errorf("custom token header X-Test-Extra = %q, want yes", gotExtra)
 	}
-	if calls := pool.completed(); len(calls) != 1 || calls[0] != 7 {
+	if calls := tokens.completed(); len(calls) != 1 || calls[0] != 7 {
 		t.Errorf("OnRequestComplete calls = %v, want [7]", calls)
 	}
 }
@@ -181,8 +183,8 @@ func TestDoRequest_SetsAuthHeadersAndReportsCompletion(t *testing.T) {
 // --- doRequest: error status mapping ---
 
 func TestDoRequest_Unauthorized401(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"message":"Unauthorized"}`))
 	}))
@@ -191,14 +193,14 @@ func TestDoRequest_Unauthorized401(t *testing.T) {
 	if err != ErrUnauthorized {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
-	if pool.unauthorized() != 1 {
-		t.Errorf("NotifyUnauthorized called %d times, want 1", pool.unauthorized())
+	if tokens.unauthorized() != 1 {
+		t.Errorf("NotifyUnauthorized called %d times, want 1", tokens.unauthorized())
 	}
 }
 
 func TestDoRequest_RateLimited429(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"message":"Too Many Requests"}`))
 	}))
@@ -210,8 +212,8 @@ func TestDoRequest_RateLimited429(t *testing.T) {
 }
 
 func TestDoRequest_RateLimited403WithRetryAfter(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "120")
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte(`{"message":"blocked"}`))
@@ -224,8 +226,8 @@ func TestDoRequest_RateLimited403WithRetryAfter(t *testing.T) {
 }
 
 func TestDoRequest_EmptyBodyTreatedAsRateLimited(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK) // 200 but no body
 	}))
 
@@ -236,8 +238,8 @@ func TestDoRequest_EmptyBodyTreatedAsRateLimited(t *testing.T) {
 }
 
 func TestDoRequest_APIErrorBody(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{"reason":"private","kind":"t5"}`))
 	}))
 
@@ -250,12 +252,12 @@ func TestDoRequest_APIErrorBody(t *testing.T) {
 // --- doRequest: ETag conditional requests ---
 
 func TestDoRequest_ETagConditional(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	const etag = `"snapshot-v1"`
 	const payload = `{"kind":"Listing","data":{"children":[]}}`
 
 	var hits int
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -291,10 +293,10 @@ func TestDoRequest_ETagConditional(t *testing.T) {
 // --- doRequest: redirect following ---
 
 func TestDoRequest_FollowsRedirect(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	const payload = `{"kind":"Listing","data":{"children":[]}}`
 
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/r/oldname/hot.json":
 			http.Redirect(w, r, "/r/newname/hot.json", http.StatusMovedPermanently)
@@ -317,7 +319,7 @@ func TestDoRequest_FollowsRedirect(t *testing.T) {
 		t.Errorf("body after redirect = %q", body)
 	}
 	// One OnRequestComplete per hop (redirect + final).
-	if calls := pool.completed(); len(calls) != 2 {
+	if calls := tokens.completed(); len(calls) != 2 {
 		t.Errorf("OnRequestComplete calls = %v, want 2 hops", calls)
 	}
 }
@@ -325,12 +327,12 @@ func TestDoRequest_FollowsRedirect(t *testing.T) {
 // --- high-level fetch helpers ---
 
 func TestFetchSubreddit_Success(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	listing := `{"kind":"Listing","data":{"before":null,"after":"t3_next","children":[
 		{"kind":"t3","data":{"id":"p1","title":"Hello","subreddit":"golang","is_self":true,"score":5,"created_utc":1700000000}}
 	]}}`
 	var gotPath string
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path + "?" + r.URL.RawQuery
 		w.Write([]byte(listing))
 	}))
@@ -351,8 +353,8 @@ func TestFetchSubreddit_Success(t *testing.T) {
 }
 
 func TestFetchSubreddit_PropagatesError(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"message":"slow down"}`))
 	}))
@@ -366,8 +368,8 @@ func TestFetchSubreddit_PropagatesError(t *testing.T) {
 // --- boundary tests ---
 
 func TestDoRequest_ContextCancelled(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(300 * time.Millisecond)
 		w.Write([]byte(`{}`))
 	}))
@@ -382,9 +384,9 @@ func TestDoRequest_ContextCancelled(t *testing.T) {
 }
 
 func TestDoRequest_MultiHopRedirect(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	const payload = `{"kind":"Listing","data":{"children":[]}}`
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/hop0.json":
 			http.Redirect(w, r, "/hop1.json", http.StatusFound)
@@ -406,7 +408,7 @@ func TestDoRequest_MultiHopRedirect(t *testing.T) {
 		t.Errorf("body after 3-hop redirect = %q", body)
 	}
 	// One completion callback per hop (hop0, hop1, hop2).
-	if calls := pool.completed(); len(calls) != 3 {
+	if calls := tokens.completed(); len(calls) != 3 {
 		t.Errorf("OnRequestComplete calls = %v, want 3 hops", calls)
 	}
 }
@@ -415,9 +417,9 @@ func TestDoRequest_MultiHopRedirect(t *testing.T) {
 // overflow: a server that endlessly redirects to itself must yield an error,
 // not unbounded recursion.
 func TestDoRequest_RedirectLoopIsBounded(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	var hits int
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		http.Redirect(w, r, "/loop.json", http.StatusFound)
 	}))
@@ -440,10 +442,10 @@ func TestDoRequest_RedirectLoopIsBounded(t *testing.T) {
 // cache and token-completion paths. All traffic stays on the local test
 // server — no requests reach Reddit.
 func TestClient_ConcurrentFetch(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
+	tokens := &mockTokenProvider{token: defaultToken()}
 	const etag = `"snapshot"`
 	const listing = `{"kind":"Listing","data":{"before":null,"after":null,"children":[]}}`
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -472,14 +474,14 @@ func TestClient_ConcurrentFetch(t *testing.T) {
 	}
 	wg.Wait()
 
-	if n := len(pool.completed()); n != goroutines*iters {
+	if n := len(tokens.completed()); n != goroutines*iters {
 		t.Errorf("OnRequestComplete calls = %d, want %d", n, goroutines*iters)
 	}
 }
 
 func TestProbe_ParsesRateLimitHeaders(t *testing.T) {
-	pool := &mockPool{token: defaultToken()}
-	c := newTestClient(t, pool, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	tokens := &mockTokenProvider{token: defaultToken()}
+	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Ratelimit-Remaining", "297.0")
 		w.Header().Set("X-Ratelimit-Reset", "412.0")
 		w.Header().Set("X-Ratelimit-Used", "303")

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -45,17 +44,6 @@ func NewClient(uaPool *useragent.Pool) *Client {
 
 func (c *Client) Authenticate(cfg config.OAuthTokenConfig) (*TokenResult, error) {
 	var lastErr error
-
-	if cfg.Backend == "password" {
-		for i := range maxRetries {
-			result, err := c.passwordAuth(cfg)
-			if err == nil {
-				return result, nil
-			}
-			lastErr = fmt.Errorf("password attempt %d: %w", i+1, err)
-		}
-		return nil, fmt.Errorf("all auth attempts failed: %w", lastErr)
-	}
 
 	if cfg.Backend == "" || cfg.Backend == "mobile_spoof" {
 		for i := range maxRetries {
@@ -202,64 +190,6 @@ func (c *Client) genericWebAuth() (*TokenResult, error) {
 		ExpiresIn:   parsed.ExpiresIn,
 		Headers:     headers,
 		Identity:    identity,
-	}, nil
-}
-
-func (c *Client) passwordAuth(cfg config.OAuthTokenConfig) (*TokenResult, error) {
-	form := url.Values{
-		"grant_type": {"password"},
-		"username":   {cfg.Username},
-		"password":   {cfg.Password},
-	}
-
-	req, err := http.NewRequest("POST", genericEndpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-
-	auth := "Basic " + basicAuth(cfg.ClientID, cfg.ClientSecret)
-	req.Header.Set("Authorization", auth)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", fmt.Sprintf("RedMemo:redmemo:v1.0.0 (by /u/%s)", cfg.Username))
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("password auth: status %d: %s", resp.StatusCode, truncate(data, 200))
-	}
-
-	var parsed struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int64  `json:"expires_in"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, fmt.Errorf("password auth: parse response: %w", err)
-	}
-	if parsed.AccessToken == "" {
-		return nil, fmt.Errorf("password auth: empty access_token in response: %s", truncate(data, 200))
-	}
-
-	ua := fmt.Sprintf("RedMemo:redmemo:v1.0.0 (by /u/%s)", cfg.Username)
-	return &TokenResult{
-		AccessToken: parsed.AccessToken,
-		ExpiresIn:   parsed.ExpiresIn,
-		Headers: map[string]string{
-			"User-Agent": ua,
-		},
-		Identity: SpoofIdentity{
-			UserAgent: ua,
-			DeviceID:  "",
-			Headers:   map[string]string{"User-Agent": ua},
-		},
 	}, nil
 }
 

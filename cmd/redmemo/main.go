@@ -105,15 +105,15 @@ func main() {
 
 	// 8. Init OAuth
 	oauthClient := oauth.NewClient(uaPool)
-	oauthPool := oauth.NewPool(cfg.OAuth, oauthClient, tokenStore, redisCache, uaPool)
+	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, redisCache, uaPool)
 
 	// 9. Init Reddit clients
-	redditAdapter := &oauthAdapter{pool: oauthPool}
+	redditAdapter := &oauthAdapter{holder: oauthHolder}
 	redditCli := reddit.NewClient(redditAdapter)
 	publicCli := reddit.NewPublicClient(uaPool)
 
 	// 10. Init modules
-	rateLimiter := ratelimit.New(cfg.RateLimit, oauthPool)
+	rateLimiter := ratelimit.New(cfg.RateLimit, oauthHolder)
 	hrLimiter := hrlimit.NewManager(redisCache.Client(), cfg.HRLimit)
 
 	renderer, err := render.New(cfg.Render)
@@ -129,14 +129,14 @@ func main() {
 	archiver.SetSubStatusStore(subStatusStore)
 
 	prefetcher := prefetch.New(
-		cfg.Prefetch, oauthPool, &settingsAdapter{store: settingsStore},
+		cfg.Prefetch, oauthHolder, &settingsAdapter{store: settingsStore},
 		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,
 		subIconStore, hrLimiter,
 	)
 
 	// 11. Start background tasks
-	if err := oauthPool.Start(ctx); err != nil {
-		log.Printf("oauth pool start: %v (continuing without tokens)", err)
+	if err := oauthHolder.Start(ctx); err != nil {
+		log.Printf("oauth holder start: %v (continuing without tokens)", err)
 	}
 	rateLimiter.Start(ctx)
 	evictor.Start(ctx)
@@ -148,7 +148,7 @@ func main() {
 
 	// 12. Register routes, start HTTP server
 	h := handler.New(
-		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthPool,
+		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
 		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, uaPool, cfg,
 	)
@@ -167,7 +167,7 @@ func main() {
 		sig := <-sigCh
 		log.Printf("received %v, shutting down...", sig)
 		cancel()
-		oauthPool.Stop()
+		oauthHolder.Stop()
 		rateLimiter.Stop()
 		prefetcher.Stop()
 		srv.Shutdown(context.Background())
@@ -180,13 +180,13 @@ func main() {
 	log.Println("RedMemo stopped")
 }
 
-// oauthAdapter bridges oauth.Pool → reddit.TokenProvider interface.
+// oauthAdapter bridges oauth.TokenHolder → reddit.TokenProvider interface.
 type oauthAdapter struct {
-	pool *oauth.Pool
+	holder *oauth.TokenHolder
 }
 
-func (a *oauthAdapter) GetBestToken() *reddit.TokenInfo {
-	mt := a.pool.GetBestToken()
+func (a *oauthAdapter) Token() *reddit.TokenInfo {
+	mt := a.holder.Token()
 	if mt == nil {
 		return nil
 	}
@@ -197,17 +197,16 @@ func (a *oauthAdapter) GetBestToken() *reddit.TokenInfo {
 	return &reddit.TokenInfo{
 		ID:          mt.StoredToken.ID,
 		AccessToken: mt.StoredToken.AccessToken,
-		UserAgent:   mt.Identity.UserAgent,
 		Headers:     headers,
 	}
 }
 
 func (a *oauthAdapter) OnRequestComplete(tokenID int, resp *http.Response) {
-	a.pool.OnRequestComplete(tokenID, resp)
+	a.holder.OnRequestComplete(tokenID, resp)
 }
 
 func (a *oauthAdapter) NotifyUnauthorized() {
-	a.pool.NotifyUnauthorized()
+	a.holder.NotifyUnauthorized()
 }
 
 // settingsAdapter bridges store.SettingsStore → prefetch.SettingsProvider interface.

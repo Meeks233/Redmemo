@@ -198,7 +198,7 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 	var posts []reddit.Post
 	var err error
 
-	if h.oauthPool.HasAvailableTokens() {
+	if h.oauthHolder.HasAvailableTokens() {
 		posts, _, _, err = h.redditCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 5)
 	} else {
 		posts, _, _, err = h.publicCli.FetchSearch(ctx, query, sub, sort, t, after, restrictSR, 5)

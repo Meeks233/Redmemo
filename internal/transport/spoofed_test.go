@@ -17,33 +17,46 @@ func TestNewSpoofedClient(t *testing.T) {
 	if c.Transport == nil {
 		t.Fatal("Transport is nil")
 	}
-	if _, ok := c.Transport.(*http.Transport); !ok {
-		t.Errorf("Transport is %T, want *http.Transport", c.Transport)
+	if _, ok := c.Transport.(http.RoundTripper); !ok {
+		t.Errorf("Transport is %T, want http.RoundTripper", c.Transport)
 	}
 }
 
 func TestNewSpoofedTransport(t *testing.T) {
-	tr := NewSpoofedTransport()
-	if tr == nil {
+	rt := NewSpoofedTransport()
+	if rt == nil {
 		t.Fatal("NewSpoofedTransport returned nil")
 	}
-	// The uTLS spoofing hangs off DialTLSContext — without it the transport
-	// would fall back to Go's stdlib ClientHello.
-	if tr.DialTLSContext == nil {
-		t.Error("DialTLSContext must be set for uTLS fingerprint spoofing")
+	srt, ok := rt.(*spoofedRoundTripper)
+	if !ok {
+		t.Fatalf("Transport is %T, want *spoofedRoundTripper", rt)
 	}
-	// HTTP/2 must stay off: the spoofed ClientHello advertises only http/1.1,
-	// and Go's transport cannot drive h2 over this connection.
-	if tr.ForceAttemptHTTP2 {
-		t.Error("ForceAttemptHTTP2 must be false")
+	if srt.h1 == nil {
+		t.Fatal("h1 transport must be set")
 	}
-	if tr.MaxIdleConns != 100 {
-		t.Errorf("MaxIdleConns = %d, want 100", tr.MaxIdleConns)
+	if srt.h2 == nil {
+		t.Fatal("h2 transport must be set")
 	}
-	if tr.MaxIdleConnsPerHost != 10 {
-		t.Errorf("MaxIdleConnsPerHost = %d, want 10", tr.MaxIdleConnsPerHost)
+	// The uTLS spoofing hangs off DialTLSContext on both transports — without
+	// it the transport would fall back to Go's stdlib ClientHello.
+	if srt.h1.DialTLSContext == nil {
+		t.Error("h1.DialTLSContext must be set for uTLS fingerprint spoofing")
 	}
-	if tr.IdleConnTimeout != 90*time.Second {
-		t.Errorf("IdleConnTimeout = %v, want 90s", tr.IdleConnTimeout)
+	if srt.h2.DialTLSContext == nil {
+		t.Error("h2.DialTLSContext must be set for uTLS fingerprint spoofing")
+	}
+	// HTTP/2 stays off on the h1 transport — protocol selection happens via
+	// real ALPN, not via Go's auto-upgrade path.
+	if srt.h1.ForceAttemptHTTP2 {
+		t.Error("h1.ForceAttemptHTTP2 must be false")
+	}
+	if srt.h1.MaxIdleConns != 100 {
+		t.Errorf("h1.MaxIdleConns = %d, want 100", srt.h1.MaxIdleConns)
+	}
+	if srt.h1.MaxIdleConnsPerHost != 10 {
+		t.Errorf("h1.MaxIdleConnsPerHost = %d, want 10", srt.h1.MaxIdleConnsPerHost)
+	}
+	if srt.h1.IdleConnTimeout != 90*time.Second {
+		t.Errorf("h1.IdleConnTimeout = %v, want 90s", srt.h1.IdleConnTimeout)
 	}
 }

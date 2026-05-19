@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"net"
@@ -139,7 +138,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 		HomepageSort:       sort,
 		NoPosts:            len(posts) == 0,
 		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
-		HasOAuth:           h.oauthPool.HasAvailableTokens(),
+		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -205,30 +204,6 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	h.redirectFuckReddit(w, r, r.URL.Path, reason)
 }
 
-func (h *Handler) backgroundArchiveSubreddit(sub, sort, after string) {
-	existing, _ := h.postStore.ListBySubreddit(sub, 1, 0)
-	if len(existing) > 0 && time.Since(existing[0].LastUpdated) < 10*time.Minute {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	posts, _, _, err := h.fetchSubreddit(ctx, sub, sort, after, 5)
-	if err != nil {
-		log.Printf("background archive sub %s: %v", sub, err)
-		return
-	}
-	h.archiver.ArchivePosts(posts, sub, "background")
-
-	// About is never fetched from background paths — only on active user
-	// visits (see fetchSubredditAbout). Read whatever is cached and persist
-	// it to the subreddit archive if available.
-	subInfo, _ := h.fetchSubredditAbout(ctx, sub, false)
-	if subInfo.Name != "" {
-		h.archiver.ArchiveSubreddit(&subInfo)
-	}
-}
-
 func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences, limit int) bool {
 	if sort == "" {
 		sort = "hot"
@@ -275,7 +250,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		Ends:               [2]string{before, afterCursor},
 		NoPosts:            len(posts) == 0,
 		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
-		HasOAuth:           h.oauthPool.HasAvailableTokens(),
+		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -307,7 +282,7 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 		},
 		Posts:     posts,
 		NoPosts:   len(posts) == 0,
-		HasOAuth:  h.oauthPool.HasAvailableTokens(),
+		HasOAuth:  h.oauthHolder.HasAvailableTokens(),
 		IsOffline: offline,
 	}
 	data.Sub.Name = sub

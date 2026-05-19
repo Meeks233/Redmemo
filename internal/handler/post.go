@@ -155,7 +155,7 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		Comments:        comments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
-		HasOAuth:        h.oauthPool.HasAvailableTokens(),
+		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -193,7 +193,7 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		Comments:        comments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
-		HasOAuth:        h.oauthPool.HasAvailableTokens(),
+		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
 		IsOffline:       offline,
 	}
 

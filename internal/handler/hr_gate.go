@@ -22,7 +22,7 @@ func (h *Handler) shouldDegrade(ctx context.Context) (degrade bool, reason strin
 			return true, blockedReason
 		}
 	}
-	if !h.oauthPool.HasAvailableTokens() {
+	if !h.oauthHolder.HasAvailableTokens() {
 		return true, "quota_exhausted"
 	}
 	return false, ""

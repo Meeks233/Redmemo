@@ -57,18 +57,18 @@ func rlResp(remaining, reset string) *http.Response {
 
 // --- concurrency / stress ---
 
-// TestPool_ConcurrentAccess drives every locked Pool accessor from many
+// TestHolder_ConcurrentAccess drives every locked TokenHolder accessor from many
 // goroutines at once. Run with -race to catch data races between the RWMutex
-// readers and the GetBestToken/OnRequestComplete writers. Quota is kept high
+// readers and the Token/OnRequestComplete writers. Quota is kept high
 // so the low-quota refresh path (which would spawn background goroutines) is
 // never triggered — this isolates pure lock contention.
-func TestPool_ConcurrentAccess(t *testing.T) {
+func TestHolder_ConcurrentAccess(t *testing.T) {
 	mt := &ManagedToken{
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 500,
 		RateResetAt:   time.Now().Add(10 * time.Minute),
 	}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	const goroutines = 64
 	const iters = 400
@@ -82,7 +82,7 @@ func TestPool_ConcurrentAccess(t *testing.T) {
 			for i := 0; i < iters; i++ {
 				switch (g + i) % 7 {
 				case 0:
-					p.GetBestToken()
+					p.Token()
 				case 1:
 					// remaining stays well above the low-quota threshold
 					p.OnRequestComplete(1, rlResp("500.0", "600"))
@@ -104,7 +104,7 @@ func TestPool_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := p.GetBestToken(); got == nil {
+	if got := p.Token(); got == nil {
 		t.Fatal("token should still be available after concurrent access")
 	}
 }
@@ -114,7 +114,7 @@ func TestPool_ConcurrentAccess(t *testing.T) {
 func TestWindowInfo_Boundaries(t *testing.T) {
 	t.Run("future reset keeps remaining", func(t *testing.T) {
 		reset := time.Now().Add(5 * time.Minute)
-		p := newTestPool(&ManagedToken{RateRemaining: 30, RateResetAt: reset})
+		p := newTestHolder(&ManagedToken{RateRemaining: 30, RateResetAt: reset})
 		got, capacity, rem := p.WindowInfo()
 		if capacity != 99 {
 			t.Errorf("capacity = %d, want 99", capacity)
@@ -129,7 +129,7 @@ func TestWindowInfo_Boundaries(t *testing.T) {
 
 	t.Run("past reset rolls window forward", func(t *testing.T) {
 		// 25 min in the past spans more than two 10-min windows.
-		p := newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(-25 * time.Minute)})
+		p := newTestHolder(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(-25 * time.Minute)})
 		got, _, rem := p.WindowInfo()
 		if rem != 99 {
 			t.Errorf("remaining = %d, want 99 after rollover", rem)
@@ -140,7 +140,7 @@ func TestWindowInfo_Boundaries(t *testing.T) {
 	})
 
 	t.Run("exhausted with future reset reports zero", func(t *testing.T) {
-		p := newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(5 * time.Minute)})
+		p := newTestHolder(&ManagedToken{RateRemaining: 0, RateResetAt: time.Now().Add(5 * time.Minute)})
 		_, _, rem := p.WindowInfo()
 		if rem != 0 {
 			t.Errorf("remaining = %d, want 0", rem)
@@ -148,7 +148,7 @@ func TestWindowInfo_Boundaries(t *testing.T) {
 	})
 
 	t.Run("nil active", func(t *testing.T) {
-		p := newTestPool(nil)
+		p := newTestHolder(nil)
 		got, capacity, rem := p.WindowInfo()
 		if !got.IsZero() || capacity != 0 || rem != 0 {
 			t.Errorf("nil active: got resetAt=%v capacity=%d remaining=%d", got, capacity, rem)
@@ -160,7 +160,7 @@ func TestWindowInfo_Boundaries(t *testing.T) {
 
 func TestEarliestReset_Boundaries(t *testing.T) {
 	t.Run("future reset", func(t *testing.T) {
-		p := newTestPool(&ManagedToken{RateResetAt: time.Now().Add(3 * time.Minute)})
+		p := newTestHolder(&ManagedToken{RateResetAt: time.Now().Add(3 * time.Minute)})
 		secs, windowSec := p.EarliestReset()
 		if windowSec != 600 {
 			t.Errorf("windowSec = %d, want 600", windowSec)
@@ -171,7 +171,7 @@ func TestEarliestReset_Boundaries(t *testing.T) {
 	})
 
 	t.Run("past reset rolls forward into a future window", func(t *testing.T) {
-		p := newTestPool(&ManagedToken{RateResetAt: time.Now().Add(-90 * time.Minute)})
+		p := newTestHolder(&ManagedToken{RateResetAt: time.Now().Add(-90 * time.Minute)})
 		secs, _ := p.EarliestReset()
 		if secs < 0 || secs > 600 {
 			t.Errorf("secs = %d, want within (0,600]", secs)
@@ -179,7 +179,7 @@ func TestEarliestReset_Boundaries(t *testing.T) {
 	})
 
 	t.Run("nil active", func(t *testing.T) {
-		p := newTestPool(nil)
+		p := newTestHolder(nil)
 		secs, windowSec := p.EarliestReset()
 		if secs != 0 || windowSec != 600 {
 			t.Errorf("nil active: secs=%d windowSec=%d", secs, windowSec)
@@ -192,7 +192,7 @@ func TestEarliestReset_Boundaries(t *testing.T) {
 func TestOnRequestComplete_MalformedHeaders(t *testing.T) {
 	t.Run("non-numeric remaining is ignored", func(t *testing.T) {
 		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 88}
-		p := newTestPool(mt)
+		p := newTestHolder(mt)
 		p.OnRequestComplete(1, rlResp("not-a-number", ""))
 		if mt.RateRemaining != 88 {
 			t.Errorf("RateRemaining = %d, want 88 (unchanged)", mt.RateRemaining)
@@ -201,7 +201,7 @@ func TestOnRequestComplete_MalformedHeaders(t *testing.T) {
 
 	t.Run("whitespace around values is trimmed", func(t *testing.T) {
 		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 88}
-		p := newTestPool(mt)
+		p := newTestHolder(mt)
 		p.OnRequestComplete(1, rlResp("  42.0  ", "  300  "))
 		if mt.RateRemaining != 42 {
 			t.Errorf("RateRemaining = %d, want 42", mt.RateRemaining)
@@ -214,7 +214,7 @@ func TestOnRequestComplete_MalformedHeaders(t *testing.T) {
 	t.Run("non-numeric reset leaves resetAt unchanged", func(t *testing.T) {
 		orig := time.Now().Add(7 * time.Minute)
 		mt := &ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50, RateResetAt: orig}
-		p := newTestPool(mt)
+		p := newTestHolder(mt)
 		p.OnRequestComplete(1, rlResp("40.0", "garbage"))
 		if !mt.RateResetAt.Equal(orig) {
 			t.Error("RateResetAt changed despite an unparseable reset header")
@@ -232,7 +232,7 @@ func TestForceRefresh_FailureIncrementsConsecutive(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
 	p.client = newClientToServer(t, srv)
 	p.backend = "mobile_spoof"
 
@@ -252,7 +252,7 @@ func TestForceRefresh_SwitchesBackendAfterMaxFails(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
 	p.client = newClientToServer(t, srv)
 	p.backend = "mobile_spoof"
 	p.consecutiveFail = maxConsecutiveFails - 1 // one more failure trips the switch
@@ -275,7 +275,7 @@ func TestForceRefresh_RespectsCooldown(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
 	p.client = newClientToServer(t, srv)
 	p.backend = "mobile_spoof"
 	p.lastRefreshAt = time.Now() // still inside the cooldown window
@@ -300,7 +300,7 @@ func TestOnRequestComplete_LowQuotaTriggersRefresh(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := newTestPool(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
 	p.client = newClientToServer(t, srv)
 	p.backend = "mobile_spoof"
 

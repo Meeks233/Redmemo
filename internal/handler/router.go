@@ -24,7 +24,7 @@ type Handler struct {
 	renderer      *render.Engine
 	redditCli     *reddit.Client
 	publicCli     *reddit.PublicClient
-	oauthPool     *oauth.Pool
+	oauthHolder   *oauth.TokenHolder
 	postStore     *store.PostStore
 	commentStore  *store.CommentStore
 	subStore      *store.SubredditStore
@@ -47,7 +47,7 @@ func New(
 	r *render.Engine,
 	rc *reddit.Client,
 	pc *reddit.PublicClient,
-	op *oauth.Pool,
+	op *oauth.TokenHolder,
 	ps *store.PostStore,
 	cs *store.CommentStore,
 	ss *store.SubredditStore,
@@ -72,7 +72,7 @@ func New(
 		renderer:      r,
 		redditCli:     rc,
 		publicCli:     pc,
-		oauthPool:     op,
+		oauthHolder:   op,
 		postStore:     ps,
 		commentStore:  cs,
 		subStore:      ss,

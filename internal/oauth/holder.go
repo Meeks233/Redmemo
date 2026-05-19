@@ -24,7 +24,7 @@ type ManagedToken struct {
 	RateResetAt   time.Time
 }
 
-type Pool struct {
+type TokenHolder struct {
 	mu     sync.RWMutex
 	active *ManagedToken
 	client *Client
@@ -46,8 +46,8 @@ const (
 	maxConsecutiveFails = 5
 )
 
-func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache, uaPool *useragent.Pool) *Pool {
-	return &Pool{
+func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, c *cache.Cache, uaPool *useragent.Pool) *TokenHolder {
+	return &TokenHolder{
 		client:  client,
 		store:   tokenStore,
 		cache:   c,
@@ -57,7 +57,7 @@ func NewPool(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStor
 	}
 }
 
-func (p *Pool) Start(ctx context.Context) error {
+func (p *TokenHolder) Start(ctx context.Context) error {
 	ctx, p.cancel = context.WithCancel(ctx)
 
 	// Clean up old dynamic tokens from previous architecture.
@@ -121,7 +121,7 @@ func (p *Pool) Start(ctx context.Context) error {
 	return nil
 }
 
-func (p *Pool) authenticateFromConfig() error {
+func (p *TokenHolder) authenticateFromConfig() error {
 	for _, tcfg := range p.cfg.Tokens {
 		if tcfg.Backend == "" {
 			tcfg.Backend = "mobile_spoof"
@@ -144,7 +144,7 @@ func (p *Pool) authenticateFromConfig() error {
 	return nil
 }
 
-func (p *Pool) installToken(result *TokenResult, clientID, clientSecret, backend string) {
+func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, backend string) {
 	now := time.Now()
 	expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
 	remaining := 99
@@ -184,7 +184,7 @@ func (p *Pool) installToken(result *TokenResult, clientID, clientSecret, backend
 	log.Printf("oauth: installed new %s token (expires in %ds)", backend, result.ExpiresIn)
 }
 
-func (p *Pool) refreshLoop(ctx context.Context) {
+func (p *TokenHolder) refreshLoop(ctx context.Context) {
 	defer p.wg.Done()
 	for {
 		p.mu.RLock()
@@ -228,7 +228,7 @@ func (p *Pool) refreshLoop(ctx context.Context) {
 }
 
 // ForceRefresh re-authenticates with a new device identity. Thread-safe with cooldown.
-func (p *Pool) forceRefresh(reason string) {
+func (p *TokenHolder) forceRefresh(reason string) {
 	if !p.refreshMu.TryLock() {
 		return
 	}
@@ -251,16 +251,6 @@ func (p *Pool) forceRefresh(reason string) {
 	}
 	p.mu.RUnlock()
 
-	if tcfg.Backend == "password" {
-		for _, tc := range p.cfg.Tokens {
-			if tc.ClientID == tcfg.ClientID && tc.Backend == "password" {
-				tcfg.Username = tc.Username
-				tcfg.Password = tc.Password
-				break
-			}
-		}
-	}
-
 	result, err := p.client.Authenticate(tcfg)
 	if err != nil {
 		p.consecutiveFail++
@@ -279,16 +269,16 @@ func (p *Pool) forceRefresh(reason string) {
 }
 
 // NotifyUnauthorized is called when a 401 is received. Triggers re-auth.
-func (p *Pool) NotifyUnauthorized() {
+func (p *TokenHolder) NotifyUnauthorized() {
 	go p.forceRefresh("401_unauthorized")
 }
 
 // NotifyLowQuota is called when remaining is critically low.
-func (p *Pool) NotifyLowQuota() {
+func (p *TokenHolder) NotifyLowQuota() {
 	go p.forceRefresh("low_quota")
 }
 
-func (p *Pool) GetBestToken() *ManagedToken {
+func (p *TokenHolder) Token() *ManagedToken {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -330,7 +320,7 @@ func (p *Pool) GetBestToken() *ManagedToken {
 	return p.active
 }
 
-func (p *Pool) OnRequestComplete(tokenID int, resp *http.Response) {
+func (p *TokenHolder) OnRequestComplete(tokenID int, resp *http.Response) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -374,7 +364,7 @@ func (p *Pool) OnRequestComplete(tokenID int, resp *http.Response) {
 }
 
 // RemainingBudget implements ratelimit.BudgetSource.
-func (p *Pool) RemainingBudget(_ context.Context) (int, error) {
+func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -404,7 +394,7 @@ type TokenStatusInfo struct {
 	ExpiresAt     *time.Time
 }
 
-func (p *Pool) TokenStatuses() []TokenStatusInfo {
+func (p *TokenHolder) TokenStatuses() []TokenStatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -425,7 +415,7 @@ func (p *Pool) TokenStatuses() []TokenStatusInfo {
 }
 
 // WindowInfo returns the rate limit window state.
-func (p *Pool) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
+func (p *TokenHolder) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -449,7 +439,7 @@ func (p *Pool) WindowInfo() (resetAt time.Time, capacity int, remaining int) {
 }
 
 // EarliestReset returns (seconds until reset, window total seconds).
-func (p *Pool) EarliestReset() (int, int) {
+func (p *TokenHolder) EarliestReset() (int, int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -473,13 +463,13 @@ func (p *Pool) EarliestReset() (int, int) {
 	return secs, windowSec
 }
 
-func (p *Pool) EarliestResetSeconds() int {
+func (p *TokenHolder) EarliestResetSeconds() int {
 	s, _ := p.EarliestReset()
 	return s
 }
 
 // HasAvailableTokens reports whether the active token has remaining quota.
-func (p *Pool) HasAvailableTokens() bool {
+func (p *TokenHolder) HasAvailableTokens() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -498,9 +488,9 @@ func (p *Pool) HasAvailableTokens() bool {
 
 // SpawnTokenIfNeeded is a no-op kept for API compatibility. Single-token model
 // handles recovery via NotifyUnauthorized / NotifyLowQuota.
-func (p *Pool) SpawnTokenIfNeeded(_ context.Context) {}
+func (p *TokenHolder) SpawnTokenIfNeeded(_ context.Context) {}
 
-func (p *Pool) Stop() {
+func (p *TokenHolder) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -509,7 +499,7 @@ func (p *Pool) Stop() {
 
 // --- Identity persistence helpers ---
 
-func (p *Pool) identityToJSON(id SpoofIdentity) *string {
+func (p *TokenHolder) identityToJSON(id SpoofIdentity) *string {
 	data := map[string]string{
 		"_user_agent": id.UserAgent,
 		"_device_id":  id.DeviceID,
@@ -525,7 +515,7 @@ func (p *Pool) identityToJSON(id SpoofIdentity) *string {
 	return &s
 }
 
-func (p *Pool) restoreIdentity(st *store.StoredToken) SpoofIdentity {
+func (p *TokenHolder) restoreIdentity(st *store.StoredToken) SpoofIdentity {
 	if st.HeadersJSON != nil && *st.HeadersJSON != "" {
 		var data map[string]string
 		if err := json.Unmarshal([]byte(*st.HeadersJSON), &data); err == nil && len(data) > 0 {

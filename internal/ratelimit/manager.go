@@ -13,7 +13,7 @@ import (
 )
 
 // BudgetSource provides OAuth token budget information.
-// Implemented by oauth.Pool in batch 2.
+// Implemented by oauth.TokenHolder.
 type BudgetSource interface {
 	RemainingBudget(ctx context.Context) (int, error)
 }

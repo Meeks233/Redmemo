@@ -27,37 +27,37 @@ var (
 	ErrRateLimited      = errors.New("rate limited")
 )
 
-// TokenProvider abstracts the OAuth token pool.
-// Implemented by oauth.Pool.
+// TokenProvider abstracts the OAuth token source.
+// Implemented by oauth.TokenHolder.
 type TokenProvider interface {
-	GetBestToken() *TokenInfo
+	Token() *TokenInfo
 	OnRequestComplete(tokenID int, resp *http.Response)
 	NotifyUnauthorized()
 }
 
 // TokenInfo holds the info needed to make an authenticated request.
+// Headers carries the full spoof header set, including User-Agent.
 type TokenInfo struct {
 	ID          int
 	AccessToken string
-	UserAgent   string
 	Headers     map[string]string
 }
 
-// Client is a Reddit API client that uses an OAuth token pool.
+// Client is a Reddit API client backed by an OAuth token source.
 type Client struct {
-	pool       TokenProvider
+	tokens     TokenProvider
 	httpClient *http.Client
 	etags      *etagCache
 }
 
 // NewClient creates a new Reddit API client.
-func NewClient(pool TokenProvider) *Client {
+func NewClient(tokens TokenProvider) *Client {
 	cli := transport.NewSpoofedClient(30 * time.Second)
 	cli.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
 	return &Client{
-		pool:       pool,
+		tokens:     tokens,
 		httpClient: cli,
 		etags:      newETagCache(2000),
 	}
@@ -216,7 +216,7 @@ func (c *Client) doRequest(ctx context.Context, path string) ([]byte, *http.Resp
 }
 
 func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]byte, *http.Response, error) {
-	token := c.pool.GetBestToken()
+	token := c.tokens.Token()
 	if token == nil {
 		return nil, nil, ErrNoTokenAvailable
 	}
@@ -228,7 +228,6 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 
 	req.Header.Set("Host", "oauth.reddit.com")
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
-	req.Header.Set("User-Agent", token.UserAgent)
 	req.Header.Set("Cookie", quarantineCookie)
 	for k, v := range token.Headers {
 		req.Header.Set(k, v)
@@ -246,7 +245,7 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 	defer resp.Body.Close()
 
 	// Update token rate limits
-	c.pool.OnRequestComplete(token.ID, resp)
+	c.tokens.OnRequestComplete(token.ID, resp)
 
 	// 304 Not Modified — return cached body
 	if resp.StatusCode == http.StatusNotModified && hasCached {
@@ -282,7 +281,7 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 
 	// Handle errors
 	if resp.StatusCode == 401 {
-		c.pool.NotifyUnauthorized()
+		c.tokens.NotifyUnauthorized()
 		return nil, resp, ErrUnauthorized
 	}
 

@@ -23,7 +23,7 @@ func (h *Handler) notifyUserRequest() {
 }
 
 func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, after string, limit int) ([]reddit.Post, string, string, error) {
-	if h.oauthPool.HasAvailableTokens() {
+	if h.oauthHolder.HasAvailableTokens() {
 		posts, before, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, after, limit)
 		h.recordUpstream(ctx)
 		if err == nil {
@@ -37,7 +37,7 @@ func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, after string, l
 }
 
 func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (reddit.Post, []reddit.Comment, error) {
-	if h.oauthPool.HasAvailableTokens() {
+	if h.oauthHolder.HasAvailableTokens() {
 		post, comments, err := h.redditCli.FetchPost(ctx, sub, id, commentSort)
 		h.recordUpstream(ctx)
 		if err == nil {
@@ -598,7 +598,7 @@ func (h *Handler) fetchSubredditAbout(ctx context.Context, sub string, active bo
 
 	var info reddit.Subreddit
 	var err error
-	if h.oauthPool.HasAvailableTokens() {
+	if h.oauthHolder.HasAvailableTokens() {
 		info, err = h.redditCli.FetchSubredditAbout(ctx, sub)
 		h.recordUpstream(ctx)
 		if err == nil {

@@ -13,7 +13,7 @@ func NewTokenStore(db *sql.DB) *TokenStore {
 	return &TokenStore{db: db}
 }
 
-func (s *TokenStore) GetBestToken() (*StoredToken, error) {
+func (s *TokenStore) Token() (*StoredToken, error) {
 	t := &StoredToken{}
 	err := s.db.QueryRow(`
 		SELECT id, client_id, client_secret, access_token, expires_at,
@@ -30,7 +30,7 @@ func (s *TokenStore) GetBestToken() (*StoredToken, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get best token: %w", err)
+		return nil, fmt.Errorf("get token: %w", err)
 	}
 	return t, nil
 }

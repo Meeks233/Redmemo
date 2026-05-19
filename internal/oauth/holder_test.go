@@ -9,19 +9,19 @@ import (
 	"github.com/redmemo/redmemo/internal/store"
 )
 
-func newTestPool(active *ManagedToken) *Pool {
-	return &Pool{active: active}
+func newTestHolder(active *ManagedToken) *TokenHolder {
+	return &TokenHolder{active: active}
 }
 
-func TestGetBestToken_Available(t *testing.T) {
+func TestToken_Available(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 	mt := &ManagedToken{
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 50,
 		RateResetAt:   future,
 	}
-	p := newTestPool(mt)
-	best := p.GetBestToken()
+	p := newTestHolder(mt)
+	best := p.Token()
 	if best == nil {
 		t.Fatal("expected non-nil token")
 	}
@@ -30,35 +30,35 @@ func TestGetBestToken_Available(t *testing.T) {
 	}
 }
 
-func TestGetBestToken_Exhausted(t *testing.T) {
+func TestToken_Exhausted(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 	mt := &ManagedToken{
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 0,
 		RateResetAt:   future,
 	}
-	p := newTestPool(mt)
-	if got := p.GetBestToken(); got != nil {
+	p := newTestHolder(mt)
+	if got := p.Token(); got != nil {
 		t.Errorf("expected nil, got token ID %d", got.StoredToken.ID)
 	}
 }
 
-func TestGetBestToken_Empty(t *testing.T) {
-	p := newTestPool(nil)
-	if got := p.GetBestToken(); got != nil {
-		t.Errorf("expected nil for empty pool, got %+v", got)
+func TestToken_Empty(t *testing.T) {
+	p := newTestHolder(nil)
+	if got := p.Token(); got != nil {
+		t.Errorf("expected nil when no token held, got %+v", got)
 	}
 }
 
-func TestGetBestToken_ResetsAfterWindow(t *testing.T) {
+func TestToken_ResetsAfterWindow(t *testing.T) {
 	past := time.Now().Add(-1 * time.Minute)
 	mt := &ManagedToken{
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 0,
 		RateResetAt:   past,
 	}
-	p := newTestPool(mt)
-	best := p.GetBestToken()
+	p := newTestHolder(mt)
+	best := p.Token()
 	if best == nil {
 		t.Fatal("expected non-nil token after window reset")
 	}
@@ -72,7 +72,7 @@ func TestOnRequestComplete_ParsesHeaders(t *testing.T) {
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 99,
 	}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	resp := &http.Response{Header: http.Header{}}
 	resp.Header.Set("X-Ratelimit-Remaining", "554.0")
@@ -93,7 +93,7 @@ func TestOnRequestComplete_FloatRemaining(t *testing.T) {
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 99,
 	}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	resp := &http.Response{Header: http.Header{}}
 	resp.Header.Set("X-Ratelimit-Remaining", "95.5")
@@ -110,7 +110,7 @@ func TestOnRequestComplete_UnknownTokenID(t *testing.T) {
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 99,
 	}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	resp := &http.Response{Header: http.Header{}}
 	resp.Header.Set("X-Ratelimit-Remaining", "50.0")
@@ -127,7 +127,7 @@ func TestOnRequestComplete_NoHeaders(t *testing.T) {
 		StoredToken:   store.StoredToken{ID: 1},
 		RateRemaining: 99,
 	}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	resp := &http.Response{Header: http.Header{}}
 	p.OnRequestComplete(1, resp)
@@ -140,7 +140,7 @@ func TestOnRequestComplete_NoHeaders(t *testing.T) {
 func TestRemainingBudget_SingleToken(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 	mt := &ManagedToken{RateRemaining: 50, RateResetAt: future}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	budget, err := p.RemainingBudget(context.Background())
 	if err != nil {
@@ -152,7 +152,7 @@ func TestRemainingBudget_SingleToken(t *testing.T) {
 }
 
 func TestRemainingBudget_Empty(t *testing.T) {
-	p := newTestPool(nil)
+	p := newTestHolder(nil)
 	budget, err := p.RemainingBudget(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestRemainingBudget_Empty(t *testing.T) {
 func TestRemainingBudget_ResetsAfterWindow(t *testing.T) {
 	past := time.Now().Add(-1 * time.Minute)
 	mt := &ManagedToken{RateRemaining: 0, RateResetAt: past}
-	p := newTestPool(mt)
+	p := newTestHolder(mt)
 
 	budget, err := p.RemainingBudget(context.Background())
 	if err != nil {
@@ -179,23 +179,23 @@ func TestRemainingBudget_ResetsAfterWindow(t *testing.T) {
 func TestHasAvailableTokens(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 
-	p := newTestPool(nil)
+	p := newTestHolder(nil)
 	if p.HasAvailableTokens() {
 		t.Error("expected false for nil active")
 	}
 
-	p = newTestPool(&ManagedToken{RateRemaining: 10, RateResetAt: future})
+	p = newTestHolder(&ManagedToken{RateRemaining: 10, RateResetAt: future})
 	if !p.HasAvailableTokens() {
 		t.Error("expected true with remaining > 0")
 	}
 
 	past := time.Now().Add(-1 * time.Minute)
-	p = newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: past})
+	p = newTestHolder(&ManagedToken{RateRemaining: 0, RateResetAt: past})
 	if !p.HasAvailableTokens() {
 		t.Error("expected true after window reset")
 	}
 
-	p = newTestPool(&ManagedToken{RateRemaining: 0, RateResetAt: future})
+	p = newTestHolder(&ManagedToken{RateRemaining: 0, RateResetAt: future})
 	if p.HasAvailableTokens() {
 		t.Error("expected false with 0 remaining and future reset")
 	}

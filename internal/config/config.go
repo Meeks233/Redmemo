@@ -79,8 +79,6 @@ type OAuthConfig struct {
 type OAuthTokenConfig struct {
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
-	Username     string `yaml:"username"`
-	Password     string `yaml:"password"`
 	Backend      string `yaml:"backend"`
 }
 
@@ -206,20 +204,9 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("oauth.tokens[%d].client_id is required", i))
 		}
 		switch tok.Backend {
-		case "mobile_spoof", "generic_web", "password":
+		case "", "mobile_spoof", "generic_web":
 		default:
-			errs = append(errs, fmt.Errorf("oauth.tokens[%d].backend must be \"mobile_spoof\", \"generic_web\", or \"password\"", i))
-		}
-		if tok.Backend == "password" {
-			if tok.ClientSecret == "" {
-				errs = append(errs, fmt.Errorf("oauth.tokens[%d].client_secret is required for password backend", i))
-			}
-			if tok.Username == "" {
-				errs = append(errs, fmt.Errorf("oauth.tokens[%d].username is required for password backend", i))
-			}
-			if tok.Password == "" {
-				errs = append(errs, fmt.Errorf("oauth.tokens[%d].password is required for password backend", i))
-			}
+			errs = append(errs, fmt.Errorf("oauth.tokens[%d].backend must be \"mobile_spoof\" or \"generic_web\"", i))
 		}
 	}
 	for i, sub := range c.Prefetch.Subreddits {
