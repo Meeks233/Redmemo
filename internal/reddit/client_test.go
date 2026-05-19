@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	fhttp "github.com/bogdanfinn/fhttp"
 )
 
 // --- mock TokenProvider ---
@@ -26,7 +28,7 @@ func (m *mockTokenProvider) Token() *TokenInfo {
 	return m.token
 }
 
-func (m *mockTokenProvider) OnRequestComplete(tokenID int, _ *http.Response) {
+func (m *mockTokenProvider) OnRequestComplete(tokenID int, _ *fhttp.Response) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.completeCalls = append(m.completeCalls, tokenID)
@@ -62,16 +64,19 @@ func defaultToken() *TokenInfo {
 }
 
 // rewriteTransport routes the client's https://oauth.reddit.com requests to
-// the local httptest server while preserving path + query.
+// the local httptest server while preserving path + query. It is an fhttp
+// RoundTripper because the spoofed client (and now the test client) speaks
+// fhttp; the plain fhttp transport reaches the stdlib httptest server over
+// plain HTTP/1.1.
 type rewriteTransport struct {
 	scheme string
 	host   string
 }
 
-func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *rewriteTransport) RoundTrip(req *fhttp.Request) (*fhttp.Response, error) {
 	req.URL.Scheme = t.scheme
 	req.URL.Host = t.host
-	return http.DefaultTransport.RoundTrip(req)
+	return fhttp.DefaultTransport.RoundTrip(req)
 }
 
 // newTestClient builds a Client wired to a test server. The Client struct is
@@ -85,11 +90,11 @@ func newTestClient(t *testing.T, tokens TokenProvider, handler http.Handler) *Cl
 	if err != nil {
 		t.Fatalf("parse server url: %v", err)
 	}
-	httpClient := &http.Client{
+	httpClient := &fhttp.Client{
 		Transport: &rewriteTransport{scheme: u.Scheme, host: u.Host},
 		// Mirror NewClient: redirects are followed manually by doRequest.
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
+		CheckRedirect: func(*fhttp.Request, []*fhttp.Request) error {
+			return fhttp.ErrUseLastResponse
 		},
 	}
 	return &Client{

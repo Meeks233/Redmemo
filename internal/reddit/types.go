@@ -4,42 +4,42 @@ import "html/template"
 
 // Post represents a Reddit post with all display-ready fields.
 type Post struct {
-	ID            string         `json:"id"`
-	Title         string         `json:"title"`
-	Community     string         `json:"subreddit"`
-	Body          template.HTML  // selftext_html after rewrite_urls()
-	Author        Author         `json:"author"`
-	Permalink     string         `json:"permalink"`
-	LinkTitle     string         `json:"link_title"`
-	Poll          *Poll          `json:"poll"`
-	Score         [2]string      // [formatted, raw] via FormatNum
-	UpvoteRatio   int64          // upvote_ratio * 100
-	PostType      string         // "video"|"gif"|"image"|"self"|"gallery"|"link"
-	Flair         Flair
-	Flags         Flags
-	Thumbnail     Media
-	Media         Media
-	Domain        string         `json:"domain"`
-	RelTime       string         // relative time "3h ago"
-	Created       string         // absolute time "May 08 2026, 12:00:00 UTC"
-	CreatedTS     uint64         // Unix timestamp
-	ArchivedRelTime string       // relative archive time "2d ago"
-	ArchivedTime    string       // absolute archive time
-	NumDuplicates uint64         `json:"num_duplicates"`
-	Comments      [2]string      // [formatted, raw] via FormatNum
-	Gallery       []GalleryMedia
-	Awards        Awards
-	NSFW          bool           `json:"over_18"`
-	OutURL        *string        // url_overridden_by_dest
-	WSURL         string         `json:"websocket_url"`
+	ID              string        `json:"id"`
+	Title           string        `json:"title"`
+	Community       string        `json:"subreddit"`
+	Body            template.HTML // selftext_html after rewrite_urls()
+	Author          Author        `json:"author"`
+	Permalink       string        `json:"permalink"`
+	LinkTitle       string        `json:"link_title"`
+	Poll            *Poll         `json:"poll"`
+	Score           [2]string     // [formatted, raw] via FormatNum
+	UpvoteRatio     int64         // upvote_ratio * 100
+	PostType        string        // "video"|"gif"|"image"|"self"|"gallery"|"link"
+	Flair           Flair
+	Flags           Flags
+	Thumbnail       Media
+	Media           Media
+	Domain          string    `json:"domain"`
+	RelTime         string    // relative time "3h ago"
+	Created         string    // absolute time "May 08 2026, 12:00:00 UTC"
+	CreatedTS       uint64    // Unix timestamp
+	ArchivedRelTime string    // relative archive time "2d ago"
+	ArchivedTime    string    // absolute archive time
+	NumDuplicates   uint64    `json:"num_duplicates"`
+	Comments        [2]string // [formatted, raw] via FormatNum
+	Gallery         []GalleryMedia
+	Awards          Awards
+	NSFW            bool    `json:"over_18"`
+	OutURL          *string // url_overridden_by_dest
+	WSURL           string  `json:"websocket_url"`
 }
 
 // Comment represents a Reddit comment with recursive replies.
 type Comment struct {
 	ID          string
-	Kind        string     // "t1" = comment, "more" = load more
-	ParentID    string     // parsed from "t1_xxx" → "xxx"
-	ParentKind  string     // parsed from "t1_xxx" → "t1"
+	Kind        string // "t1" = comment, "more" = load more
+	ParentID    string // parsed from "t1_xxx" → "xxx"
+	ParentKind  string // parsed from "t1_xxx" → "t1"
 	PostLink    string
 	PostAuthor  string
 	Body        template.HTML // body_html after rewrite_emotes() + rewrite_urls()
@@ -47,13 +47,13 @@ type Comment struct {
 	Score       [2]string
 	RelTime     string
 	Created     string
-	Edited      [2]string  // (relative, absolute); empty if not edited
-	Replies     []Comment  // recursive
-	Highlighted bool       // id matches URL comment_id
+	Edited      [2]string // (relative, absolute); empty if not edited
+	Replies     []Comment // recursive
+	Highlighted bool      // id matches URL comment_id
 	Awards      Awards
-	Collapsed   bool       // stickied mod comment or filtered user
+	Collapsed   bool // stickied mod comment or filtered user
 	IsFiltered  bool
-	MoreCount   int64      // child count when kind=="more"
+	MoreCount   int64 // child count when kind=="more"
 	Prefs       Preferences
 }
 
@@ -107,9 +107,9 @@ type GalleryMedia struct {
 
 // Poll represents a Reddit poll attached to a post.
 type Poll struct {
-	Options           []PollOption
+	Options            []PollOption
 	VotingEndTimestamp [2]string // (relative, absolute) via FormatTime
-	TotalVoteCount    uint64
+	TotalVoteCount     uint64
 }
 
 // PollOption is a single poll choice.
@@ -132,16 +132,16 @@ type Awards []Award
 
 // Subreddit holds subreddit metadata.
 type Subreddit struct {
-	Name        string    // display_name
+	Name        string // display_name
 	Title       string
-	Description string    // public_description
+	Description string        // public_description
 	Info        template.HTML // description_html after rewrite_urls()
-	Icon        string    // community_icon, fallback icon_img, after format_url()
-	RawIcon     string    // original icon URL before format_url()
-	Members     [2]string // FormatNum(subscribers)
-	Active      [2]string // FormatNum(accounts_active)
-	Wiki        bool      // wiki_enabled
-	NSFW        bool      // over18
+	Icon        string        // community_icon, fallback icon_img, after format_url()
+	RawIcon     string        // original icon URL before format_url()
+	Members     [2]string     // FormatNum(subscribers)
+	Active      [2]string     // FormatNum(accounts_active)
+	Wiki        bool          // wiki_enabled
+	NSFW        bool          // over18
 }
 
 // User holds Reddit user profile data.

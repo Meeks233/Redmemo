@@ -2,10 +2,10 @@ package oauth
 
 import (
 	"context"
-	"net/http"
 	"testing"
 	"time"
 
+	http "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/store"
 )
 

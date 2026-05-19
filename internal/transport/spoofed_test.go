@@ -1,9 +1,11 @@
 package transport
 
 import (
-	"net/http"
 	"testing"
 	"time"
+
+	http "github.com/bogdanfinn/fhttp"
+	"github.com/bogdanfinn/fhttp/http2"
 )
 
 func TestNewSpoofedClient(t *testing.T) {
@@ -11,52 +13,70 @@ func TestNewSpoofedClient(t *testing.T) {
 	if c == nil {
 		t.Fatal("NewSpoofedClient returned nil")
 	}
-	if c.Timeout != 7*time.Second {
-		t.Errorf("Timeout = %v, want 7s", c.Timeout)
+}
+
+// TestRedditClientProfile pins the OkHttp HTTP/2 fingerprint that closes the
+// h2 gap: Akamai 4:16777216|16711681|0|m,p,a,s.
+func TestRedditClientProfile(t *testing.T) {
+	p := redditClientProfile()
+
+	settings := p.GetSettings()
+	if len(settings) != 1 {
+		t.Fatalf("settings has %d params, want exactly 1", len(settings))
 	}
-	if c.Transport == nil {
-		t.Fatal("Transport is nil")
+	if v, ok := settings[http2.SettingInitialWindowSize]; !ok || v != 16777216 {
+		t.Errorf("INITIAL_WINDOW_SIZE = %d (present=%v), want 16777216", v, ok)
 	}
-	if _, ok := c.Transport.(http.RoundTripper); !ok {
-		t.Errorf("Transport is %T, want http.RoundTripper", c.Transport)
+
+	order := p.GetSettingsOrder()
+	if len(order) != 1 || order[0] != http2.SettingInitialWindowSize {
+		t.Errorf("settingsOrder = %v, want [INITIAL_WINDOW_SIZE]", order)
+	}
+
+	if cf := p.GetConnectionFlow(); cf != 16711681 {
+		t.Errorf("connectionFlow = %d, want 16711681", cf)
+	}
+
+	want := []string{":method", ":path", ":authority", ":scheme"}
+	got := p.GetPseudoHeaderOrder()
+	if len(got) != len(want) {
+		t.Fatalf("pseudoHeaderOrder = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("pseudoHeaderOrder[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if prio := p.GetPriorities(); len(prio) != 0 {
+		t.Errorf("priorities = %v, want none (no PRIORITY frames)", prio)
 	}
 }
 
-func TestNewSpoofedTransport(t *testing.T) {
-	rt := NewSpoofedTransport()
-	if rt == nil {
-		t.Fatal("NewSpoofedTransport returned nil")
+// TestRedditClientHelloSpec guards the audited ClientHello against regression:
+// JA3/JA4 depend on the cipher set and ALPN staying exactly as captured.
+func TestRedditClientHelloSpec(t *testing.T) {
+	spec := redditClientHelloSpec()
+	if len(spec.CipherSuites) != 15 {
+		t.Errorf("cipher suite count = %d, want 15", len(spec.CipherSuites))
 	}
-	srt, ok := rt.(*spoofedRoundTripper)
-	if !ok {
-		t.Fatalf("Transport is %T, want *spoofedRoundTripper", rt)
+	if len(spec.Extensions) != 13 {
+		t.Errorf("extension count = %d, want 13", len(spec.Extensions))
 	}
-	if srt.h1 == nil {
-		t.Fatal("h1 transport must be set")
+}
+
+func TestApplyHeaderOrder(t *testing.T) {
+	req, err := http.NewRequest("GET", "https://oauth.reddit.com/", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
 	}
-	if srt.h2 == nil {
-		t.Fatal("h2 transport must be set")
+	ApplyHeaderOrder(req)
+
+	if got := req.Header[http.HeaderOrderKey]; len(got) == 0 {
+		t.Error("HeaderOrderKey not set on request")
 	}
-	// The uTLS spoofing hangs off DialTLSContext on both transports — without
-	// it the transport would fall back to Go's stdlib ClientHello.
-	if srt.h1.DialTLSContext == nil {
-		t.Error("h1.DialTLSContext must be set for uTLS fingerprint spoofing")
-	}
-	if srt.h2.DialTLSContext == nil {
-		t.Error("h2.DialTLSContext must be set for uTLS fingerprint spoofing")
-	}
-	// HTTP/2 stays off on the h1 transport — protocol selection happens via
-	// real ALPN, not via Go's auto-upgrade path.
-	if srt.h1.ForceAttemptHTTP2 {
-		t.Error("h1.ForceAttemptHTTP2 must be false")
-	}
-	if srt.h1.MaxIdleConns != 100 {
-		t.Errorf("h1.MaxIdleConns = %d, want 100", srt.h1.MaxIdleConns)
-	}
-	if srt.h1.MaxIdleConnsPerHost != 10 {
-		t.Errorf("h1.MaxIdleConnsPerHost = %d, want 10", srt.h1.MaxIdleConnsPerHost)
-	}
-	if srt.h1.IdleConnTimeout != 90*time.Second {
-		t.Errorf("h1.IdleConnTimeout = %v, want 90s", srt.h1.IdleConnTimeout)
+	pseudo := req.Header[http.PHeaderOrderKey]
+	if len(pseudo) != 4 || pseudo[0] != ":method" {
+		t.Errorf("PHeaderOrderKey = %v, want method/path/authority/scheme", pseudo)
 	}
 }

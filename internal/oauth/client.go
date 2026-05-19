@@ -5,24 +5,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	http "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/transport"
 	"github.com/redmemo/redmemo/internal/useragent"
 )
 
+// httpDoer is the subset of tls_client.HttpClient the OAuth client depends on,
+// narrowed so tests can inject a plain fhttp client.
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 const (
-	mobileClientID    = "ohXpoqrZYub1kg"
-	mobileEndpoint    = "https://www.reddit.com/auth/v2/oauth/access-token/loid"
-	genericWebAuth    = "Basic M1hmQkpXbGlIdnFBQ25YcmZJWWxMdzo="
-	genericEndpoint   = "https://www.reddit.com/api/v1/access_token"
-	authTimeout       = 5 * time.Second
-	maxRetries        = 5
+	mobileClientID  = "ohXpoqrZYub1kg"
+	mobileEndpoint  = "https://www.reddit.com/auth/v2/oauth/access-token/loid"
+	genericWebAuth  = "Basic M1hmQkpXbGlIdnFBQ25YcmZJWWxMdzo="
+	genericEndpoint = "https://www.reddit.com/api/v1/access_token"
+	authTimeout     = 5 * time.Second
+	maxRetries      = 5
 )
 
 type TokenResult struct {
@@ -33,7 +39,7 @@ type TokenResult struct {
 }
 
 type Client struct {
-	httpClient *http.Client
+	httpClient httpDoer
 	uaPool     *useragent.Pool
 
 	mu      sync.RWMutex
@@ -117,6 +123,7 @@ func (c *Client) mobileSpoofAuth() (*TokenResult, error) {
 	auth := "Basic " + basicAuth(mobileClientID, "")
 	req.Header.Set("Authorization", auth)
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -179,6 +186,7 @@ func (c *Client) genericWebAuth() (*TokenResult, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Sec-GPC", "1")
 	req.Header.Set("Connection", "keep-alive")
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

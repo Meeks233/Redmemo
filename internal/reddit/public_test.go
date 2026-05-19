@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	fhttp "github.com/bogdanfinn/fhttp"
 )
 
 // --- token bucket (tryAcquire) ---
@@ -114,7 +116,7 @@ func newTestPublicClient(t *testing.T, tokens int, handler http.Handler) *Public
 		t.Fatalf("parse server url: %v", err)
 	}
 	return &PublicClient{
-		httpClient: &http.Client{Transport: &rewriteTransport{scheme: u.Scheme, host: u.Host}},
+		httpClient: &fhttp.Client{Transport: &rewriteTransport{scheme: u.Scheme, host: u.Host}},
 		pinnedUA:   "test-public-ua/1.0",
 		tokens:     tokens,
 		maxTokens:  8,

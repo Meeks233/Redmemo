@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
@@ -25,8 +26,14 @@ type Proxy struct {
 	useNginx   bool
 	mediaStore *store.MediaIndexStore
 	cache      *cache.Cache
-	httpClient *http.Client
+	httpClient httpDoer
 	uaPool     *useragent.Pool
+}
+
+// httpDoer is the subset of tls_client.HttpClient the media proxy depends on,
+// narrowed so tests can inject a plain fhttp client.
+type httpDoer interface {
+	Do(*fhttp.Request) (*fhttp.Response, error)
 }
 
 func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache, uaPool *useragent.Pool) *Proxy {
@@ -300,11 +307,12 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaM
 }
 
 func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaMeta, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", originalURL, nil)
+	req, err := fhttp.NewRequestWithContext(ctx, "GET", originalURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("User-Agent", p.uaPool.Get())
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -390,7 +398,7 @@ func (p *Proxy) DownloadMedia(ctx context.Context, originalURL string) error {
 // reverseProxy streams targetURL straight through to the client. noStore
 // strips upstream caching headers and marks the response uncacheable.
 func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool) {
-	req, err := http.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
+	req, err := fhttp.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
 	if err != nil {
 		serveLoader(w, http.StatusAccepted)
 		return
@@ -402,6 +410,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 			req.Header.Set(h, v)
 		}
 	}
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

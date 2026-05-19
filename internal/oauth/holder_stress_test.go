@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/store"
 )
 
@@ -22,10 +23,10 @@ type authRewriteTransport struct {
 	host   string
 }
 
-func (t *authRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *authRewriteTransport) RoundTrip(req *fhttp.Request) (*fhttp.Response, error) {
 	req.URL.Scheme = t.scheme
 	req.URL.Host = t.host
-	return http.DefaultTransport.RoundTrip(req)
+	return fhttp.DefaultTransport.RoundTrip(req)
 }
 
 // newClientToServer builds an oauth.Client whose HTTP traffic is pinned to srv.
@@ -36,7 +37,7 @@ func newClientToServer(t *testing.T, srv *httptest.Server) *Client {
 		t.Fatalf("parse server url: %v", err)
 	}
 	return &Client{
-		httpClient: &http.Client{
+		httpClient: &fhttp.Client{
 			Timeout:   2 * time.Second,
 			Transport: &authRewriteTransport{scheme: u.Scheme, host: u.Host},
 		},
@@ -44,15 +45,15 @@ func newClientToServer(t *testing.T, srv *httptest.Server) *Client {
 }
 
 // rlResp builds a bare response carrying only rate-limit headers.
-func rlResp(remaining, reset string) *http.Response {
-	h := http.Header{}
+func rlResp(remaining, reset string) *fhttp.Response {
+	h := fhttp.Header{}
 	if remaining != "" {
 		h.Set("X-Ratelimit-Remaining", remaining)
 	}
 	if reset != "" {
 		h.Set("X-Ratelimit-Reset", reset)
 	}
-	return &http.Response{Header: h}
+	return &fhttp.Response{Header: h}
 }
 
 // --- concurrency / stress ---

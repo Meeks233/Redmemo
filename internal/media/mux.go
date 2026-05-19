@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/transport"
 )
 
 var (
@@ -534,11 +536,12 @@ func (p *Proxy) probeAudio(ctx context.Context, videoURL, tmpDir string) (string
 // code, so the caller can distinguish 4xx (definitively absent) from 5xx /
 // network errors (transient).
 func (p *Proxy) downloadToWithStatus(ctx context.Context, url, dst string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := fhttp.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("User-Agent", p.uaPool.Get())
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

@@ -5,14 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	http "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/redmemo/redmemo/internal/transport"
 )
+
+// httpDoer is the subset of tls_client.HttpClient the Reddit clients depend on.
+// Narrowing the field to this interface keeps the spoofed transport in
+// production while letting tests inject a plain fhttp client.
+type httpDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
 
 const redditAPIBase = "https://oauth.reddit.com"
 
@@ -46,19 +54,16 @@ type TokenInfo struct {
 // Client is a Reddit API client backed by an OAuth token source.
 type Client struct {
 	tokens     TokenProvider
-	httpClient *http.Client
+	httpClient httpDoer
 	etags      *etagCache
 }
 
-// NewClient creates a new Reddit API client.
+// NewClient creates a new Reddit API client. Redirects are not followed by the
+// transport — doRequestDepth handles 3xx hops itself.
 func NewClient(tokens TokenProvider) *Client {
-	cli := transport.NewSpoofedClient(30 * time.Second)
-	cli.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
 	return &Client{
 		tokens:     tokens,
-		httpClient: cli,
+		httpClient: transport.NewSpoofedClient(30*time.Second, tls_client.WithNotFollowRedirects()),
 		etags:      newETagCache(2000),
 	}
 }
@@ -237,6 +242,8 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 	if hasCached {
 		req.Header.Set("If-None-Match", cachedETag)
 	}
+
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

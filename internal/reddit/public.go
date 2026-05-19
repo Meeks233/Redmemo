@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
+	http "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/transport"
 	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type PublicClient struct {
-	httpClient *http.Client
+	httpClient httpDoer
 	uaPool     *useragent.Pool
 	pinnedUA   string
 
@@ -70,6 +70,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	req.Header.Set("User-Agent", c.pinnedUA)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Cookie", quarantineCookie)
+	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

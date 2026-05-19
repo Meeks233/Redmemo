@@ -33,8 +33,8 @@ func TestTruncate(t *testing.T) {
 		maxLen int
 		want   string
 	}{
-		{"hello", 10, "hello"},        // shorter than limit — unchanged
-		{"hello", 5, "hello"},         // exactly the limit — unchanged
+		{"hello", 10, "hello"},         // shorter than limit — unchanged
+		{"hello", 5, "hello"},          // exactly the limit — unchanged
 		{"hello world", 5, "hello..."}, // longer — truncated with ellipsis
 		{"", 5, ""},
 	}
@@ -129,4 +129,3 @@ func TestAuthenticate_AllAttemptsFail(t *testing.T) {
 		t.Errorf("err = %v, want 'all auth attempts failed'", err)
 	}
 }
-

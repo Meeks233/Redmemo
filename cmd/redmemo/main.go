@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
@@ -211,7 +212,7 @@ func (a *oauthAdapter) Token() *reddit.TokenInfo {
 	}
 }
 
-func (a *oauthAdapter) OnRequestComplete(tokenID int, resp *http.Response) {
+func (a *oauthAdapter) OnRequestComplete(tokenID int, resp *fhttp.Response) {
 	a.holder.OnRequestComplete(tokenID, resp)
 }
 
