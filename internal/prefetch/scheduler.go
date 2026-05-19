@@ -68,6 +68,10 @@ type cycleState struct {
 	NextCycleAt time.Time         `json:"next_cycle_at"`
 	Round       int               `json:"round"`
 	Cursors     map[string]string `json:"cursors"`
+	// Exhausted records subs whose listing returned no further pages. A sub
+	// missing from Cursors is NOT necessarily exhausted — it may have failed
+	// to fetch — so resumption must consult this set, not cursor presence.
+	Exhausted map[string]bool `json:"exhausted,omitempty"`
 }
 
 const cycleStateKey = "_prefetch_cycle_state"
@@ -410,6 +414,7 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 	// Try to restore state from a previous run
 	var startRound int
 	cursors := make(map[string]string)
+	exhausted := make(map[string]bool)
 	var cycleWait time.Duration
 
 	if saved := s.loadCycleState(); saved != nil && !saved.NextCycleAt.IsZero() {
@@ -423,6 +428,9 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			startRound = saved.Round
 			if saved.Cursors != nil {
 				cursors = saved.Cursors
+			}
+			if saved.Exhausted != nil {
+				exhausted = saved.Exhausted
 			}
 			cycleWait = time.Until(saved.NextCycleAt)
 			if cycleWait <= 0 {
@@ -464,11 +472,15 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 				return err
 			}
 
-			if round > 0 {
-				if _, hasCursor := cursors[sub]; !hasCursor {
-					continue
-				}
+			// Skip only subs that genuinely ran out of pages. A sub that
+			// failed to fetch in an earlier round has no cursor either, but
+			// must be retried — not silently dropped for the rest of the cycle.
+			if round > 0 && exhausted[sub] {
+				continue
 			}
+			// This sub is still in play this round (whether it succeeds or
+			// fails), so the cycle should not end early on its account.
+			activeSubs++
 
 			cursor := cursors[sub]
 			var posts []reddit.Post
@@ -510,9 +522,9 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 
 			if after != "" {
 				cursors[sub] = after
-				activeSubs++
 			} else {
 				delete(cursors, sub)
+				exhausted[sub] = true
 				s.Events.Addf(LevelInfo, "L1", "r/%s: no more pages after round %d", sub, round+1)
 			}
 
@@ -537,6 +549,7 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			NextCycleAt: nextCycleAt,
 			Round:       round + 1,
 			Cursors:     cursors,
+			Exhausted:   exhausted,
 		})
 		s.setL1Status("running", round+1, maxRoundsPerCycle, subs, cursors, nextCycleAt)
 
@@ -837,8 +850,17 @@ func ExtractMediaItems(p *reddit.Post) []mediaItem {
 	if p.Media.Poster != "" {
 		items = append(items, mediaItem{URL: reddit.UnformatURL(p.Media.Poster), Kind: "poster"})
 	}
-	if p.Thumbnail.URL != "" {
-		items = append(items, mediaItem{URL: reddit.UnformatURL(p.Thumbnail.URL), Kind: "thumbnail"})
+	// The thumbnail is only rendered in listing cards for non-media post types
+	// (link/etc.) — see the post_thumbnail block in partials.html, gated on
+	// PostType not being self/image/video/gif. For media posts the card shows
+	// the full Media.URL, so caching the tiny thumbnail is a wasted upstream
+	// fetch; skip it for exactly the types the template skips.
+	switch p.PostType {
+	case "image", "video", "gif", "self":
+	default:
+		if p.Thumbnail.URL != "" {
+			items = append(items, mediaItem{URL: reddit.UnformatURL(p.Thumbnail.URL), Kind: "thumbnail"})
+		}
 	}
 	for i := range p.Gallery {
 		if p.Gallery[i].URL != "" {

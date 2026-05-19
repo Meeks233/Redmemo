@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ func (h *Handler) handleUserPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id string) {
+	t := newReqTimer()
 	prefs := h.readPreferences(r)
 	urlPath := r.URL.Path
 	commentSort := r.URL.Query().Get("sort")
@@ -36,16 +38,19 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 		cacheKey += "?sort=" + commentSort
 	}
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
+		t.mark("cache")
+		t.writeHeader(w)
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(cached)
 		return
 	}
+	t.mark("cache")
 
 	// 2. HR gate / OAuth quota
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderPostFallback(w, r, sub, id, commentSort, prefs) {
+		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t) {
 			return
 		}
 	}
@@ -54,7 +59,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	// (reason==""); when degraded, only the amber degraded banner shows.
 	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
-		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason)
+		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason, t)
 		return
 	}
 
@@ -127,9 +132,10 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"ok":true}`)
 }
 
-func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences) bool {
+func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences, t *reqTimer) bool {
 	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
 	h.recordUpstream(r.Context())
+	t.mark("upstream")
 	if err != nil {
 		log.Printf("handler: fallback fetch post %s/%s: %v", sub, id, err)
 		return false
@@ -158,16 +164,21 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
 	}
 
+	var buf bytes.Buffer
+	if err := h.renderer.RenderPost(&buf, data); err != nil {
+		log.Printf("handler: render post: %v", err)
+	}
+	t.mark("render")
+
+	t.writeHeader(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "fallback")
-	if err := h.renderer.RenderPost(w, data); err != nil {
-		log.Printf("handler: render post: %v", err)
-	}
+	w.Write(buf.Bytes())
 	return true
 }
 
-func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string) {
+func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string, t *reqTimer) {
 	var post reddit.Post
 	if err := json.Unmarshal(sp.JSONData, &post); err != nil {
 		h.renderer.RenderError(w, prefs.Lang, "存档数据解析失败", http.StatusInternalServerError)
@@ -180,6 +191,7 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if stored != nil {
 		json.Unmarshal(stored.JSONData, &comments)
 	}
+	t.mark("archive-decode")
 
 	data := render.PostPageData{
 		BasePage: render.BasePage{
@@ -197,10 +209,15 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		IsOffline:       offline,
 	}
 
+	var buf bytes.Buffer
+	if err := h.renderer.RenderPost(&buf, data); err != nil {
+		log.Printf("handler: render post from archive: %v", err)
+	}
+	t.mark("render")
+
+	t.writeHeader(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "archive")
-	if err := h.renderer.RenderPost(w, data); err != nil {
-		log.Printf("handler: render post from archive: %v", err)
-	}
+	w.Write(buf.Bytes())
 }

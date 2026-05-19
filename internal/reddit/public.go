@@ -13,6 +13,12 @@ import (
 	"github.com/redmemo/redmemo/internal/useragent"
 )
 
+// publicCookie augments the quarantine/gated opt-in cookie with over18=1.
+// www.reddit.com gates NSFW listings on this cookie (the oauth.reddit.com
+// host instead honors the include_over_18 query param), so without it NSFW
+// subreddits like r/golang are rejected with a 403.
+const publicCookie = quarantineCookie + `; over18=1`
+
 type PublicClient struct {
 	httpClient httpDoer
 	uaPool     *useragent.Pool
@@ -69,7 +75,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	}
 	req.Header.Set("User-Agent", c.pinnedUA)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Cookie", quarantineCookie)
+	req.Header.Set("Cookie", publicCookie)
 	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)

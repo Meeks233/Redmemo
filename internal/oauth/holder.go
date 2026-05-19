@@ -234,6 +234,9 @@ func (p *TokenHolder) refreshLoop(ctx context.Context) {
 
 // ForceRefresh re-authenticates with a new device identity. Thread-safe with cooldown.
 func (p *TokenHolder) forceRefresh(reason string) {
+	if p.client == nil {
+		return
+	}
 	if !p.refreshMu.TryLock() {
 		return
 	}
@@ -315,6 +318,9 @@ func (p *TokenHolder) Token() *ManagedToken {
 	defer p.mu.Unlock()
 
 	if p.active == nil {
+		// No token at all (e.g. startup auth failed). Kick off recovery now
+		// instead of waiting up to 22 min for the refresh loop's idle tick.
+		go p.forceRefresh("no_active_token")
 		return nil
 	}
 

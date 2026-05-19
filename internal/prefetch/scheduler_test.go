@@ -114,6 +114,8 @@ func TestExtractMediaURLs_UnformatsProxyPaths(t *testing.T) {
 }
 
 func TestExtractMediaItems_VideoPost(t *testing.T) {
+	// A video post's listing card shows the full media, not the thumbnail —
+	// so the thumbnail must NOT be extracted even when present.
 	p := &reddit.Post{
 		ID:       "v1",
 		PostType: "video",
@@ -124,14 +126,13 @@ func TestExtractMediaItems_VideoPost(t *testing.T) {
 		Thumbnail: reddit.Media{URL: "/thumb/a/thumb.jpg"},
 	}
 	items := ExtractMediaItems(p)
-	if len(items) != 3 {
-		t.Fatalf("expected 3 items, got %d: %+v", len(items), items)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items (thumbnail skipped for video), got %d: %+v", len(items), items)
 	}
-	wantKinds := []string{"video", "poster", "thumbnail"}
+	wantKinds := []string{"video", "poster"}
 	wantURLs := []string{
 		"https://v.redd.it/abc123/DASH_720.mp4",
 		"https://preview.redd.it/poster.jpg?width=640",
-		"https://a.thumbs.redditmedia.com/thumb.jpg",
 	}
 	for i, item := range items {
 		if item.Kind != wantKinds[i] {
@@ -140,6 +141,27 @@ func TestExtractMediaItems_VideoPost(t *testing.T) {
 		if item.URL != wantURLs[i] {
 			t.Errorf("items[%d].URL = %q, want %q", i, item.URL, wantURLs[i])
 		}
+	}
+}
+
+func TestExtractMediaItems_LinkPostKeepsThumbnail(t *testing.T) {
+	// A link post's listing card DOES render the thumbnail, so it must still
+	// be extracted and cached.
+	p := &reddit.Post{
+		ID:        "l1",
+		PostType:  "link",
+		Media:     reddit.Media{URL: "https://example.com/article"},
+		Thumbnail: reddit.Media{URL: "/thumb/a/thumb.jpg"},
+	}
+	items := ExtractMediaItems(p)
+	var gotThumb bool
+	for _, it := range items {
+		if it.Kind == "thumbnail" {
+			gotThumb = true
+		}
+	}
+	if !gotThumb {
+		t.Errorf("link post should keep thumbnail, got %+v", items)
 	}
 }
 

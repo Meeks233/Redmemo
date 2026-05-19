@@ -173,8 +173,8 @@ func TestPublicFetch_SetsHeaders(t *testing.T) {
 	if accept != "application/json" {
 		t.Errorf("Accept = %q", accept)
 	}
-	if cookie != quarantineCookie {
-		t.Errorf("Cookie = %q, want quarantine opt-in cookie", cookie)
+	if cookie != publicCookie {
+		t.Errorf("Cookie = %q, want public opt-in cookie", cookie)
 	}
 }
 

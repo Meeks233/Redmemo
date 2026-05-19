@@ -77,6 +77,9 @@ func IdentityFromProfile(p *store.DeviceProfile) SpoofIdentity {
 		"Content-Type":          "application/json; charset=UTF-8",
 		"client-vendor-id":      p.DeviceID,
 		"X-Reddit-Device-Id":    p.DeviceID,
+		// Set explicitly so the transport does not inject its own default
+		// ("gzip, deflate, br"); real Reddit Android (OkHttp) advertises gzip only.
+		"Accept-Encoding": "gzip",
 	}
 
 	return SpoofIdentity{
