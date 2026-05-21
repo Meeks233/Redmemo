@@ -1,0 +1,43 @@
+# Git metadata
+.git
+.gitignore
+.gitattributes
+
+# Reference / docs / dev-only directories
+_redlib_ref
+docs
+scripts
+deploy
+
+# Local secrets — never bake into image layers
+config.yaml
+
+# IDE / editor
+.vscode
+.claude
+.idea
+
+# Build artifacts
+bin
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# OS / Claude Code junk
+.cc-turn-done
+nul
+Thumbs.db
+.DS_Store
+
+# Root meta files not needed inside the image
+CLAUDE.md
+Makefile
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Logs
+*.log
