@@ -1,6 +1,6 @@
 # Research notes
-redlib.md
-reddit.md
+docs/redlib.md
+docs/reddit.md
 
 # Redlib reference clone
 _redlib_ref/
@@ -13,7 +13,7 @@ config.yaml
 !config.example.yaml
 
 # Internal docs
-structure.md
+docs/structure.md
 CLAUDE.md
 
 # Claude Code turn-end marker (used by deploy.ps1 watch mode)
@@ -24,3 +24,7 @@ CLAUDE.md
 
 # Windows accidental redirect artifact (e.g. `> /dev/null` parsed as `> nul`)
 nul
+
+.vscode
+
+docs
