@@ -1,11 +1,9 @@
-# Research notes
-docs/redlib.md
-docs/reddit.md
-
-# Redlib reference clone
+# --- Project-internal directories ---
+docs
+scripts
 _redlib_ref/
 
-# Build output
+# --- Build output ---
 bin/
 *.exe
 *.dll
@@ -14,25 +12,44 @@ bin/
 *.test
 *.out
 
-# Runtime config (contains secrets)
+# --- Go tooling output ---
+*.pprof
+coverage.out
+coverage.html
+*.coverprofile
+
+# --- Runtime secrets / local config ---
 config.yaml
 !config.example.yaml
+.env
+.env.*
 
-# Internal docs
-docs/structure.md
+# --- Logs & temp ---
+*.log
+*.tmp
+*.temp
+
+# --- Editor backups ---
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# --- IDE / per-machine ---
+.vscode/
+.idea/
+*.iml
+.history/
+
+# --- Claude Code (per-machine) ---
+.claude/
+.cc-turn-done
 CLAUDE.md
 
-# Claude Code turn-end marker (used by deploy/deploy.ps1 watch mode)
-.cc-turn-done
-
-# Local Claude Code settings (per-machine)
-.claude/
-
-# Windows accidental redirect artifact (e.g. `> /dev/null` parsed as `> nul`)
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
 nul
-
-.vscode
-
-docs
-
-scripts
