@@ -6,11 +6,7 @@ services:
     environment:
       - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:-redmemo_dev}@postgres:5432/redmemo?sslmode=disable
       - REDMEMO_REDIS_ADDR=redis:6379
-      # Legacy settings sync: auto-discovers redlib via Docker DNS (redlib:8080)
-      # To use an external redlib instance instead:
-      #   REDMEMO_LEGACY_INSTANCE=192.168.1.100:8080
-      # To disable sync entirely:
-      #   REDMEMO_LEGACY_SYNC=false
+      - REDMEMO_LEGACY_SYNC=false
     volumes:
       - ./config.yaml:/etc/redmemo/config.yaml:ro
       - media_data:/data/media
@@ -49,23 +45,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    restart: unless-stopped
-
-  # Optional: keep a redlib instance for one-time settings migration.
-  # RedMemo will auto-sync settings on first startup, then never contact it again.
-  # Safe to remove after migration is complete.
-  redlib:
-    image: quay.io/redlib/redlib:latest
-    ports:
-      - "8081:8080"
-    environment:
-      - SFW_ONLY=off
-      - REDLIB_DEFAULT_THEME=dark
-      - REDLIB_DEFAULT_SHOW_NSFW=on
-      - REDLIB_DEFAULT_REMOVE_DEFAULT_FEEDS=on
-      - REDLIB_DEFAULT_USE_HLS=on
-    profiles:
-      - migration
     restart: unless-stopped
 
 volumes:
