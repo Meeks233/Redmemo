@@ -137,6 +137,13 @@ func main() {
 	// window the closure blocks on WaitForUserAgent instead of falling back
 	// to a pool UA — emitting a different UA than the (about-to-be)
 	// authoritative session from one IP is a stealth tell.
+	// One-shot purge of pre-v20 URL-hash media files. Idempotent — the
+	// sentinel inside cfg.Media.RootPath keeps subsequent startups from
+	// touching anything once the wipe has run.
+	if err := media.WipeLegacyRootIfNeeded(cfg.Media.RootPath); err != nil {
+		log.Printf("media: legacy cleanup: %v", err)
+	}
+
 	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, func() string {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
