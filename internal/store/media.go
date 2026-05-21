@@ -3,8 +3,20 @@ package store
 import (
 	"database/sql"
 	"fmt"
+
+	"github.com/redmemo/redmemo/internal/reddit"
 )
 
+// MediaIndexStore is a content-addressed media cache backed by two tables:
+//
+//   media_content — keyed by sha256(file_bytes). One row per unique file.
+//                   Holds file_path, audio_state, eviction stats.
+//   media_url     — keyed by CanonicalKey(rawURL). Maps a stable URL identity
+//                   (query stripped) onto a content row. Many URLs can alias
+//                   the same content.
+//
+// Callers still pass raw URLs (or muxed: prefixed keys). Canonicalization is
+// internal so the call sites in media/proxy.go and media/mux.go are unchanged.
 type MediaIndexStore struct {
 	db *sql.DB
 }
@@ -13,14 +25,19 @@ func NewMediaIndexStore(db *sql.DB) *MediaIndexStore {
 	return &MediaIndexStore{db: db}
 }
 
-func (s *MediaIndexStore) Resolve(originalURL string) (*MediaMeta, error) {
+// Resolve returns the cached media for rawURL — joining the URL row to its
+// content row by canonical key. Returns (nil, nil) when the canonical key is
+// unknown (no media_url entry yet).
+func (s *MediaIndexStore) Resolve(rawURL string) (*MediaMeta, error) {
+	key := reddit.CanonicalKey(rawURL)
 	m := &MediaMeta{}
 	err := s.db.QueryRow(`
-		SELECT original_url, hash, file_path, mime_type, file_size,
-		       first_seen, last_accessed, access_count, audio_state,
-		       audio_fail_count, last_audio_attempt_at
-		FROM media_index
-		WHERE original_url = $1`, originalURL,
+		SELECT u.raw_url, c.content_hash, c.file_path, c.mime_type, c.file_size,
+		       c.first_seen, c.last_accessed, c.access_count, c.audio_state,
+		       c.audio_fail_count, c.last_audio_attempt_at
+		FROM media_url u
+		JOIN media_content c ON c.content_hash = u.content_hash
+		WHERE u.canonical_key = $1`, key,
 	).Scan(
 		&m.OriginalURL, &m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
 		&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.AudioState,
@@ -35,28 +52,123 @@ func (s *MediaIndexStore) Resolve(originalURL string) (*MediaMeta, error) {
 	return m, nil
 }
 
+// Save upserts a (content, url) pair after a successful fetch. meta.Hash is
+// the hex sha256 of the file bytes — the new authoritative identifier. The
+// variant-upgrade rule applies: if the canonical_key already points at a
+// different (smaller) content row, repoint to the new larger file and NULL the
+// old content row's file_path so eviction sweeps the orphan. Same-size or
+// smaller fetches are no-ops on the URL row (we keep the better copy).
 func (s *MediaIndexStore) Save(meta *MediaMeta) error {
-	_, err := s.db.Exec(`
-		INSERT INTO media_index (original_url, hash, file_path, mime_type, file_size)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (original_url) DO UPDATE SET
-			file_path     = EXCLUDED.file_path,
-			mime_type     = EXCLUDED.mime_type,
-			file_size     = EXCLUDED.file_size,
-			last_accessed = NOW()`,
-		meta.OriginalURL, meta.Hash, meta.FilePath, meta.MIMEType, meta.FileSize,
-	)
-	if err != nil {
-		return fmt.Errorf("save media: %w", err)
+	if meta.Hash == "" {
+		return fmt.Errorf("save media: empty content hash")
 	}
-	return nil
+	if meta.FilePath == nil {
+		return fmt.Errorf("save media: nil file path")
+	}
+	key := reddit.CanonicalKey(meta.OriginalURL)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin save: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Upsert the content row. Existing row keeps its audio_state and access
+	// stats; only file_path / mime / size are refreshed (in case the file was
+	// previously evicted and we just re-downloaded it).
+	if _, err := tx.Exec(`
+		INSERT INTO media_content (content_hash, file_path, mime_type, file_size)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (content_hash) DO UPDATE SET
+			file_path = EXCLUDED.file_path,
+			mime_type = EXCLUDED.mime_type,
+			file_size = EXCLUDED.file_size`,
+		meta.Hash, *meta.FilePath, meta.MIMEType, meta.FileSize,
+	); err != nil {
+		return fmt.Errorf("upsert content: %w", err)
+	}
+
+	// Variant-upgrade: look up what the canonical currently points at.
+	var (
+		existingHash *string
+		existingSize *int64
+	)
+	err = tx.QueryRow(`
+		SELECT u.content_hash, c.file_size
+		FROM media_url u
+		JOIN media_content c ON c.content_hash = u.content_hash
+		WHERE u.canonical_key = $1`, key,
+	).Scan(&existingHash, &existingSize)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("lookup existing url: %w", err)
+	}
+
+	repoint := true
+	if existingHash != nil {
+		if *existingHash == meta.Hash {
+			// Same content; nothing to do beyond refreshing raw_url (the
+			// signature on the latest fetch is the freshest one we have).
+			if _, err := tx.Exec(
+				`UPDATE media_url SET raw_url = $1 WHERE canonical_key = $2`,
+				meta.OriginalURL, key,
+			); err != nil {
+				return fmt.Errorf("refresh raw_url: %w", err)
+			}
+			return tx.Commit()
+		}
+		// Different content under the same canonical. Bigger wins — a fresh
+		// thumbnail fetch must never overwrite a larger source already cached.
+		if existingSize != nil && *existingSize >= meta.FileSize {
+			repoint = false
+		}
+	}
+
+	if !repoint {
+		// Keep the existing (larger) mapping. The new content row stays in the
+		// content table — another canonical may alias it later, or eviction
+		// will clean it up.
+		return tx.Commit()
+	}
+
+	// Repoint or insert the URL mapping.
+	if _, err := tx.Exec(`
+		INSERT INTO media_url (canonical_key, raw_url, content_hash)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (canonical_key) DO UPDATE SET
+			raw_url      = EXCLUDED.raw_url,
+			content_hash = EXCLUDED.content_hash`,
+		key, meta.OriginalURL, meta.Hash,
+	); err != nil {
+		return fmt.Errorf("upsert url: %w", err)
+	}
+
+	// NULL the orphaned old content's file_path so eviction reclaims the
+	// disk byte. Skip if any other URL still aliases that content.
+	if existingHash != nil {
+		if _, err := tx.Exec(`
+			UPDATE media_content
+			SET file_path = NULL
+			WHERE content_hash = $1
+			  AND NOT EXISTS (SELECT 1 FROM media_url WHERE content_hash = $1)`,
+			*existingHash,
+		); err != nil {
+			return fmt.Errorf("orphan old content: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
-func (s *MediaIndexStore) RecordAccess(originalURL string) error {
+// RecordAccess bumps last_accessed and access_count on the content row that
+// rawURL's canonical key resolves to. A canonical that does not map yet is a
+// silent no-op (the next Save will install the row).
+func (s *MediaIndexStore) RecordAccess(rawURL string) error {
+	key := reddit.CanonicalKey(rawURL)
 	_, err := s.db.Exec(`
-		UPDATE media_index
+		UPDATE media_content
 		SET last_accessed = NOW(), access_count = access_count + 1
-		WHERE original_url = $1`, originalURL,
+		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`,
+		key,
 	)
 	if err != nil {
 		return fmt.Errorf("record media access: %w", err)
@@ -64,6 +176,7 @@ func (s *MediaIndexStore) RecordAccess(originalURL string) error {
 	return nil
 }
 
+// BatchRecordAccess applies RecordAccess to many URLs inside one transaction.
 func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	if len(urls) == 0 {
 		return nil
@@ -73,9 +186,9 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 		return fmt.Errorf("begin batch access: %w", err)
 	}
 	stmt, err := tx.Prepare(`
-		UPDATE media_index
+		UPDATE media_content
 		SET last_accessed = NOW(), access_count = access_count + 1
-		WHERE original_url = $1`)
+		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("prepare batch access: %w", err)
@@ -83,7 +196,7 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	defer stmt.Close()
 
 	for _, url := range urls {
-		if _, err := stmt.Exec(url); err != nil {
+		if _, err := stmt.Exec(reddit.CanonicalKey(url)); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("batch access %s: %w", url, err)
 		}
@@ -91,65 +204,150 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	return tx.Commit()
 }
 
+// Stats reports the count and total file size of resident (non-evicted)
+// content rows. Used by the settings page disk-usage display.
 func (s *MediaIndexStore) Stats() (count int64, totalSize int64, err error) {
-	err = s.db.QueryRow(`SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(file_size), 0) FROM media_index WHERE file_path IS NOT NULL`).Scan(&count, &totalSize)
+	err = s.db.QueryRow(`
+		SELECT COALESCE(COUNT(*), 0), COALESCE(SUM(file_size), 0)
+		FROM media_content
+		WHERE file_path IS NOT NULL`).Scan(&count, &totalSize)
 	return
 }
 
-// Delete removes a media_index row and returns its file_path (if any) so the
-// caller can unlink the cached file. Used to drop the legacy silent video-only
-// row once a proper muxed copy supersedes it.
-func (s *MediaIndexStore) Delete(originalURL string) (*string, error) {
-	var filePath *string
-	err := s.db.QueryRow(
-		`DELETE FROM media_index WHERE original_url = $1 RETURNING file_path`,
-		originalURL,
-	).Scan(&filePath)
+// Delete removes a media_url row by canonical key. If the underlying content
+// row is now orphaned (no other URL aliases it), its file_path is returned
+// so the caller can unlink the file; otherwise nil. The content row itself
+// is left in place — its row is cheap and a future fetch may re-attach.
+func (s *MediaIndexStore) Delete(rawURL string) (*string, error) {
+	key := reddit.CanonicalKey(rawURL)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin delete: %w", err)
+	}
+	defer tx.Rollback()
+
+	var contentHash string
+	err = tx.QueryRow(
+		`DELETE FROM media_url WHERE canonical_key = $1 RETURNING content_hash`,
+		key,
+	).Scan(&contentHash)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("delete media: %w", err)
+		return nil, fmt.Errorf("delete media url: %w", err)
+	}
+
+	var stillReferenced bool
+	if err := tx.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM media_url WHERE content_hash = $1)`,
+		contentHash,
+	).Scan(&stillReferenced); err != nil {
+		return nil, fmt.Errorf("check orphan content: %w", err)
+	}
+
+	if stillReferenced {
+		return nil, tx.Commit()
+	}
+
+	// Orphaned: read the file_path, then clear it. Two statements in the same
+	// tx — the read sees the pre-update value, the caller os.Removes it.
+	var filePath *string
+	err = tx.QueryRow(
+		`SELECT file_path FROM media_content WHERE content_hash = $1`,
+		contentHash,
+	).Scan(&filePath)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("read orphan file_path: %w", err)
+	}
+	if _, err := tx.Exec(
+		`UPDATE media_content SET file_path = NULL WHERE content_hash = $1`,
+		contentHash,
+	); err != nil {
+		return nil, fmt.Errorf("clear orphan file_path: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return filePath, nil
 }
 
-// DeleteSupersededPlainRows removes every legacy non-muxed video row whose
-// content is now superseded by a muxed: row that holds a conclusive cached
-// file ('has_audio' or 'silent'). Returns the file paths of the deleted rows
-// so the caller can unlink the orphaned files. Idempotent.
+// DeleteSupersededPlainRows drops every legacy non-muxed video URL row whose
+// muxed:<inner> counterpart already holds a conclusive cached file. Returns
+// file paths of any orphaned content (the unmuxed silent file) so the caller
+// can unlink them. Idempotent.
 func (s *MediaIndexStore) DeleteSupersededPlainRows() ([]string, error) {
-	rows, err := s.db.Query(`
-		DELETE FROM media_index AS plain
-		WHERE plain.original_url NOT LIKE 'muxed:%'
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin sweep: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`
+		DELETE FROM media_url AS plain
+		WHERE plain.canonical_key NOT LIKE 'muxed:%'
 		  AND EXISTS (
-		      SELECT 1 FROM media_index m
-		      WHERE m.original_url = 'muxed:' || plain.original_url
-		        AND m.audio_state IN ('has_audio', 'silent')
-		        AND m.file_path IS NOT NULL
+		      SELECT 1 FROM media_url mu
+		      JOIN media_content mc ON mc.content_hash = mu.content_hash
+		      WHERE mu.canonical_key = 'muxed:' || plain.canonical_key
+		        AND mc.audio_state IN ('has_audio', 'silent')
+		        AND mc.file_path IS NOT NULL
 		  )
-		RETURNING plain.file_path`)
+		RETURNING plain.content_hash`)
 	if err != nil {
 		return nil, fmt.Errorf("delete superseded plain rows: %w", err)
 	}
-	defer rows.Close()
+	var orphans []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan superseded plain row: %w", err)
+		}
+		orphans = append(orphans, h)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 
 	var paths []string
-	for rows.Next() {
+	for _, h := range orphans {
 		var fp *string
-		if err := rows.Scan(&fp); err != nil {
-			return nil, fmt.Errorf("scan superseded plain row: %w", err)
+		err := tx.QueryRow(`
+			UPDATE media_content
+			SET file_path = NULL
+			WHERE content_hash = $1
+			  AND NOT EXISTS (SELECT 1 FROM media_url WHERE content_hash = $1)
+			RETURNING file_path`,
+			h,
+		).Scan(&fp)
+		if err == sql.ErrNoRows {
+			continue // still referenced by another URL
+		}
+		if err != nil {
+			return nil, fmt.Errorf("orphan content: %w", err)
 		}
 		if fp != nil {
 			paths = append(paths, *fp)
 		}
 	}
-	return paths, rows.Err()
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return paths, nil
 }
 
-func (s *MediaIndexStore) MarkEvicted(hash string) error {
-	_, err := s.db.Exec(`
-		UPDATE media_index SET file_path = NULL WHERE hash = $1`, hash,
+// MarkEvicted clears the file_path on a content row whose disk file the
+// evictor has just removed. The URL aliases stay so the next request can
+// re-trigger a fetch and re-attach.
+func (s *MediaIndexStore) MarkEvicted(contentHash string) error {
+	_, err := s.db.Exec(
+		`UPDATE media_content SET file_path = NULL WHERE content_hash = $1`,
+		contentHash,
 	)
 	if err != nil {
 		return fmt.Errorf("mark evicted: %w", err)
@@ -157,14 +355,16 @@ func (s *MediaIndexStore) MarkEvicted(hash string) error {
 	return nil
 }
 
-// SetAudioState updates the audio verdict on an existing media_index row and
-// resets the failure counter. Caller must Save the row first. Used for the
-// conclusive verdicts "has_audio" and "silent".
-func (s *MediaIndexStore) SetAudioState(originalURL, state string) error {
+// SetAudioState writes a conclusive audio verdict ("has_audio" or "silent")
+// on the content row aliased by rawURL's canonical key and resets the failure
+// counter. Used by the muxing pipeline once it knows the truth about a video.
+func (s *MediaIndexStore) SetAudioState(rawURL, state string) error {
+	key := reddit.CanonicalKey(rawURL)
 	_, err := s.db.Exec(`
-		UPDATE media_index SET audio_state = $2, audio_fail_count = 0
-		WHERE original_url = $1`,
-		originalURL, state,
+		UPDATE media_content
+		SET audio_state = $2, audio_fail_count = 0
+		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`,
+		key, state,
 	)
 	if err != nil {
 		return fmt.Errorf("set audio state: %w", err)
@@ -172,21 +372,21 @@ func (s *MediaIndexStore) SetAudioState(originalURL, state string) error {
 	return nil
 }
 
-// RecordAudioFailure increments the failure counter on an existing media_index
-// row (caller must Save the emergency-silent file first) and stamps the attempt
-// time. While the count stays below abandonThreshold the row is 'failed' (L5
-// keeps retrying); once it reaches the threshold it flips to 'abandoned' and
-// L5 stops. Returns the resulting audio_state.
-func (s *MediaIndexStore) RecordAudioFailure(originalURL string, abandonThreshold int) (string, error) {
+// RecordAudioFailure increments the failure counter on the content row and
+// stamps the attempt time. Below the threshold the row is 'failed' (L5 keeps
+// retrying); once it reaches the threshold it flips to 'abandoned' and L5
+// stops. Returns the resulting audio_state.
+func (s *MediaIndexStore) RecordAudioFailure(rawURL string, abandonThreshold int) (string, error) {
+	key := reddit.CanonicalKey(rawURL)
 	var state string
 	err := s.db.QueryRow(`
-		UPDATE media_index
+		UPDATE media_content
 		SET audio_fail_count = audio_fail_count + 1,
 		    last_audio_attempt_at = NOW(),
 		    audio_state = CASE WHEN audio_fail_count + 1 >= $2 THEN 'abandoned' ELSE 'failed' END
-		WHERE original_url = $1
+		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)
 		RETURNING audio_state`,
-		originalURL, abandonThreshold,
+		key, abandonThreshold,
 	).Scan(&state)
 	if err != nil {
 		return "", fmt.Errorf("record audio failure: %w", err)
@@ -194,15 +394,16 @@ func (s *MediaIndexStore) RecordAudioFailure(originalURL string, abandonThreshol
 	return state, nil
 }
 
-// ReviveAudio moves an 'abandoned' row back to 'failed' with a fresh retry
-// budget, so the L5 layer picks it up again. Called when a user views a video
-// whose audio mux was previously abandoned. No-op for rows not 'abandoned'.
-func (s *MediaIndexStore) ReviveAudio(originalURL string) error {
+// ReviveAudio moves an 'abandoned' content row back to 'failed' so L5 picks
+// it up again. No-op for rows not 'abandoned'.
+func (s *MediaIndexStore) ReviveAudio(rawURL string) error {
+	key := reddit.CanonicalKey(rawURL)
 	_, err := s.db.Exec(`
-		UPDATE media_index
+		UPDATE media_content
 		SET audio_state = 'failed', audio_fail_count = 0
-		WHERE original_url = $1 AND audio_state = 'abandoned'`,
-		originalURL,
+		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)
+		  AND audio_state = 'abandoned'`,
+		key,
 	)
 	if err != nil {
 		return fmt.Errorf("revive audio: %w", err)
@@ -210,14 +411,17 @@ func (s *MediaIndexStore) ReviveAudio(originalURL string) error {
 	return nil
 }
 
-// ListAudioFailed returns the original_url of muxed entries parked as 'failed',
-// oldest first (first-come-first-served), capped at limit. 'abandoned' rows are
-// intentionally excluded — L5 no longer retries those.
+// ListAudioFailed returns the raw URL of muxed entries parked as 'failed',
+// oldest first, capped at limit. 'abandoned' rows are excluded — L5 stops
+// retrying those.
 func (s *MediaIndexStore) ListAudioFailed(limit int) ([]string, error) {
 	rows, err := s.db.Query(`
-		SELECT original_url FROM media_index
-		WHERE audio_state = 'failed'
-		ORDER BY first_seen ASC
+		SELECT u.raw_url
+		FROM media_url u
+		JOIN media_content c ON c.content_hash = u.content_hash
+		WHERE c.audio_state = 'failed'
+		  AND u.canonical_key LIKE 'muxed:%'
+		ORDER BY c.first_seen ASC
 		LIMIT $1`, limit,
 	)
 	if err != nil {
@@ -236,11 +440,14 @@ func (s *MediaIndexStore) ListAudioFailed(limit int) ([]string, error) {
 	return urls, rows.Err()
 }
 
+// ListEvictionCandidates returns the worst (size × idle_hours) content rows,
+// largest pressure first. The evictor passes these to MarkEvicted after it
+// removes the file on disk.
 func (s *MediaIndexStore) ListEvictionCandidates(limit int) ([]*MediaMeta, error) {
 	rows, err := s.db.Query(`
-		SELECT original_url, hash, file_path, mime_type, file_size,
+		SELECT content_hash, file_path, mime_type, file_size,
 		       first_seen, last_accessed, access_count, audio_state
-		FROM media_index
+		FROM media_content
 		WHERE file_path IS NOT NULL
 		ORDER BY (file_size / 1048576.0) * (EXTRACT(EPOCH FROM NOW() - last_accessed) / 3600.0) DESC
 		LIMIT $1`, limit,
@@ -254,7 +461,7 @@ func (s *MediaIndexStore) ListEvictionCandidates(limit int) ([]*MediaMeta, error
 	for rows.Next() {
 		m := &MediaMeta{}
 		if err := rows.Scan(
-			&m.OriginalURL, &m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
+			&m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
 			&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.AudioState,
 		); err != nil {
 			return nil, fmt.Errorf("scan eviction candidate: %w", err)

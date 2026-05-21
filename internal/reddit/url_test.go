@@ -60,6 +60,108 @@ func TestFormatURL(t *testing.T) {
 	}
 }
 
+func TestCanonicalKey(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		// preview.redd.it — width + signature stripped, two variants collapse
+		{
+			"preview width 640",
+			"https://preview.redd.it/abc.jpg?width=640&s=signature1",
+			"https://preview.redd.it/abc.jpg",
+		},
+		{
+			"preview width 320",
+			"https://preview.redd.it/abc.jpg?width=320&s=signature2",
+			"https://preview.redd.it/abc.jpg",
+		},
+		{
+			"preview re-signed",
+			"https://preview.redd.it/abc.jpg?width=640&s=NEWSIG",
+			"https://preview.redd.it/abc.jpg",
+		},
+		// external-preview behaves the same
+		{
+			"external-preview",
+			"https://external-preview.redd.it/xyz.png?width=108&crop=smart&auto=webp&s=abc",
+			"https://external-preview.redd.it/xyz.png",
+		},
+		// i.redd.it — already canonical, query (if any) dropped
+		{
+			"i.redd.it no query",
+			"https://i.redd.it/photo.jpg",
+			"https://i.redd.it/photo.jpg",
+		},
+		{
+			"i.redd.it with query",
+			"https://i.redd.it/photo.jpg?s=abc",
+			"https://i.redd.it/photo.jpg",
+		},
+		// v.redd.it DASH — drop ?source=fallback
+		{
+			"v.redd.it dash",
+			"https://v.redd.it/abc123/DASH_720.mp4?source=fallback",
+			"https://v.redd.it/abc123/DASH_720.mp4",
+		},
+		// host case insensitivity
+		{
+			"mixed case host",
+			"https://Preview.Redd.IT/abc.jpg?width=640",
+			"https://preview.redd.it/abc.jpg",
+		},
+		// muxed: prefix preserved, inner canonicalized
+		{
+			"muxed prefix",
+			"muxed:https://v.redd.it/abc123/DASH_720.mp4?source=fallback",
+			"muxed:https://v.redd.it/abc123/DASH_720.mp4",
+		},
+		// thumbs
+		{
+			"a.thumbs",
+			"https://a.thumbs.redditmedia.com/thumb.jpg?s=x",
+			"https://a.thumbs.redditmedia.com/thumb.jpg",
+		},
+		// external host — same path-only rule
+		{
+			"imgur",
+			"https://i.imgur.com/abc.jpg?1",
+			"https://i.imgur.com/abc.jpg",
+		},
+		// Empty / malformed — input returned unchanged
+		{
+			"empty",
+			"",
+			"",
+		},
+		{
+			"no scheme no host",
+			"just-a-string",
+			"just-a-string",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CanonicalKey(tt.input)
+			if got != tt.want {
+				t.Errorf("CanonicalKey(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalKey_VariantsCollapse(t *testing.T) {
+	// The dedup property: any two URLs that should refer to the same logical
+	// asset must produce the same canonical key.
+	a := CanonicalKey("https://preview.redd.it/img.jpg?width=640&s=A")
+	b := CanonicalKey("https://preview.redd.it/img.jpg?width=320&s=B")
+	c := CanonicalKey("https://preview.redd.it/img.jpg?width=108&crop=smart&auto=webp&s=C")
+	if a != b || b != c {
+		t.Errorf("three preview variants should canonicalize to one key, got %q / %q / %q", a, b, c)
+	}
+}
+
 func TestRewriteURLs(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -220,6 +220,40 @@ var migrations = []string{
 	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS device_lifespan_days INTEGER     NOT NULL DEFAULT 1095;
 	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS next_android_version INTEGER     NOT NULL DEFAULT 0;
 	 ALTER TABLE device_profile ADD COLUMN IF NOT EXISTS os_next_check_at     TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
+
+	// v20: content-addressed media store. media_index is replaced by two tables
+	// — media_content keyed by sha256(file_bytes), and media_url keyed by
+	// CanonicalKey(rawURL) pointing at the content row. This dedups across
+	// resolution variants, signature refreshes, and same-bytes-different-host
+	// reposts. audio_state moves to media_content because it is a property of
+	// the file, not the URL. THIS DROPS THE EXISTING MEDIA CACHE — only safe
+	// because the project is pre-production; on-disk files at sha256(url) paths
+	// will be orphaned and need manual cleanup of the media root.
+	`DROP TABLE IF EXISTS media_index;
+	 CREATE TABLE media_content (
+	    content_hash         TEXT PRIMARY KEY,
+	    file_path            TEXT,
+	    mime_type            TEXT,
+	    file_size            BIGINT NOT NULL DEFAULT 0,
+	    audio_state          TEXT,
+	    audio_fail_count     INT  NOT NULL DEFAULT 0,
+	    last_audio_attempt_at TIMESTAMPTZ,
+	    first_seen           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	    last_accessed        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	    access_count         BIGINT NOT NULL DEFAULT 0,
+	    CONSTRAINT media_content_audio_state_check CHECK (
+	        audio_state IS NULL OR audio_state IN ('has_audio','silent','failed','abandoned')
+	    )
+	 );
+	 CREATE TABLE media_url (
+	    canonical_key        TEXT PRIMARY KEY,
+	    raw_url              TEXT NOT NULL,
+	    content_hash         TEXT NOT NULL REFERENCES media_content(content_hash),
+	    first_seen           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	 );
+	 CREATE INDEX idx_media_url_content ON media_url (content_hash);
+	 CREATE INDEX idx_media_content_eviction ON media_content (file_size, last_accessed)
+	    WHERE file_path IS NOT NULL;`,
 }
 
 func RunMigrations(db *sql.DB) error {

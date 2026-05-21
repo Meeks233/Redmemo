@@ -132,7 +132,16 @@ func main() {
 		log.Fatalf("render: %v", err)
 	}
 
-	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, uaPool)
+	// Media fetches must reuse the active OAuth session's UA so a single
+	// identity drives every Reddit-facing request. During the cold-start
+	// window the closure blocks on WaitForUserAgent instead of falling back
+	// to a pool UA — emitting a different UA than the (about-to-be)
+	// authoritative session from one IP is a stealth tell.
+	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, func() string {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		return oauthHolder.WaitForUserAgent(ctx)
+	})
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)

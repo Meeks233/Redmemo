@@ -2,6 +2,8 @@ package media
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"io"
@@ -18,16 +20,15 @@ import (
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/transport"
-	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type Proxy struct {
-	rootPath   string
-	useNginx   bool
-	mediaStore *store.MediaIndexStore
-	cache      *cache.Cache
-	httpClient httpDoer
-	uaPool     *useragent.Pool
+	rootPath    string
+	useNginx    bool
+	mediaStore  *store.MediaIndexStore
+	cache       *cache.Cache
+	httpClient  httpDoer
+	userAgentFn func() string
 }
 
 // httpDoer is the subset of tls_client.HttpClient the media proxy depends on,
@@ -36,7 +37,13 @@ type httpDoer interface {
 	Do(*fhttp.Request) (*fhttp.Response, error)
 }
 
-func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache, uaPool *useragent.Pool) *Proxy {
+// NewProxy wires the media proxy. userAgentFn must return the User-Agent of
+// the currently active OAuth session so media fetches share one identity with
+// the API client; mixing a random UA pool here previously emitted multiple
+// UAs from the same IP within seconds, defeating the single-identity model.
+// The injected closure is expected to block during the cold-start window
+// rather than fall back to a pool UA — see TokenHolder.WaitForUserAgent.
+func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache, userAgentFn func() string) *Proxy {
 	return &Proxy{
 		rootPath:   cfg.RootPath,
 		mediaStore: mediaStore,
@@ -48,8 +55,8 @@ func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cach
 		// they time out. The 3-minute ceiling covers large 1080p clips; the old
 		// 60s cap aborted them mid-download even when the mux context allowed
 		// longer.
-		httpClient: transport.NewSpoofedClient(3 * time.Minute),
-		uaPool:     uaPool,
+		httpClient:  transport.NewSpoofedClient(3 * time.Minute),
+		userAgentFn: userAgentFn,
 	}
 }
 
@@ -311,7 +318,7 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", p.uaPool.Get())
+	req.Header.Set("User-Agent", p.userAgentFn())
 	transport.ApplyHeaderOrder(req)
 
 	resp, err := p.httpClient.Do(req)
@@ -332,30 +339,41 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 		return nil, fmt.Errorf("upstream returned non-media content-type %q", resp.Header.Get("Content-Type"))
 	}
 
-	hash := HashURL(originalURL)
-	filePath := HashToPath(p.rootPath, hash)
-
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-		return nil, fmt.Errorf("mkdir: %w", err)
+	// Stream into a staging file in the media root, hashing the bytes in
+	// flight. The final path is sha256(content), so the publish rename can
+	// only happen once we have read the whole body — until then the path is
+	// not known.
+	if err := os.MkdirAll(p.rootPath, 0755); err != nil {
+		return nil, fmt.Errorf("mkdir root: %w", err)
 	}
-
-	// Write to a staging file and rename — the publish is atomic, so a
-	// concurrent reader serving a prior copy of this path never sees a torn
-	// file (single-flight already keeps two writers off the same path).
-	partPath := filePath + ".part"
-	f, err := os.Create(partPath)
+	staging, err := os.CreateTemp(p.rootPath, "fetch-*.part")
 	if err != nil {
-		return nil, fmt.Errorf("create file: %w", err)
+		return nil, fmt.Errorf("create staging: %w", err)
 	}
-
-	size, err := io.Copy(f, resp.Body)
-	f.Close()
+	stagingPath := staging.Name()
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(staging, hasher), resp.Body)
+	staging.Close()
 	if err != nil {
-		os.Remove(partPath)
+		os.Remove(stagingPath)
 		return nil, fmt.Errorf("write file: %w", err)
 	}
-	if err := os.Rename(partPath, filePath); err != nil {
-		os.Remove(partPath)
+
+	hash := hex.EncodeToString(hasher.Sum(nil))
+	filePath := HashToPath(p.rootPath, hash)
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		os.Remove(stagingPath)
+		return nil, fmt.Errorf("mkdir shard: %w", err)
+	}
+
+	// If the same bytes are already cached under a different URL, drop the
+	// staging file — disk dedup is structural. Otherwise atomic-rename into
+	// place; a concurrent reader of a prior copy at this path never sees a
+	// torn file (single-flight keeps two writers off the same path).
+	if _, statErr := os.Stat(filePath); statErr == nil {
+		os.Remove(stagingPath)
+	} else if err := os.Rename(stagingPath, filePath); err != nil {
+		os.Remove(stagingPath)
 		return nil, fmt.Errorf("publish file: %w", err)
 	}
 
@@ -403,7 +421,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 		serveLoader(w, http.StatusAccepted)
 		return
 	}
-	req.Header.Set("User-Agent", p.uaPool.Get())
+	req.Header.Set("User-Agent", p.userAgentFn())
 
 	for _, h := range []string{"Range", "If-Modified-Since", "Cache-Control"} {
 		if v := r.Header.Get(h); v != "" {

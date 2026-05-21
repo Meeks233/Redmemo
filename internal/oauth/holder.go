@@ -42,6 +42,13 @@ type TokenHolder struct {
 	consecutiveFail int
 	lastRefreshAt   time.Time
 	backend         string // "mobile_spoof" or "generic_web"
+
+	// uaReady is closed once an OAuth-bound User-Agent first becomes available.
+	// Callers (notably the media proxy) wait on it instead of falling back to a
+	// pool UA — emitting a different UA than the authoritative session token
+	// from the same IP within seconds is a stealth tell we can't afford.
+	uaReady     chan struct{}
+	uaReadyOnce sync.Once
 }
 
 const (
@@ -59,7 +66,16 @@ func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.To
 		cfg:         cfg,
 		uaPool:      uaPool,
 		backend:     "mobile_spoof",
+		uaReady:     make(chan struct{}),
 	}
+}
+
+// markUAReady signals that an OAuth-bound User-Agent is now available. Wrapped
+// in sync.Once so concurrent rotations after the first install are no-ops; the
+// read path stays consistent because CurrentUserAgent serves from p.active
+// under the holder mutex regardless of channel state.
+func (p *TokenHolder) markUAReady() {
+	p.uaReadyOnce.Do(func() { close(p.uaReady) })
 }
 
 func (p *TokenHolder) Start(ctx context.Context) error {
@@ -105,6 +121,7 @@ func (p *TokenHolder) Start(ctx context.Context) error {
 
 		p.active = mt
 		p.backend = st.Backend
+		p.markUAReady()
 		log.Printf("oauth: restored token %d (%s), remaining=%d", st.ID, st.Backend, mt.RateRemaining)
 		break
 	}
@@ -118,6 +135,12 @@ func (p *TokenHolder) Start(ctx context.Context) error {
 
 	if p.active == nil {
 		log.Printf("oauth: WARNING: no active token, will retry on first request")
+		// Unblock any UA waiter that arrives before the recovery refresh
+		// succeeds — they'd otherwise stall for the full caller timeout when
+		// there is no token to wait for. A later installToken still calls
+		// markUAReady (sync.Once makes it a no-op) and CurrentUserAgent
+		// reflects the new token regardless of channel state.
+		p.markUAReady()
 	}
 
 	p.wg.Add(1)
@@ -185,6 +208,7 @@ func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, 
 	p.consecutiveFail = 0
 	p.lastRefreshAt = now
 	p.mu.Unlock()
+	p.markUAReady()
 
 	log.Printf("oauth: installed new %s token (expires in %ds)", backend, result.ExpiresIn)
 }
@@ -401,6 +425,41 @@ func (p *TokenHolder) OnRequestComplete(tokenID int, resp *http.Response) {
 	}
 }
 
+// CurrentUserAgent returns the active session token's bound User-Agent, or
+// "" if no token is loaded. Side-effect free — callers like the media proxy
+// use this to keep media fetches on the same identity as the OAuth session.
+func (p *TokenHolder) CurrentUserAgent() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.active == nil {
+		return ""
+	}
+	return p.active.Identity.UserAgent
+}
+
+// WaitForUserAgent blocks until the OAuth holder has installed a session token
+// and returns its bound User-Agent. Used by the media proxy so a media fetch
+// during cold start never emits a pool UA that contradicts the (about-to-be)
+// authoritative session identity — emitting two different UAs from one IP in
+// the same short window is a stealth tell. Returns "" if ctx is cancelled
+// first; the caller should treat that as a transient failure and retry.
+func (p *TokenHolder) WaitForUserAgent(ctx context.Context) string {
+	if ua := p.CurrentUserAgent(); ua != "" {
+		return ua
+	}
+	waitStart := time.Now()
+	log.Printf("oauth: caller blocked waiting for session UA (no active token yet)")
+	select {
+	case <-p.uaReady:
+		ua := p.CurrentUserAgent()
+		log.Printf("oauth: session UA available after %s, unblocking caller", time.Since(waitStart).Round(time.Millisecond))
+		return ua
+	case <-ctx.Done():
+		log.Printf("oauth: gave up waiting for session UA after %s: %v", time.Since(waitStart).Round(time.Millisecond), ctx.Err())
+		return ""
+	}
+}
+
 // RemainingBudget implements ratelimit.BudgetSource.
 func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()
@@ -529,6 +588,10 @@ func (p *TokenHolder) HasAvailableTokens() bool {
 func (p *TokenHolder) SpawnTokenIfNeeded(_ context.Context) {}
 
 func (p *TokenHolder) Stop() {
+	// Release any caller blocked in WaitForUserAgent so shutdown isn't held
+	// hostage by their per-call timeout. They observe a closed channel,
+	// re-read CurrentUserAgent (still "" if we never minted one), and bail.
+	p.markUAReady()
 	if p.cancel != nil {
 		p.cancel()
 	}

@@ -94,6 +94,44 @@ var (
 	vRedditHLS  = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/(HLSPlaylist\.m3u8.*)$`)
 )
 
+// muxedKeyPrefix is duplicated from media/mux.go to avoid an import cycle.
+// CanonicalKey strips and re-applies it so the wrapped v.redd.it URL is
+// canonicalized exactly like a bare one.
+const muxedKeyPrefix = "muxed:"
+
+// CanonicalKey produces a stable dedup key for a media URL by stripping the
+// query string (Reddit's variant/signature params) and lowercasing the host.
+// Reddit's `preview.redd.it` URLs encode resolution in `?width=` and a rotating
+// signature in `?s=` — the bytes for one image arrive under N distinct URLs
+// otherwise. Bare path is also the right key for i.redd.it / v.redd.it /
+// thumbs / styles / static / emoji / S3 assets — the path already identifies
+// the asset and any query is either absent or noise (e.g. `?source=fallback`).
+// External hosts get the same path-only treatment; if that ever drops a
+// meaningful query we can special-case it later.
+//
+// The HTTP fetch must still use the raw URL (Reddit verifies `s=`); this key
+// is only for the dedup index. Returns the input unchanged when url.Parse
+// fails, so a malformed URL is its own key (worst case = no dedup).
+func CanonicalKey(rawURL string) string {
+	inner, prefix := rawURL, ""
+	if strings.HasPrefix(rawURL, muxedKeyPrefix) {
+		prefix = muxedKeyPrefix
+		inner = rawURL[len(muxedKeyPrefix):]
+	}
+
+	u, err := url.Parse(inner)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	if scheme == "" {
+		scheme = "https"
+	}
+	host := strings.ToLower(u.Host)
+	return prefix + scheme + "://" + host + u.Path
+}
+
 // UnformatURL reverses FormatURL: converts a local proxy path back to the
 // original CDN URL. Returns the input unchanged if it is already absolute or
 // does not match a known prefix.

@@ -296,12 +296,6 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		return nil, fmt.Errorf("download video: %w", err)
 	}
 
-	hash := HashURL(key)
-	outPath := HashToPath(p.rootPath, hash)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return nil, fmt.Errorf("mkdir: %w", err)
-	}
-
 	// Transient audio-CDN failures (5xx, network blips) are common. Retry the
 	// whole probe a few times, spaced >=1s apart, before giving up.
 	var audioTmp string
@@ -330,8 +324,9 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		// video-only file as an emergency silent copy so requests stop hitting
 		// Reddit live, and record the failure so L5 (and user-triggered
 		// retries) can try again later.
-		if err := publishToCache(videoTmp, outPath); err != nil {
-			return nil, fmt.Errorf("cache emergency silent: %w", err)
+		hash, outPath, perr := publishContent(videoTmp, p.rootPath)
+		if perr != nil {
+			return nil, fmt.Errorf("cache emergency silent: %w", perr)
 		}
 		meta, err := p.saveMuxedFile(key, hash, outPath)
 		if err != nil {
@@ -349,23 +344,21 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 	}
 
 	var verdict string
+	var stagingPath string
 	if audioConfirmedAbsent {
 		// Reddit returned 4xx for every audio candidate — this video genuinely
 		// has no audio track. Cache the silent video and record the verdict so
 		// future requests skip the probe.
-		if err := publishToCache(videoTmp, outPath); err != nil {
-			return nil, fmt.Errorf("save silent video: %w", err)
-		}
+		stagingPath = videoTmp
 		verdict = "silent"
 	} else {
 		// We have an audio file; ffmpeg must be available to mux.
 		if findFfmpeg() == "" {
 			return nil, fmt.Errorf("ffmpeg not installed; cannot mux audio")
 		}
-		// ffmpeg writes a staging file in the cache directory; the final
-		// rename is atomic, so a request serving a prior (emergency) copy of
-		// this same path never observes a torn file.
-		partPath := outPath + ".part"
+		// ffmpeg writes into the same temp dir; publishContent moves the final
+		// file to its content-addressed home only after we know its hash.
+		muxedTmp := filepath.Join(tmpDir, "muxed.mp4")
 		cmd := exec.CommandContext(ctx, findFfmpeg(),
 			"-y", "-loglevel", "error",
 			"-i", videoTmp, "-i", audioTmp,
@@ -373,18 +366,19 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 			"-map", "0:v:0", "-map", "1:a:0",
 			"-movflags", "+faststart",
 			"-f", "mp4",
-			partPath)
+			muxedTmp)
 		if out, ferr := cmd.CombinedOutput(); ferr != nil {
-			os.Remove(partPath)
+			os.Remove(muxedTmp)
 			return nil, fmt.Errorf("ffmpeg: %w: %s", ferr, strings.TrimSpace(string(out)))
 		}
-		if err := os.Rename(partPath, outPath); err != nil {
-			os.Remove(partPath)
-			return nil, fmt.Errorf("publish muxed file: %w", err)
-		}
+		stagingPath = muxedTmp
 		verdict = "has_audio"
 	}
 
+	hash, outPath, err := publishContent(stagingPath, p.rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("publish muxed: %w", err)
+	}
 	meta, err := p.saveMuxedFile(key, hash, outPath)
 	if err != nil {
 		return nil, err
@@ -473,13 +467,19 @@ func publishToCache(srcPath, outPath string) error {
 // downloadSilent fetches just the raw video (no audio probe, no ffmpeg) for
 // videos we've previously confirmed have no audio track.
 func (p *Proxy) downloadSilent(ctx context.Context, videoURL, key string) (*store.MediaMeta, error) {
-	hash := HashURL(key)
-	outPath := HashToPath(p.rootPath, hash)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return nil, fmt.Errorf("mkdir: %w", err)
+	tmpDir, err := os.MkdirTemp("", "redmemo-silent-")
+	if err != nil {
+		return nil, fmt.Errorf("tempdir: %w", err)
 	}
-	if err := p.downloadTo(ctx, videoURL, outPath); err != nil {
+	defer os.RemoveAll(tmpDir)
+
+	stagingPath := filepath.Join(tmpDir, "v.mp4")
+	if err := p.downloadTo(ctx, videoURL, stagingPath); err != nil {
 		return nil, fmt.Errorf("download: %w", err)
+	}
+	hash, outPath, err := publishContent(stagingPath, p.rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("publish silent: %w", err)
 	}
 	info, err := os.Stat(outPath)
 	if err != nil {
@@ -540,7 +540,7 @@ func (p *Proxy) downloadToWithStatus(ctx context.Context, url, dst string) (int,
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", p.uaPool.Get())
+	req.Header.Set("User-Agent", p.userAgentFn())
 	transport.ApplyHeaderOrder(req)
 
 	resp, err := p.httpClient.Do(req)
