@@ -7,6 +7,12 @@ _redlib_ref/
 
 # Build output
 bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
 
 # Runtime config (contains secrets)
 config.yaml
@@ -16,7 +22,7 @@ config.yaml
 docs/structure.md
 CLAUDE.md
 
-# Claude Code turn-end marker (used by deploy.ps1 watch mode)
+# Claude Code turn-end marker (used by deploy/deploy.ps1 watch mode)
 .cc-turn-done
 
 # Local Claude Code settings (per-machine)
