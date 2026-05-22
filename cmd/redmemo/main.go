@@ -104,8 +104,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 7. Init UA pool
-	uaPool := useragent.NewPool(settingsStore)
+	// 7. Init browser UA source (only feeds the standby generic_web OAuth backend)
+	browserUA := useragent.NewPool(settingsStore)
 
 	// 8. Init OAuth
 	deviceProfile, err := oauth.ResolveDeviceProfile(deviceProfileStore)
@@ -114,9 +114,9 @@ func main() {
 	}
 	log.Printf("oauth: pinned device profile (android=%d, app=%s, device=%s)",
 		deviceProfile.AndroidVersion, deviceProfile.AppVersion, deviceProfile.DeviceID)
-	oauthClient := oauth.NewClient(uaPool, deviceProfile)
+	oauthClient := oauth.NewClient(browserUA, deviceProfile)
 	versionTracker := versionintel.NewTracker(&http.Client{Timeout: 15 * time.Second})
-	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache, uaPool)
+	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache, browserUA)
 
 	// sessionUA returns the active OAuth session's bound User-Agent, blocking
 	// through the cold-start window (see TokenHolder.WaitForUserAgent). Every
@@ -185,7 +185,7 @@ func main() {
 	h := handler.New(
 		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
-		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, uaPool, cfg,
+		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, cfg,
 	)
 
 	srv := &http.Server{

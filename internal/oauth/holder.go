@@ -34,7 +34,7 @@ type TokenHolder struct {
 	tracker     *versionintel.Tracker
 	cache       *cache.Cache
 	cfg         config.OAuthConfig
-	uaPool      *useragent.Pool
+	browserUA   *useragent.Pool
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 
@@ -63,7 +63,7 @@ const (
 	maxConsecutiveFails = 5
 )
 
-func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache, uaPool *useragent.Pool) *TokenHolder {
+func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache, browserUA *useragent.Pool) *TokenHolder {
 	return &TokenHolder{
 		client:      client,
 		store:       tokenStore,
@@ -71,7 +71,7 @@ func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.To
 		tracker:     tracker,
 		cache:       c,
 		cfg:         cfg,
-		uaPool:      uaPool,
+		browserUA:   browserUA,
 		backend:     "mobile_spoof",
 		uaReady:     make(chan struct{}),
 		tokenReady:  make(chan struct{}),
@@ -684,5 +684,5 @@ func (p *TokenHolder) restoreIdentity(st *store.StoredToken) SpoofIdentity {
 		}
 		return GenerateIdentity()
 	}
-	return GenerateWebIdentity(p.uaPool)
+	return genericWebIdentity(p.browserUA)
 }

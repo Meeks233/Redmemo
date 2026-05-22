@@ -53,33 +53,6 @@ func TestGenerateIdentity_Uniqueness(t *testing.T) {
 	}
 }
 
-func TestGenerateWebIdentity_NilPool(t *testing.T) {
-	// A nil UA pool must fall back to the built-in web user-agent list
-	// rather than panicking.
-	id := GenerateWebIdentity(nil)
-	if id.UserAgent == "" {
-		t.Error("UserAgent is empty")
-	}
-	if id.Headers["User-Agent"] != id.UserAgent {
-		t.Errorf("Headers[User-Agent] = %q, want %q", id.Headers["User-Agent"], id.UserAgent)
-	}
-	uuidRe := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-	if !uuidRe.MatchString(id.DeviceID) {
-		t.Errorf("DeviceID is not a valid UUID v4: %s", id.DeviceID)
-	}
-}
-
-func TestGenerateWebIdentity_Uniqueness(t *testing.T) {
-	seen := make(map[string]bool, 100)
-	for range 100 {
-		id := GenerateWebIdentity(nil)
-		if seen[id.DeviceID] {
-			t.Fatalf("duplicate DeviceID: %s", id.DeviceID)
-		}
-		seen[id.DeviceID] = true
-	}
-}
-
 func TestParseOSRange(t *testing.T) {
 	cases := []struct {
 		in       string

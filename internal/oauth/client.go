@@ -40,16 +40,16 @@ type TokenResult struct {
 
 type Client struct {
 	httpClient httpDoer
-	uaPool     *useragent.Pool
+	browserUA  *useragent.Pool
 
 	mu      sync.RWMutex
 	profile *store.DeviceProfile
 }
 
-func NewClient(uaPool *useragent.Pool, profile *store.DeviceProfile) *Client {
+func NewClient(browserUA *useragent.Pool, profile *store.DeviceProfile) *Client {
 	return &Client{
 		httpClient: transport.NewSpoofedClient(authTimeout),
-		uaPool:     uaPool,
+		browserUA:  browserUA,
 		profile:    profile,
 	}
 }
@@ -171,7 +171,7 @@ func (c *Client) mobileSpoofAuth() (*TokenResult, error) {
 }
 
 func (c *Client) genericWebAuth() (*TokenResult, error) {
-	identity := GenerateWebIdentity(c.uaPool)
+	identity := genericWebIdentity(c.browserUA)
 
 	formBody := "grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client&device_id=" + identity.DeviceID
 	req, err := http.NewRequest("POST", genericEndpoint, strings.NewReader(formBody))

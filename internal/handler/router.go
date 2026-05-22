@@ -17,28 +17,26 @@ import (
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/transport"
-	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type Handler struct {
-	ratelimit     *ratelimit.Manager
-	hr            *hrlimit.Manager
-	cache         *cache.Cache
-	renderer      *render.Engine
-	redditCli     *reddit.Client
-	publicCli     *reddit.PublicClient
-	oauthHolder   *oauth.TokenHolder
-	postStore     *store.PostStore
-	commentStore  *store.CommentStore
-	subStore      *store.SubredditStore
-	mediaStore    *store.MediaIndexStore
-	settingsStore *store.SettingsStore
+	ratelimit      *ratelimit.Manager
+	hr             *hrlimit.Manager
+	cache          *cache.Cache
+	renderer       *render.Engine
+	redditCli      *reddit.Client
+	publicCli      *reddit.PublicClient
+	oauthHolder    *oauth.TokenHolder
+	postStore      *store.PostStore
+	commentStore   *store.CommentStore
+	subStore       *store.SubredditStore
+	mediaStore     *store.MediaIndexStore
+	settingsStore  *store.SettingsStore
 	mediaProxy     *media.Proxy
 	archiver       *archive.Service
 	prefetcher     *prefetch.Scheduler
 	subStatusStore *store.SubStatusStore
 	subIconStore   *store.SubIconStore
-	uaPool         *useragent.Pool
 	// spoofedClient carries the uTLS/HTTP-2 Reddit-app fingerprint for the few
 	// upstream fetches the handler makes directly (e.g. HLS manifest rewriting)
 	// instead of going through reddit/media clients. Built once; never use
@@ -67,7 +65,6 @@ func New(
 	pf *prefetch.Scheduler,
 	sss *store.SubStatusStore,
 	sis *store.SubIconStore,
-	uap *useragent.Pool,
 	cfg *config.Config,
 ) *Handler {
 	defaults, _ := sts.GetAll()
@@ -75,27 +72,26 @@ func New(
 		defaults = make(map[string]string)
 	}
 	return &Handler{
-		ratelimit:     rl,
-		hr:            hr,
-		cache:         c,
-		renderer:      r,
-		redditCli:     rc,
-		publicCli:     pc,
-		oauthHolder:   op,
-		postStore:     ps,
-		commentStore:  cs,
-		subStore:      ss,
-		mediaStore:    ms,
-		settingsStore: sts,
-		mediaProxy:    mp,
+		ratelimit:      rl,
+		hr:             hr,
+		cache:          c,
+		renderer:       r,
+		redditCli:      rc,
+		publicCli:      pc,
+		oauthHolder:    op,
+		postStore:      ps,
+		commentStore:   cs,
+		subStore:       ss,
+		mediaStore:     ms,
+		settingsStore:  sts,
+		mediaProxy:     mp,
 		archiver:       arc,
 		prefetcher:     pf,
 		subStatusStore: sss,
 		subIconStore:   sis,
-		uaPool:         uap,
 		spoofedClient:  transport.NewSpoofedClient(30 * time.Second),
-		cfg:           cfg,
-		siteDefaults:  defaults,
+		cfg:            cfg,
+		siteDefaults:   defaults,
 	}
 }
 

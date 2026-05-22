@@ -198,24 +198,21 @@ func GenerateIdentity() SpoofIdentity {
 	}
 }
 
-var webUserAgents = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0",
-	"Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
-}
-
-func GenerateWebIdentity(uaPool *useragent.Pool) SpoofIdentity {
+// genericWebIdentity builds the spoof identity for the standby generic_web OAuth
+// backend, binding a UA from the pool. Blocks if the pool is empty rather than
+// fabricating one.
+func genericWebIdentity(browserUA *useragent.Pool) SpoofIdentity {
 	deviceID := uuid.New().String()
 	var ua string
-	if uaPool != nil && uaPool.Size() > 0 {
-		ua = uaPool.Get()
+	if browserUA != nil && browserUA.Size() > 0 {
+		ua = browserUA.Get()
 	} else {
-		ua = webUserAgents[rand.IntN(len(webUserAgents))]
+		// No pool entry to bind — block rather than invent a UA.
+		log.Printf("oauth: genericWebIdentity blocked — UA pool empty, waiting")
+		for browserUA == nil || browserUA.Size() == 0 {
+			time.Sleep(time.Second)
+		}
+		ua = browserUA.Get()
 	}
 	return SpoofIdentity{
 		UserAgent: ua,
