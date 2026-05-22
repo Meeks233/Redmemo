@@ -49,6 +49,13 @@ type TokenHolder struct {
 	// from the same IP within seconds is a stealth tell we can't afford.
 	uaReady     chan struct{}
 	uaReadyOnce sync.Once
+
+	// tokenReady is closed only when an OAuth token has actually been installed
+	// (restored from store or freshly authenticated). Unlike uaReady, this is
+	// NOT closed on startup-auth failure — NP must block here, not fall back to
+	// public, until a real session token+UA pair exists.
+	tokenReady     chan struct{}
+	tokenReadyOnce sync.Once
 }
 
 const (
@@ -67,6 +74,7 @@ func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.To
 		uaPool:      uaPool,
 		backend:     "mobile_spoof",
 		uaReady:     make(chan struct{}),
+		tokenReady:  make(chan struct{}),
 	}
 }
 
@@ -76,6 +84,15 @@ func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.To
 // under the holder mutex regardless of channel state.
 func (p *TokenHolder) markUAReady() {
 	p.uaReadyOnce.Do(func() { close(p.uaReady) })
+}
+
+// markTokenReady signals that a real OAuth token is now installed. Unlike
+// markUAReady, this is only called on actual install success — not on the
+// startup-auth failure path — so WaitForToken can be used by background
+// workers (NP) to block until a consistent token+UA pair exists instead of
+// falling back to an unauthenticated public request.
+func (p *TokenHolder) markTokenReady() {
+	p.tokenReadyOnce.Do(func() { close(p.tokenReady) })
 }
 
 func (p *TokenHolder) Start(ctx context.Context) error {
@@ -122,6 +139,7 @@ func (p *TokenHolder) Start(ctx context.Context) error {
 		p.active = mt
 		p.backend = st.Backend
 		p.markUAReady()
+		p.markTokenReady()
 		log.Printf("oauth: restored token %d (%s), remaining=%d", st.ID, st.Backend, mt.RateRemaining)
 		break
 	}
@@ -209,6 +227,7 @@ func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, 
 	p.lastRefreshAt = now
 	p.mu.Unlock()
 	p.markUAReady()
+	p.markTokenReady()
 
 	log.Printf("oauth: installed new %s token (expires in %ds)", backend, result.ExpiresIn)
 }
@@ -457,6 +476,30 @@ func (p *TokenHolder) WaitForUserAgent(ctx context.Context) string {
 	case <-ctx.Done():
 		log.Printf("oauth: gave up waiting for session UA after %s: %v", time.Since(waitStart).Round(time.Millisecond), ctx.Err())
 		return ""
+	}
+}
+
+// WaitForToken blocks until an OAuth token has been installed (restored or
+// freshly authenticated). Background workers use this instead of falling back
+// to a public/unauthenticated request when Token() returns nil: emitting an
+// unauthenticated request from the same IP that's about to carry the session
+// token contradicts the single-identity stealth model. Returns true once a
+// token is ready, or false if ctx is cancelled first.
+func (p *TokenHolder) WaitForToken(ctx context.Context) bool {
+	select {
+	case <-p.tokenReady:
+		return true
+	default:
+	}
+	waitStart := time.Now()
+	log.Printf("oauth: caller blocked waiting for session token")
+	select {
+	case <-p.tokenReady:
+		log.Printf("oauth: session token available after %s, unblocking caller", time.Since(waitStart).Round(time.Millisecond))
+		return true
+	case <-ctx.Done():
+		log.Printf("oauth: gave up waiting for session token after %s: %v", time.Since(waitStart).Round(time.Millisecond), ctx.Err())
+		return false
 	}
 }
 

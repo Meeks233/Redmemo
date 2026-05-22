@@ -10,7 +10,6 @@ import (
 
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/transport"
-	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 // publicCookie augments the quarantine/gated opt-in cookie with over18=1.
@@ -21,8 +20,13 @@ const publicCookie = quarantineCookie + `; over18=1`
 
 type PublicClient struct {
 	httpClient httpDoer
-	uaPool     *useragent.Pool
-	pinnedUA   string
+	// userAgentFn returns the active OAuth session's bound User-Agent so every
+	// public-endpoint request shares one identity with the authenticated API
+	// client. It is expected to block during cold start (see
+	// TokenHolder.WaitForUserAgent) rather than fall back to a pool UA — emitting
+	// a second UA from the session IP is a stealth tell. The browser UA pool that
+	// previously fed pinnedUA is now dead code on this path.
+	userAgentFn func() string
 
 	mu         sync.Mutex
 	tokens     int
@@ -31,15 +35,14 @@ type PublicClient struct {
 	refillRate time.Duration
 }
 
-func NewPublicClient(uaPool *useragent.Pool) *PublicClient {
+func NewPublicClient(userAgentFn func() string) *PublicClient {
 	return &PublicClient{
-		httpClient: transport.NewSpoofedClient(15 * time.Second),
-		uaPool:     uaPool,
-		pinnedUA:   uaPool.Get(),
-		tokens:     8,
-		maxTokens:  8,
-		lastRefill: time.Now(),
-		refillRate: 8 * time.Second,
+		httpClient:  transport.NewSpoofedClient(15 * time.Second),
+		userAgentFn: userAgentFn,
+		tokens:      8,
+		maxTokens:   8,
+		lastRefill:  time.Now(),
+		refillRate:  8 * time.Second,
 	}
 }
 
@@ -69,11 +72,16 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 		return nil, fmt.Errorf("public api: rate limited locally")
 	}
 
+	ua := c.userAgentFn()
+	if ua == "" {
+		return nil, fmt.Errorf("public api: no session user-agent available")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.reddit.com"+path, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", c.pinnedUA)
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Cookie", publicCookie)
 	transport.ApplyHeaderOrder(req)

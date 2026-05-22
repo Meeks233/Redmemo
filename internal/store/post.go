@@ -17,6 +17,12 @@ func NewPostStore(db *sql.DB) *PostStore {
 	return &PostStore{db: db}
 }
 
+// nsfwExcludeSQL is the single source of truth for the WHERE fragment that
+// drops NSFW (over_18) rows from a posts query. Callers append it conditionally
+// based on the user's show_nsfw preference. Kept here so any future column
+// rename or storage shape change touches one place.
+const nsfwExcludeSQL = " AND COALESCE((json_data->>'over_18')::boolean, false) = false"
+
 func (s *PostStore) Get(urlPath string) (*StoredPost, error) {
 	p := &StoredPost{}
 	err := s.db.QueryRow(`
@@ -60,15 +66,19 @@ func (s *PostStore) Save(post *StoredPost) error {
 	return nil
 }
 
-func (s *PostStore) ListBySubreddit(sub string, limit, offset int) ([]*StoredPost, error) {
-	rows, err := s.db.Query(`
+func (s *PostStore) ListBySubreddit(sub string, limit, offset int, excludeNSFW bool) ([]*StoredPost, error) {
+	where := "LOWER(subreddit) = LOWER($1)"
+	if excludeNSFW {
+		where += nsfwExcludeSQL
+	}
+	q := fmt.Sprintf(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
 		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
-		WHERE LOWER(subreddit) = LOWER($1)
+		WHERE %s
 		ORDER BY created_utc DESC
-		LIMIT $2 OFFSET $3`, sub, limit, offset,
-	)
+		LIMIT $2 OFFSET $3`, where)
+	rows, err := s.db.Query(q, sub, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list posts by subreddit: %w", err)
 	}
@@ -175,7 +185,7 @@ func (s *PostStore) ListNotorious(limit int) ([]*StoredPost, error) {
 	return scanPosts(rows)
 }
 
-func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, mode string) ([]*StoredPost, error) {
+func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, mode string, excludeNSFW bool) ([]*StoredPost, error) {
 	var baseWhere, orderBy string
 	switch sort {
 	case "new_archive":
@@ -204,6 +214,10 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 		where += fmt.Sprintf(" AND subreddit != ALL($%d)", argN)
 		args = append(args, pq.Array(subs))
 		argN++
+	}
+
+	if excludeNSFW {
+		where += nsfwExcludeSQL
 	}
 
 	args = append(args, limit)
@@ -296,15 +310,19 @@ func (s *PostStore) Random(opts RandomPostOpts) (*StoredPost, error) {
 	return p, nil
 }
 
-func (s *PostStore) Search(query string, limit int) ([]*StoredPost, error) {
-	rows, err := s.db.Query(`
+func (s *PostStore) Search(query string, limit int, excludeNSFW bool) ([]*StoredPost, error) {
+	where := "title ILIKE '%' || $1 || '%'"
+	if excludeNSFW {
+		where += nsfwExcludeSQL
+	}
+	q := fmt.Sprintf(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
 		       author, score, created_utc, first_seen, last_updated, source, media_done
 		FROM posts
-		WHERE title ILIKE '%' || $1 || '%'
+		WHERE %s
 		ORDER BY created_utc DESC
-		LIMIT $2`, query, limit,
-	)
+		LIMIT $2`, where)
+	rows, err := s.db.Query(q, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search posts: %w", err)
 	}
@@ -420,9 +438,13 @@ func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64,
 	return posts, total, err
 }
 
-func (s *PostStore) CountBySubreddit(sub string) (int64, error) {
+func (s *PostStore) CountBySubreddit(sub string, excludeNSFW bool) (int64, error) {
+	where := "LOWER(subreddit) = LOWER($1)"
+	if excludeNSFW {
+		where += nsfwExcludeSQL
+	}
 	var count int64
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE LOWER(subreddit) = LOWER($1)`, sub).Scan(&count)
+	err := s.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM posts WHERE %s`, where), sub).Scan(&count)
 	return count, err
 }
 

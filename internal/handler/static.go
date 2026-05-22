@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/transport"
 )
 
 var validSubName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_]{1,20}$`)
@@ -137,14 +139,28 @@ func (h *Handler) handleMediaStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstream string) {
-	req, err := http.NewRequestWithContext(r.Context(), "GET", upstream, nil)
+	// Reuse the active OAuth session's UA so this manifest fetch shares one
+	// identity with every other Reddit-facing request; the browser UA pool is now
+	// dead code here. Blocks through cold start rather than emit a pool UA.
+	ua := h.oauthHolder.WaitForUserAgent(r.Context())
+	if ua == "" {
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+
+	// Fetch through the uTLS-spoofed transport (fhttp) so the TLS ClientHello and
+	// HTTP/2 fingerprint match the real Reddit app — same stack every other
+	// upstream client uses. net/http.DefaultClient would emit a plain Go TLS
+	// fingerprint, a tell against the rest of our traffic.
+	req, err := fhttp.NewRequestWithContext(r.Context(), "GET", upstream, nil)
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("User-Agent", h.uaPool.Get())
+	req.Header.Set("User-Agent", ua)
+	transport.ApplyHeaderOrder(req)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := h.spoofedClient.Do(req)
 	if err != nil {
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
@@ -241,7 +257,6 @@ func validateFromPath(from string) string {
 	}
 	return ""
 }
-
 
 func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	budget, _ := h.oauthHolder.RemainingBudget(r.Context())
@@ -468,4 +483,3 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%ds", s)
 }
-

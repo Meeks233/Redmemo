@@ -242,6 +242,14 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 		searchOpts.Limit = archivePageSize
 		searchOpts.Offset = (page - 1) * archivePageSize
 
+		// Honor the global show_nsfw preference. The archive search form has
+		// its own NSFW dropdown for explicit narrowing, but show_nsfw=off must
+		// dominate: a user who turned NSFW off should never see NSFW results
+		// regardless of what the archive form says.
+		if prefs.ShowNSFW != "on" {
+			searchOpts.NSFW = "sfw"
+		}
+
 		stored, total, err := h.postStore.ArchiveSearch(searchOpts)
 		if err != nil {
 			log.Printf("handler: archive search: %v", err)
@@ -494,7 +502,8 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	total, _ := h.postStore.CountBySubreddit(sub)
+	excludeNSFW := prefs.ShowNSFW != "on"
+	total, _ := h.postStore.CountBySubreddit(sub, excludeNSFW)
 	totalPages := int((total + archivePageSize - 1) / archivePageSize)
 	if totalPages < 1 {
 		totalPages = 1
@@ -504,7 +513,7 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * archivePageSize
-	stored, err := h.postStore.ListBySubreddit(sub, archivePageSize, offset)
+	stored, err := h.postStore.ListBySubreddit(sub, archivePageSize, offset, excludeNSFW)
 	if err != nil {
 		log.Printf("handler: archive list %s: %v", sub, err)
 	}
@@ -525,12 +534,11 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 			BrandName: h.cfg.Render.BrandName,
 			Version:   "0.1.0",
 		},
-		Sub:                sub,
-		Posts:              posts,
-		TotalPosts:         total,
-		Page:               page,
-		TotalPages:         totalPages,
-		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
+		Sub:        sub,
+		Posts:      posts,
+		TotalPosts: total,
+		Page:       page,
+		TotalPages: totalPages,
 		HasPrev:            page > 1,
 		HasNext:            page < totalPages,
 	}
@@ -543,7 +551,7 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) isArchivableSub(sub string) bool {
 	if h.postStore != nil {
-		if count, err := h.postStore.CountBySubreddit(sub); err == nil && count > 0 {
+		if count, err := h.postStore.CountBySubreddit(sub, false); err == nil && count > 0 {
 			return true
 		}
 	}

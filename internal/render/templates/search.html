@@ -7,8 +7,7 @@
      "Posts" and "Prefs". */}}
 {{ define "search_post_list" }}
 	{{ range .Posts }}
-		{{ if and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") }}
-		{{ else if .Title }}
+		{{ if .Title }}
 			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs "LazyMedia" $.LazyMedia }}
 		{{ else }}
 			<div class="comment">

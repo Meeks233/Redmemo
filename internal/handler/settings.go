@@ -68,7 +68,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, name := range prefetchSubs {
 			if !statSet[name] {
-				cnt, _ := h.postStore.CountBySubreddit(name)
+				cnt, _ := h.postStore.CountBySubreddit(name, false)
 				subStats = append(subStats, render.SubredditStatView{
 					Name:      name,
 					PostCount: cnt,

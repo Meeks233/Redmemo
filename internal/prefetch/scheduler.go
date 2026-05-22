@@ -3,6 +3,7 @@ package prefetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -16,6 +17,15 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/store"
 )
+
+// TokenWaiter is implemented by the OAuth holder. NP uses it to block on a
+// missing session token instead of issuing an unauthenticated public request:
+// emitting two different identities (no-token public vs. about-to-arrive
+// session token) from the same IP within seconds is a stealth tell. Optional —
+// when nil (e.g. in tests) the scheduler simply skips the wait.
+type TokenWaiter interface {
+	WaitForToken(ctx context.Context) bool
+}
 
 type MediaDownloader interface {
 	DownloadMedia(ctx context.Context, url string) error
@@ -86,11 +96,12 @@ type SubIconProvider interface {
 }
 
 type Scheduler struct {
-	cfg       config.PrefetchConfig
-	pool      WindowInfoProvider
-	settings  SettingsProvider
-	cli       *reddit.Client
-	publicCli *reddit.PublicClient
+	cfg         config.PrefetchConfig
+	pool        WindowInfoProvider
+	tokenWaiter TokenWaiter
+	settings    SettingsProvider
+	cli         *reddit.Client
+	publicCli   *reddit.PublicClient
 	archiver  *archive.Service
 	media     MediaDownloader
 	subStatus SubStatusChecker
@@ -143,12 +154,14 @@ func New(
 	iconStore SubIconProvider,
 	hr HRRecorder,
 ) *Scheduler {
+	tw, _ := pool.(TokenWaiter)
 	return &Scheduler{
-		cfg:       cfg,
-		pool:      pool,
-		settings:  settings,
-		cli:       redditCli,
-		publicCli: publicCli,
+		cfg:         cfg,
+		pool:        pool,
+		tokenWaiter: tw,
+		settings:    settings,
+		cli:         redditCli,
+		publicCli:   publicCli,
 		archiver:  archiver,
 		media:     media,
 		subStatus: subStatus,
@@ -491,15 +504,20 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
 				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
 				s.recordUpstream(ctx)
-				if fetchErr != nil {
-					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: oauth failed: %v, trying public", sub, round+1, fetchErr)
-					if s.publicCli != nil {
-						posts, _, after, fetchErr = s.publicCli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+				// If the session token wasn't installed yet, block until it is
+				// and retry on the OAuth path. Falling back to publicCli here
+				// would emit an unauthenticated request from the same IP that's
+				// about to carry the session token — a stealth tell we won't
+				// accept. No fallback.
+				if errors.Is(fetchErr, reddit.ErrNoTokenAvailable) && s.tokenWaiter != nil {
+					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
+					if s.tokenWaiter.WaitForToken(ctx) {
+						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
 						s.recordUpstream(ctx)
 					}
 				}
 				if fetchErr != nil {
-					s.Events.Addf(LevelError, "L1", "r/%s round %d: fetch failed (both): %v", sub, round+1, fetchErr)
+					s.Events.Addf(LevelError, "L1", "r/%s round %d: fetch failed: %v", sub, round+1, fetchErr)
 					if s.subStatus != nil {
 						s.subStatus.RecordFailure(sub, fetchErr.Error())
 					}

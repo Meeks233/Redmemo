@@ -27,10 +27,8 @@
 	</div>
 	{{ else }}
 	{{ range .Posts }}
-		{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on")) }}
 		<hr class="sep" />
 		{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs }}
-		{{ end }}
 	{{ end }}
 	{{ end }}
 	{{ if eq .Prefs.UseHLS "on" }}

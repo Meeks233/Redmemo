@@ -118,10 +118,22 @@ func main() {
 	versionTracker := versionintel.NewTracker(&http.Client{Timeout: 15 * time.Second})
 	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache, uaPool)
 
+	// sessionUA returns the active OAuth session's bound User-Agent, blocking
+	// through the cold-start window (see TokenHolder.WaitForUserAgent). Every
+	// Reddit-facing client shares this one closure so a single identity drives
+	// every outbound request; falling back to a browser UA pool would emit a
+	// second UA from the session IP — a stealth tell. The browser UA pool is now
+	// dead code on these paths.
+	sessionUA := func() string {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		return oauthHolder.WaitForUserAgent(ctx)
+	}
+
 	// 9. Init Reddit clients
 	redditAdapter := &oauthAdapter{holder: oauthHolder}
 	redditCli := reddit.NewClient(redditAdapter)
-	publicCli := reddit.NewPublicClient(uaPool)
+	publicCli := reddit.NewPublicClient(sessionUA)
 
 	// 10. Init modules
 	rateLimiter := ratelimit.New(cfg.RateLimit, oauthHolder)
@@ -144,11 +156,7 @@ func main() {
 		log.Printf("media: legacy cleanup: %v", err)
 	}
 
-	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, func() string {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		return oauthHolder.WaitForUserAgent(ctx)
-	})
+	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, sessionUA)
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)

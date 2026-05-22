@@ -68,10 +68,8 @@
 		{{ else }}
 		<div id="posts">
 		{{ range .Posts }}
-			{{ if not (and .Flags.NSFW (ne $.Prefs.ShowNSFW "on") (not $.Sub.NSFW)) }}
 			<hr class="sep" />
 			{{ template "post_in_list" dict "Post" . "Prefs" $.Prefs "LazyMedia" (and (eq $.Prefs.LazyMedia "on") (not $.IsOffline)) }}
-			{{ end }}
 		{{ end }}
 		{{ if eq .Prefs.UseHLS "on" }}
 		<script src="/hls.min.js"></script>

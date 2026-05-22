@@ -100,7 +100,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const limit = 5
-	stored, err := h.postStore.ListHomepage(sort, limit, offset, subs, mode)
+	stored, err := h.postStore.ListHomepage(sort, limit, offset, subs, mode, prefs.ShowNSFW != "on")
 	if err != nil {
 		log.Printf("handler: homepage db query (%s): %v", sort, err)
 	}
@@ -137,7 +137,6 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 		Posts:              posts,
 		HomepageSort:       sort,
 		NoPosts:            len(posts) == 0,
-		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}
 
@@ -194,7 +193,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	// 3. Archive fallback. Distinguish "truly offline" (upstream failed,
 	// reason==""→show offline banner) from "deliberately degraded" (HR /
 	// quota, reason!=""→show only degraded banner, not the offline one).
-	posts, _ := h.postStore.ListBySubreddit(sub, limit, 0)
+	posts, _ := h.postStore.ListBySubreddit(sub, limit, 0, prefs.ShowNSFW != "on")
 	if len(posts) > 0 {
 		h.renderSubredditFromArchive(w, r, sub, posts, prefs, reason == "", reason)
 		return
@@ -249,7 +248,6 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		Sort:               [2]string{sort, r.URL.Query().Get("t")},
 		Ends:               [2]string{before, afterCursor},
 		NoPosts:            len(posts) == 0,
-		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}
 

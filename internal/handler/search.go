@@ -73,9 +73,8 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					After:      nextAfter,
 					RestrictSR: restrictSR,
 				},
-				Sub:                sub,
-				NoPosts:            len(posts) == 0,
-				AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
+				Sub:     sub,
+				NoPosts: len(posts) == 0,
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -91,7 +90,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 
 	// 3. Archive search (offline fallback)
 	if query != "" {
-		stored, _ := h.postStore.Search(query, 25)
+		stored, _ := h.postStore.Search(query, 25, prefs.ShowNSFW != "on")
 		if len(stored) > 0 {
 			var posts []reddit.Post
 			for _, sp := range stored {
@@ -115,10 +114,9 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					Query: query,
 					Sort:  sort,
 				},
-				Sub:                sub,
-				NoPosts:            len(posts) == 0,
-				AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
-				IsOffline:          reason == "",
+				Sub:       sub,
+				NoPosts:   len(posts) == 0,
+				IsOffline: reason == "",
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

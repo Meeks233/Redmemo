@@ -280,9 +280,36 @@ func (e *Engine) renderPage(w io.Writer, lang, name string, data any) error {
 	return tmpl.ExecuteTemplate(w, name, data)
 }
 
+// filterNSFW is the single chokepoint that enforces the user's show_nsfw
+// preference at the render boundary. SQL-side filtering already drops NSFW rows
+// from local archive reads; this is the safety net for upstream Reddit
+// responses (which always carry include_over_18=on so the archive can capture
+// the full feed) and any future code path that bypasses the store.
+//
+// Returns the filtered slice plus a flag indicating that the input was
+// non-empty but every post was hidden — used to show the "all NSFW hidden"
+// banner without a second pass.
+func filterNSFW(posts []reddit.Post, prefs reddit.Preferences) ([]reddit.Post, bool) {
+	if prefs.ShowNSFW == "on" || len(posts) == 0 {
+		return posts, false
+	}
+	kept := make([]reddit.Post, 0, len(posts))
+	for _, p := range posts {
+		if !p.Flags.NSFW {
+			kept = append(kept, p)
+		}
+	}
+	return kept, len(kept) == 0
+}
+
 func (e *Engine) RenderSubreddit(w io.Writer, data SubredditPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
+	}
+	var hidden bool
+	data.Posts, hidden = filterNSFW(data.Posts, data.Prefs)
+	if hidden {
+		data.AllPostsHiddenNSFW = true
 	}
 	return e.renderPage(w, data.Prefs.Lang, "subreddit.html", data)
 }
@@ -292,6 +319,7 @@ func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.P
 	if tmpl == nil {
 		return fmt.Errorf("subreddit template not found")
 	}
+	posts, _ = filterNSFW(posts, prefs)
 	for i, p := range posts {
 		if i > 0 {
 			io.WriteString(w, `<hr class="sep" />`)
@@ -315,6 +343,11 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
+	var hidden bool
+	data.Posts, hidden = filterNSFW(data.Posts, data.Prefs)
+	if hidden {
+		data.AllPostsHiddenNSFW = true
+	}
 	return e.renderPage(w, data.Prefs.Lang, "search.html", data)
 }
 
@@ -326,6 +359,7 @@ func (e *Engine) RenderSearchPostList(w io.Writer, posts []reddit.Post, prefs re
 	if tmpl == nil {
 		return fmt.Errorf("search template not found")
 	}
+	posts, _ = filterNSFW(posts, prefs)
 	data := map[string]any{"Posts": posts, "Prefs": prefs, "LazyMedia": prefs.LazyMedia == "on"}
 	return tmpl.ExecuteTemplate(w, "search_post_list", data)
 }
@@ -334,6 +368,11 @@ func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
+	var hidden bool
+	data.Posts, hidden = filterNSFW(data.Posts, data.Prefs)
+	if hidden {
+		data.AllPostsHiddenNSFW = true
+	}
 	return e.renderPage(w, data.Prefs.Lang, "user.html", data)
 }
 
@@ -341,12 +380,18 @@ func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
+	data.SearchPosts, _ = filterNSFW(data.SearchPosts, data.Prefs)
 	return e.renderPage(w, data.Prefs.Lang, "archive_hub.html", data)
 }
 
 func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
+	}
+	var hidden bool
+	data.Posts, hidden = filterNSFW(data.Posts, data.Prefs)
+	if hidden {
+		data.AllPostsHiddenNSFW = true
 	}
 	return e.renderPage(w, data.Prefs.Lang, "archive.html", data)
 }

@@ -173,14 +173,3 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	return p
 }
 
-func allPostsNSFW(posts []reddit.Post, prefs reddit.Preferences) bool {
-	if len(posts) == 0 || prefs.ShowNSFW == "on" {
-		return false
-	}
-	for _, p := range posts {
-		if !p.Flags.NSFW {
-			return false
-		}
-	}
-	return true
-}

@@ -254,6 +254,18 @@ var migrations = []string{
 	 CREATE INDEX idx_media_url_content ON media_url (content_hash);
 	 CREATE INDEX idx_media_content_eviction ON media_content (file_size, last_accessed)
 	    WHERE file_path IS NOT NULL;`,
+
+	// Partial index covering the SFW slice of the posts table. The vast majority
+	// of listing queries run with show_nsfw=off, which appends a
+	// `AND COALESCE((json_data->>'over_18')::boolean, false) = false` predicate
+	// to `WHERE LOWER(subreddit)=...` or the homepage `WHERE` clauses. A partial
+	// index on the SFW rows lets the planner satisfy those scans directly.
+	`CREATE INDEX IF NOT EXISTS posts_sfw_sub_created_idx
+	    ON posts (LOWER(subreddit), created_utc DESC)
+	    WHERE COALESCE((json_data->>'over_18')::boolean, false) = false;
+	 CREATE INDEX IF NOT EXISTS posts_sfw_created_idx
+	    ON posts (created_utc DESC)
+	    WHERE COALESCE((json_data->>'over_18')::boolean, false) = false;`,
 }
 
 func RunMigrations(db *sql.DB) error {

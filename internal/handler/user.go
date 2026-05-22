@@ -39,24 +39,37 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	h.redirectFuckReddit(w, r, r.URL.Path, reason)
 }
 
+// backgroundArchiveUser fetches a user's listing out-of-band and archives the
+// posts. It owns its own context (decoupled from the request) and never touches
+// the HTTP response, so it is safe to launch as a goroutine to keep growing the
+// archive on the authenticated path.
+//
+// It passes through the same global degrade gate as live traffic: when HR is in
+// cooldown or OAuth quota is exhausted it stands down instead of fetching. There
+// is deliberately no publicCli fallback — this work consumes quota and emitting
+// an unauthenticated request from the session IP is a stealth tell we won't
+// accept (see prefetch scheduler's "No fallback" note). The public client is
+// reserved for media resources only.
 func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
+	if name == "" {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var posts []reddit.Post
-	var err error
-
-	if h.oauthHolder.HasAvailableTokens() {
-		_, posts, _, err = h.redditCli.FetchUser(ctx, name, listing, sort, after)
-	} else {
-		_, posts, _, err = h.publicCli.FetchUser(ctx, name, listing, sort, after)
+	if degrade, _ := h.shouldDegrade(ctx); degrade {
+		return
 	}
+
+	_, posts, _, err := h.redditCli.FetchUser(ctx, name, listing, sort, after)
 	h.recordUpstream(ctx)
 	if err != nil {
 		log.Printf("background archive user %s: %v", name, err)
 		return
 	}
-	h.archiver.ArchivePosts(posts, "", "user_listing")
+	if len(posts) > 0 {
+		h.archiver.ArchivePosts(posts, "", "user_listing")
+	}
 }
 
 func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences) bool {
@@ -81,7 +94,6 @@ func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, nam
 		Listing:            listing,
 		Sort:               [2]string{sort, r.URL.Query().Get("t")},
 		NoPosts:            len(posts) == 0,
-		AllPostsHiddenNSFW: allPostsNSFW(posts, prefs),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
+	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
@@ -14,6 +16,7 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/transport"
 	"github.com/redmemo/redmemo/internal/useragent"
 )
 
@@ -36,8 +39,14 @@ type Handler struct {
 	subStatusStore *store.SubStatusStore
 	subIconStore   *store.SubIconStore
 	uaPool         *useragent.Pool
-	cfg            *config.Config
-	siteDefaults   map[string]string
+	// spoofedClient carries the uTLS/HTTP-2 Reddit-app fingerprint for the few
+	// upstream fetches the handler makes directly (e.g. HLS manifest rewriting)
+	// instead of going through reddit/media clients. Built once; never use
+	// net/http.DefaultClient for Reddit-facing requests — a plain Go TLS stack is
+	// a fingerprint mismatch against every other outbound request.
+	spoofedClient tls_client.HttpClient
+	cfg           *config.Config
+	siteDefaults  map[string]string
 }
 
 func New(
@@ -84,6 +93,7 @@ func New(
 		subStatusStore: sss,
 		subIconStore:   sis,
 		uaPool:         uap,
+		spoofedClient:  transport.NewSpoofedClient(30 * time.Second),
 		cfg:           cfg,
 		siteDefaults:  defaults,
 	}
