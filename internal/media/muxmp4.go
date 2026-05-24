@@ -9,6 +9,44 @@ import (
 	mp4 "github.com/abema/go-mp4"
 )
 
+// silentAudioBitrateThreshold is the bits/sec below which an audio track is
+// taken to be one of Reddit's silent placeholders. Reddit generates a ~4 kbps
+// AAC track for videos uploaded without sound (the DASH manifest lists it at
+// ~4068 bps, and both the "128k" and "64k" variants are byte-identical silence).
+// Real AAC content runs tens of kbps or more, so 8 kbps sits with wide margin
+// above the placeholder and well below anything audible.
+const silentAudioBitrateThreshold = 8000
+
+// audioIsSilentPlaceholder reports whether the fragmented audio MP4 at path is a
+// silent placeholder rather than real audio, judged purely by measured bitrate
+// (no decode). It returns false on any parse failure so an unreadable probe
+// never suppresses a mux that might carry real sound.
+func audioIsSilentPlaceholder(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	pi, err := mp4.Probe(f)
+	if err != nil {
+		return false, err
+	}
+	if len(pi.Tracks) == 0 {
+		return false, nil
+	}
+	tr := pi.Tracks[0]
+	if tr.Timescale == 0 {
+		return false, nil
+	}
+	bitrate := pi.Segments.GetBitrate(tr.TrackID, tr.Timescale)
+	if bitrate == 0 {
+		// No fragment timing to measure — don't second-guess; let it mux.
+		return false, nil
+	}
+	return bitrate < silentAudioBitrateThreshold, nil
+}
+
 // muxFragmentedMP4 combines a video-only fragmented MP4 (videoPath) and an
 // audio-only fragmented MP4 (audioPath) into a single fragmented MP4 at outPath
 // holding both tracks. It replaces the former static-ffmpeg `-c copy` step with

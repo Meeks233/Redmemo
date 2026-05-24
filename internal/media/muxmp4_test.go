@@ -15,6 +15,7 @@ type fragSpec struct {
 	movieTS   uint32
 	mediaTS   uint32
 	duration  uint32
+	sampleDur uint32 // per-fragment sample duration (media timescale); 0 = omit
 	fragments [][]byte
 }
 
@@ -67,7 +68,28 @@ func buildFragMP4(t *testing.T, path string, spec fragSpec) {
 				return err
 			}
 			return box(w, mp4.BoxTypeMdia(), func() error {
-				return writeBox(w, &mp4.Mdhd{Timescale: spec.mediaTS, DurationV0: spec.duration})
+				if err := writeBox(w, &mp4.Mdhd{Timescale: spec.mediaTS, DurationV0: spec.duration}); err != nil {
+					return err
+				}
+				// Empty sample tables — the real samples live in the fragments,
+				// but mp4.Probe needs stbl present to parse the track.
+				return box(w, mp4.BoxTypeMinf(), func() error {
+					return box(w, mp4.BoxTypeStbl(), func() error {
+						if err := writeBox(w, &mp4.Stsd{EntryCount: 0}); err != nil {
+							return err
+						}
+						if err := writeBox(w, &mp4.Stts{EntryCount: 0}); err != nil {
+							return err
+						}
+						if err := writeBox(w, &mp4.Stsc{EntryCount: 0}); err != nil {
+							return err
+						}
+						if err := writeBox(w, &mp4.Stsz{SampleCount: 0}); err != nil {
+							return err
+						}
+						return writeBox(w, &mp4.Stco{EntryCount: 0})
+					})
+				})
 			})
 		}); err != nil {
 			return err
@@ -97,12 +119,18 @@ func buildFragMP4(t *testing.T, path string, spec fragSpec) {
 				if err := writeBox(w, &mp4.Tfdt{BaseMediaDecodeTimeV0: bd}); err != nil {
 					return err
 				}
+				entry := mp4.TrunEntry{SampleSize: uint32(len(payload))}
+				flags := uint32(0x000001 | 0x000200) // data-offset + sample-size present
+				if spec.sampleDur > 0 {
+					entry.SampleDuration = spec.sampleDur
+					flags |= 0x000100 // sample-duration present
+				}
 				trun := &mp4.Trun{
 					SampleCount: 1,
 					DataOffset:  trunDataOffset,
-					Entries:     []mp4.TrunEntry{{SampleSize: uint32(len(payload))}},
+					Entries:     []mp4.TrunEntry{entry},
 				}
-				trun.SetFlags(0x000001 | 0x000200) // data-offset + sample-size present
+				trun.SetFlags(flags)
 				return writeBox(w, trun)
 			})
 		})
@@ -284,5 +312,49 @@ func TestMuxFragmentedMP4_RejectsNonFragmented(t *testing.T) {
 
 	if err := muxFragmentedMP4(plain, audio, filepath.Join(dir, "out.mp4")); err == nil {
 		t.Fatal("expected an error muxing a non-fragmented video, got nil")
+	}
+}
+
+func TestAudioIsSilentPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+
+	// Silent placeholder: tiny payloads over a long duration → ~4 kbps, well
+	// under the 8 kbps threshold. 5 samples × 48 bytes over 5 × 48000 ticks at a
+	// 48000 timescale = 5 s → 8*240/5 = 384 bps.
+	silentPath := filepath.Join(dir, "silent.mp4")
+	silentFrags := make([][]byte, 5)
+	for i := range silentFrags {
+		silentFrags[i] = make([]byte, 48)
+	}
+	buildFragMP4(t, silentPath, fragSpec{
+		trackID: 1, movieTS: 1000, mediaTS: 48000, duration: 5000, sampleDur: 48000,
+		fragments: silentFrags,
+	})
+
+	// Real audio: ~96 kbps over the same timeline (12000 bytes/sample).
+	realPath := filepath.Join(dir, "real.mp4")
+	realFrags := make([][]byte, 5)
+	for i := range realFrags {
+		realFrags[i] = make([]byte, 12000)
+	}
+	buildFragMP4(t, realPath, fragSpec{
+		trackID: 1, movieTS: 1000, mediaTS: 48000, duration: 5000, sampleDur: 48000,
+		fragments: realFrags,
+	})
+
+	silent, err := audioIsSilentPlaceholder(silentPath)
+	if err != nil {
+		t.Fatalf("silent probe: %v", err)
+	}
+	if !silent {
+		t.Error("low-bitrate track should be detected as a silent placeholder")
+	}
+
+	real, err := audioIsSilentPlaceholder(realPath)
+	if err != nil {
+		t.Fatalf("real probe: %v", err)
+	}
+	if real {
+		t.Error("normal-bitrate track must not be flagged as silent")
 	}
 }

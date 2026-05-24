@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -314,35 +315,10 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaM
 }
 
 func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaMeta, error) {
-	req, err := fhttp.NewRequestWithContext(ctx, "GET", originalURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("User-Agent", p.userAgentFn())
-	transport.ApplyHeaderOrder(req)
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("upstream status %d", resp.StatusCode)
-	}
-
-	// Reddit sometimes answers a blocked/rate-limited media request with a 200
-	// carrying an HTML error or login page. Caching that as a "media file"
-	// poisons the row and breaks the image permanently — reject it so the next
-	// request retries from scratch.
-	if isNonMediaMIME(resp.Header.Get("Content-Type")) {
-		return nil, fmt.Errorf("upstream returned non-media content-type %q", resp.Header.Get("Content-Type"))
-	}
-
-	// Stream into a staging file in the media root, hashing the bytes in
-	// flight. The final path is sha256(content), so the publish rename can
-	// only happen once we have read the whole body — until then the path is
-	// not known.
+	// Stream into a staging file in the media root, hashing the bytes in flight.
+	// The final path is sha256(content), so the publish rename can only happen
+	// once the whole body is read — until then the path is not known. The body
+	// is pulled in flow-control-safe Range chunks (see streamRangedTo).
 	if err := os.MkdirAll(p.rootPath, 0755); err != nil {
 		return nil, fmt.Errorf("mkdir root: %w", err)
 	}
@@ -352,11 +328,21 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	}
 	stagingPath := staging.Name()
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(staging, hasher), resp.Body)
+	_, hdr, size, err := p.streamRangedTo(ctx, originalURL, 0, nil, io.MultiWriter(staging, hasher))
 	staging.Close()
 	if err != nil {
 		os.Remove(stagingPath)
-		return nil, fmt.Errorf("write file: %w", err)
+		return nil, fmt.Errorf("fetch: %w", err)
+	}
+
+	// Reddit sometimes answers a blocked/rate-limited media request with a 200
+	// carrying an HTML error or login page. Caching that as a "media file"
+	// poisons the row and breaks the image permanently — reject it so the next
+	// request retries from scratch.
+	mimeType := hdr.Get("Content-Type")
+	if isNonMediaMIME(mimeType) {
+		os.Remove(stagingPath)
+		return nil, fmt.Errorf("upstream returned non-media content-type %q", mimeType)
 	}
 
 	hash := hex.EncodeToString(hasher.Sum(nil))
@@ -377,7 +363,6 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 		return nil, fmt.Errorf("publish file: %w", err)
 	}
 
-	mimeType := resp.Header.Get("Content-Type")
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
@@ -413,49 +398,183 @@ func (p *Proxy) DownloadMedia(ctx context.Context, originalURL string) error {
 	return err
 }
 
-// reverseProxy streams targetURL straight through to the client. noStore
-// strips upstream caching headers and marks the response uncacheable.
-func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool) {
-	req, err := fhttp.NewRequestWithContext(r.Context(), "GET", targetURL, nil)
+// mediaChunkSize bounds each Range request the proxy issues to Reddit's CDN.
+// The spoofed HTTP/2 transport advertises a 16 MiB flow-control window and,
+// unlike net/http, does not replenish a stream's receive window as the body is
+// read — so any single response larger than that window aborts mid-stream with
+// FLOW_CONTROL_ERROR (reproduced: a 22 MiB clip dies after exactly 16777216
+// bytes). Pulling media in sub-window chunks sidesteps the ceiling and mirrors
+// how the real Reddit app fetches DASH segments. A var (not const) so tests can
+// shrink it to force the multi-chunk path on small fixtures.
+var mediaChunkSize int64 = 8 << 20
+
+// parseContentRangeTotal extracts the total length from a Content-Range value
+// like "bytes 0-8388607/23489656". It returns -1 when the total is unknown
+// ("*") or the header is missing/malformed.
+func parseContentRangeTotal(cr string) int64 {
+	i := strings.LastIndexByte(cr, '/')
+	if i < 0 {
+		return -1
+	}
+	total, err := strconv.ParseInt(strings.TrimSpace(cr[i+1:]), 10, 64)
 	if err != nil {
-		serveLoader(w, http.StatusAccepted)
-		return
+		return -1
+	}
+	return total
+}
+
+// parseRangeStart returns the first byte offset of a client Range header such
+// as "bytes=1000-" or "bytes=1000-2000". Suffix ranges ("bytes=-500") and
+// anything unparseable yield 0 — the caller then serves from the start.
+func parseRangeStart(h string) int64 {
+	const prefix = "bytes="
+	if !strings.HasPrefix(h, prefix) {
+		return 0
+	}
+	spec := h[len(prefix):]
+	if i := strings.IndexByte(spec, ','); i >= 0 {
+		spec = spec[:i]
+	}
+	dash := strings.IndexByte(spec, '-')
+	if dash <= 0 {
+		return 0
+	}
+	start, err := strconv.ParseInt(strings.TrimSpace(spec[:dash]), 10, 64)
+	if err != nil || start < 0 {
+		return 0
+	}
+	return start
+}
+
+// getRangeWith issues a single GET for [start, start+mediaChunkSize) with the
+// shared spoof identity. extra carries optional conditional headers (e.g.
+// If-Modified-Since); any Range in extra is overridden by the chunk range.
+func (p *Proxy) getRangeWith(ctx context.Context, url string, start int64, extra fhttp.Header) (*fhttp.Response, error) {
+	req, err := fhttp.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
 	}
 	req.Header.Set("User-Agent", p.userAgentFn())
-
-	for _, h := range []string{"Range", "If-Modified-Since", "Cache-Control"} {
-		if v := r.Header.Get(h); v != "" {
-			req.Header.Set(h, v)
+	for k, vs := range extra {
+		for _, v := range vs {
+			req.Header.Add(k, v)
 		}
 	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+mediaChunkSize-1))
 	transport.ApplyHeaderOrder(req)
+	return p.httpClient.Do(req)
+}
 
-	resp, err := p.httpClient.Do(req)
+// streamRangedTo downloads url from byte offset start to w in flow-control-safe
+// chunks until the content ends. It returns the first chunk's status code and
+// header (so callers can read Content-Type / total size) plus the bytes
+// written. A non-2xx first response returns its status with a non-nil error.
+func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, extra fhttp.Header, w io.Writer) (status int, hdr fhttp.Header, written int64, err error) {
+	offset := start
+	total := int64(-1)
+	for {
+		resp, derr := p.getRangeWith(ctx, url, offset, extra)
+		if derr != nil {
+			return status, hdr, written, derr
+		}
+		if status == 0 {
+			status = resp.StatusCode
+			hdr = resp.Header
+			if status != http.StatusOK && status != http.StatusPartialContent {
+				resp.Body.Close()
+				return status, hdr, written, fmt.Errorf("status %d", status)
+			}
+			total = parseContentRangeTotal(resp.Header.Get("Content-Range"))
+		}
+		n, cerr := io.Copy(w, resp.Body)
+		resp.Body.Close()
+		written += n
+		if cerr != nil {
+			return status, hdr, written, cerr
+		}
+		// 200 means the server ignored Range and sent the whole body in one
+		// stream; there is nothing more to fetch.
+		if status == http.StatusOK {
+			return status, hdr, written, nil
+		}
+		offset += n
+		switch {
+		case n == 0:
+			return status, hdr, written, nil
+		case total >= 0 && offset >= total:
+			return status, hdr, written, nil
+		case total < 0 && n < mediaChunkSize:
+			return status, hdr, written, nil
+		}
+	}
+}
+
+// reverseProxy streams targetURL straight through to the client, fetching it
+// from the CDN in flow-control-safe chunks (see streamRangedTo) while presenting
+// the client a single coherent response for its requested range. noStore strips
+// upstream caching headers and marks the response uncacheable.
+func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool) {
+	start := parseRangeStart(r.Header.Get("Range"))
+
+	conditional := fhttp.Header{}
+	for _, h := range []string{"If-Modified-Since", "Cache-Control"} {
+		if v := r.Header.Get(h); v != "" {
+			conditional.Set(h, v)
+		}
+	}
+
+	// Peek the first chunk to learn status, content-type and total size before
+	// committing the client's response headers.
+	first, err := p.getRangeWith(r.Context(), targetURL, start, conditional)
 	if err != nil {
 		serveLoader(w, http.StatusAccepted)
 		return
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+	if first.StatusCode != http.StatusOK && first.StatusCode != http.StatusPartialContent {
+		first.Body.Close()
 		serveLoader(w, http.StatusAccepted)
 		return
 	}
+	contentType := first.Header.Get("Content-Type")
+	total := parseContentRangeTotal(first.Header.Get("Content-Range"))
 
-	for k, vs := range resp.Header {
-		if noStore {
-			switch http.CanonicalHeaderKey(k) {
-			case "Cache-Control", "Expires", "Etag", "Last-Modified", "Age":
-				continue
-			}
-		}
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
 	}
+	w.Header().Set("Accept-Ranges", "bytes")
 	if noStore {
 		w.Header().Set("Cache-Control", "no-store")
+	} else {
+		for _, h := range []string{"Cache-Control", "Expires", "Etag", "Last-Modified"} {
+			if v := first.Header.Get(h); v != "" {
+				w.Header().Set(h, v)
+			}
+		}
 	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+
+	if r.Header.Get("Range") != "" && first.StatusCode == http.StatusPartialContent && total >= 0 {
+		end := total - 1
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
+		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+		w.WriteHeader(http.StatusPartialContent)
+	} else {
+		if total >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(total-start, 10))
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+
+	n, cerr := io.Copy(w, first.Body)
+	first.Body.Close()
+	if cerr != nil {
+		return
+	}
+	offset := start + n
+	// The first chunk already covered everything when the server sent a full
+	// 200 body, a short read, or we reached the declared end.
+	if first.StatusCode == http.StatusOK || n == 0 ||
+		(total >= 0 && offset >= total) || (total < 0 && n < mediaChunkSize) {
+		return
+	}
+	_, _, _, _ = p.streamRangedTo(r.Context(), targetURL, offset, conditional, w)
 }

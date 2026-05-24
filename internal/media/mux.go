@@ -13,9 +13,7 @@ import (
 	"sync"
 	"time"
 
-	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/redmemo/redmemo/internal/store"
-	"github.com/redmemo/redmemo/internal/transport"
 )
 
 var (
@@ -330,17 +328,31 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		return meta, nil
 	}
 
+	// A downloaded audio file isn't necessarily real audio: Reddit serves a
+	// silent ~4 kbps AAC placeholder for videos uploaded without sound. Muxing
+	// that in would mark the row 'has_audio' and have the UI promise sound the
+	// file can't play, so treat it the same as a genuinely absent track.
+	silentPlaceholder := false
+	if !audioConfirmedAbsent {
+		isSilent, serr := audioIsSilentPlaceholder(audioTmp)
+		if serr != nil {
+			log.Printf("media: silent-audio check for %s failed: %v; muxing anyway", videoURL, serr)
+		} else {
+			silentPlaceholder = isSilent
+		}
+	}
+
 	var verdict string
 	var stagingPath string
-	if audioConfirmedAbsent {
-		// Reddit returned 4xx for every audio candidate — this video genuinely
-		// has no audio track. Cache the silent video and record the verdict so
-		// future requests skip the probe.
+	if audioConfirmedAbsent || silentPlaceholder {
+		// No real audio — either Reddit returned 4xx for every audio candidate,
+		// or the track it serves is a silent placeholder. Cache the silent video
+		// and record the verdict so future requests skip the probe.
 		stagingPath = videoTmp
 		verdict = "silent"
 	} else {
-		// We have an audio file. Combine it with the video in-process via the
-		// pure-Go fragmented-MP4 muxer (muxmp4.go) — no external ffmpeg. The
+		// We have a real audio file. Combine it with the video in-process via
+		// the pure-Go fragmented-MP4 muxer (muxmp4.go) — no external ffmpeg. The
 		// muxed file lands in the same temp dir; publishContent moves it to its
 		// content-addressed home only after we know its hash.
 		muxedTmp := filepath.Join(tmpDir, "muxed.mp4")
@@ -511,33 +523,19 @@ func (p *Proxy) probeAudio(ctx context.Context, videoURL, tmpDir string) (string
 
 // downloadToWithStatus is like downloadTo but also reports the HTTP status
 // code, so the caller can distinguish 4xx (definitively absent) from 5xx /
-// network errors (transient).
+// network errors (transient). The body is pulled in flow-control-safe Range
+// chunks (see streamRangedTo) — a v.redd.it segment can exceed the spoofed
+// transport's HTTP/2 window, which a single-stream GET cannot survive. A ranged
+// fetch of a present file returns 206; a missing audio candidate returns its
+// 4xx as the status with a non-nil error, exactly as probeAudio expects.
 func (p *Proxy) downloadToWithStatus(ctx context.Context, url, dst string) (int, error) {
-	req, err := fhttp.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("User-Agent", p.userAgentFn())
-	transport.ApplyHeaderOrder(req)
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode, fmt.Errorf("status %d", resp.StatusCode)
-	}
-
 	f, err := os.Create(dst)
 	if err != nil {
-		return resp.StatusCode, err
+		return 0, err
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return resp.StatusCode, err
-	}
-	return resp.StatusCode, nil
+	status, _, _, err := p.streamRangedTo(ctx, url, 0, nil, f)
+	return status, err
 }
 
 func (p *Proxy) downloadTo(ctx context.Context, url, dst string) error {
