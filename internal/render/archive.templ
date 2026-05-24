@@ -1,0 +1,57 @@
+package render
+
+import "strconv"
+
+// archive.templ ports templates/archive.html — the per-subreddit local archive
+// listing. Cards render eagerly (lazy=false): archived media is local.
+
+templ archiveTitle(d ArchivePageData) {
+	{ T(ctx, "archive.page_title", d.Sub) }
+}
+
+templ archivePage(d ArchivePageData) {
+	@layout(d.BasePage, pageSlots{Title: archiveTitle(d), Body: archiveBody(d)})
+}
+
+templ archiveBody(d ArchivePageData) {
+	<main>
+		<div id="column_one">
+			<div id="sort_options" style="display:flex;align-items:center;gap:0.5em;padding:0.5em 0;margin-bottom:1em;">
+				<a href="/archive">&larr; { T(ctx, "archive.back") }</a>
+				<span style="opacity:0.5;">|</span>
+				<strong>r/{ d.Sub }</strong>
+				<span style="opacity:0.5;">&mdash; { T(ctx, "archive.posts_count", d.TotalPosts) }</span>
+			</div>
+			if len(d.Posts) == 0 {
+				<center style="padding:2em;">{ T(ctx, "archive.no_posts") }</center>
+			} else {
+				<div id="posts">
+					if d.AllPostsHiddenNSFW {
+						<div class="archive-nsfw-notice">
+							<p class="nsfw-notice-title">{ T(ctx, "archive.nsfw_title") }</p>
+							<p>{ T(ctx, "archive.nsfw_body") }</p>
+							<p>{ T(ctx, "archive.nsfw_hint_pre") }<a href="/settings">{ T(ctx, "archive.nsfw_settings") }</a>{ T(ctx, "archive.nsfw_hint_post") }</p>
+						</div>
+					} else {
+						for _, p := range d.Posts {
+							<hr class="sep"/>
+							@postInList(p, d.Prefs, false)
+						}
+					}
+					if d.Prefs.UseHLS == "on" {
+						<script src="/hls.min.js"></script>
+						<script src="/playHLSVideo.js"></script>
+					}
+				</div>
+				<footer>
+					if d.HasPrev {
+						<a href={ templ.SafeURL("/archive/r/" + d.Sub + "?page=" + strconv.Itoa(d.Page-1)) } accesskey="P">{ T(ctx, "nav.prev") }</a>
+					}
+					if d.HasNext {
+						<a href={ templ.SafeURL("/archive/r/" + d.Sub + "?page=" + strconv.Itoa(d.Page+1)) } accesskey="N">{ T(ctx, "nav.next") }</a>
+					}
+				</footer>
+			}
+		</div>
+	</main>
+}

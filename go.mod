@@ -3,6 +3,7 @@ module github.com/redmemo/redmemo
 go 1.26.2
 
 require (
+	github.com/a-h/templ v0.3.1020
 	github.com/abema/go-mp4 v1.6.0
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/bogdanfinn/fhttp v0.6.8
@@ -26,8 +27,8 @@ require (
 	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	golang.org/x/crypto v0.46.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 )

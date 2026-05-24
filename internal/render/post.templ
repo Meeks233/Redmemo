@@ -1,0 +1,292 @@
+package render
+
+import "github.com/redmemo/redmemo/internal/reddit"
+
+// post.templ ports templates/post.html plus the "post_detail" and
+// "visit_reddit_confirmation" defines from partials.html.
+
+templ postTitle(d PostPageData) {
+	if d.SingleThread && len(d.Comments) > 0 {
+		{ d.Comments[0].Author.Name + " comments on " + d.Post.Title + " - r/" + d.Post.Community }
+	} else {
+		{ d.Post.Title + " - r/" + d.Post.Community }
+	}
+}
+
+templ postHead(d PostPageData) {
+	<meta name="author" content={ "u/" + d.Post.Author.Name }/>
+	<meta name="title" content={ d.Post.Title + " - r/" + d.Post.Community }/>
+	<meta property="og:title" content={ d.Post.Title + " - r/" + d.Post.Community }/>
+	<meta property="og:description" content={ "View on " + d.BrandName + ", an alternative private front-end to Reddit." }/>
+	<meta property="og:url" content={ d.Post.Permalink }/>
+	if d.Post.PostType == "image" {
+		<meta property="og:type" content="image"/>
+		<meta property="og:image" content={ d.Post.Thumbnail.URL }/>
+		<meta property="twitter:card" content="summary_large_image"/>
+		<meta property="twitter:image" content={ d.Post.Thumbnail.URL }/>
+	} else if d.Post.PostType == "video" || d.Post.PostType == "gif" {
+		<meta property="twitter:card" content="video"/>
+		<meta property="og:type" content="video"/>
+		<meta property="og:video" content={ d.Post.Media.URL }/>
+		<meta property="og:video:type" content="video/mp4"/>
+	} else {
+		<meta property="og:type" content="website"/>
+		if d.SingleThread {
+			<script src="/highlighted.js" defer></script>
+		}
+	}
+}
+
+templ postPage(d PostPageData) {
+	@layout(d.BasePage, pageSlots{
+		Title:     postTitle(d),
+		HeadExtra: postHead(d),
+		Search:    searchbox("/r/"+d.Post.Community, ""),
+		Content:   postContent(d),
+	})
+}
+
+templ postContent(d PostPageData) {
+	@offlineBanner(d.IsOffline)
+	@degradedBanner(d.DegradedReason)
+	<div id="column_one">
+		<script>
+			(function() {
+				var btn = document.getElementById('refresh_post');
+				if (!btn) return;
+				btn.addEventListener('click', function() {
+					if (btn.classList.contains('disabled')) { alert(btn.dataset.noTokens); return; }
+					if (btn.classList.contains('spinning')) return;
+					btn.classList.add('spinning');
+					fetch('/api/refresh/' + btn.dataset.refreshSub + '/' + btn.dataset.refreshId, { method: 'POST' })
+						.then(function(r) { return r.json(); })
+						.then(function(d) {
+							btn.classList.remove('spinning');
+							if (d.ok) location.reload();
+							else alert(d.error || btn.dataset.failLabel);
+						})
+						.catch(function() {
+							btn.classList.remove('spinning');
+							alert(btn.dataset.networkError);
+						});
+				});
+			})();
+		</script>
+		@postDetail(d.Post, d.Prefs, d.HasOAuth)
+		<div id="commentQueryForms">
+			<form id="sort">
+				<p id="comment_count">{ d.Post.Comments[0] } { commentsWord(d.Post.Comments[1]) } <span id="sorted_by">{ T(ctx, "comments.sorted_by") }</span></p>
+				<select name="sort" title={ T(ctx, "comments.sort_title") } id="commentSortSelect">
+					for _, s := range commentSorts {
+						<option value={ s } if s == d.Sort { selected }>{ T(ctx, "sort."+s) }</option>
+					}
+				</select>
+				<button id="sort_submit" class="submit">@submitSVG()</button>
+			</form>
+			<form id="sort">
+				<input id="search" class="commentQuery" type="search" name="q" value={ d.CommentQuery } placeholder={ T(ctx, "comments.search_placeholder") }/>
+				<input type="hidden" name="type" value="comment"/>
+			</form>
+		</div>
+		<div>
+			if d.CommentQuery != "" {
+				{ T(ctx, "comments.containing", d.CommentQuery) }&nbsp;|&nbsp;<a id="allCommentsLink" href={ templ.SafeURL(d.URLWithoutQuery) }>{ T(ctx, "comments.all") }</a>
+			}
+		</div>
+		for _, c := range d.Comments {
+			<div class="thread">
+				if d.SingleThread {
+					<p class="thread_nav"><a href={ templ.SafeURL(d.Post.Permalink) }>{ T(ctx, "comments.view_all") }</a></p>
+					if c.ParentKind == "t1" {
+						<p class="thread_nav"><a href="?context=9999">{ T(ctx, "comments.show_parent") }</a></p>
+					}
+				}
+				@commentTree(c)
+			</div>
+		}
+	</div>
+}
+
+// visitRedditConfirmation is the "leave to reddit.com" modal (driven by
+// redditModal.js).
+templ visitRedditConfirmation(permalink string) {
+	<div class="modal-overlay" id="reddit-modal">
+		<div class="modal-box">
+			<h2>{ T(ctx, "modal.leave_title") }</h2>
+			<p>{ T(ctx, "modal.leave_body") }</p>
+			<p class="modal-url">{ "https://www.reddit.com" + permalink }</p>
+			<div class="modal-actions">
+				<button class="modal-cancel" type="button" data-modal-close>{ T(ctx, "modal.leave_cancel") }</button>
+				<a class="modal-confirm" href={ templ.SafeURL("https://www.reddit.com" + permalink) } target="_blank" rel="nofollow noopener noreferrer" data-modal-close>{ T(ctx, "modal.leave_confirm") }</a>
+			</div>
+		</div>
+	</div>
+}
+
+// postDetail is the full post card on the detail page (the old "post_detail").
+templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
+	<div class={ "post highlighted", templ.KV("post_blurred", post.Flags.Spoiler && prefs.BlurSpoiler == "on") }>
+		<div class="post_header_row">
+			<p class="post_header">
+				<a class="post_subreddit" href={ templ.SafeURL("/r/" + post.Community) }>r/{ post.Community }</a>
+				<span class="dot">&bull;</span>
+				<a class={ "post_author", post.Author.Distinguished } href={ templ.SafeURL("/user/" + post.Author.Name) }>u/{ post.Author.Name }</a>
+				if len(post.Author.Flair.FlairParts) > 0 {
+					<small class="author_flair">@renderFlair(post.Author.Flair.FlairParts)</small>
+				}
+				<span class="dot">&bull;</span>
+				<span class="created" title={ post.Created }>{ post.RelTime }</span>
+				if post.ArchivedRelTime != "" {
+					<span class="dot">&bull;</span>
+					<span class="archived" title={ post.ArchivedTime }>{ T(ctx, "post.archived", post.ArchivedRelTime) }</span>
+				}
+				if len(post.Awards) > 0 && prefs.HideAwards != "on" {
+					<span class="dot">&bull;</span>
+					<span class="awards">
+						for _, aw := range post.Awards {
+							<span class="award" title={ aw.Name }>
+								<img alt={ aw.Name } src={ aw.IconURL } width="16" height="16"/>
+								{ i64(aw.Count) }
+							</span>
+						}
+					</span>
+				}
+			</p>
+			<div class="post_header_actions">
+				if hasOAuth {
+					<button id="refresh_post" class="post-action-btn" title={ T(ctx, "post.refetch_title") } data-refresh-sub={ post.Community } data-refresh-id={ post.ID } data-fail-label={ T(ctx, "post.refresh_failed") } data-network-error={ T(ctx, "post.network_error") }>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path><path d="M16 16h5v5"></path></svg>
+						<span>{ T(ctx, "post.refresh") }</span>
+					</button>
+				} else {
+					<button id="refresh_post" class="post-action-btn disabled" title={ T(ctx, "post.no_tokens_title") } data-no-tokens={ T(ctx, "post.no_tokens_alert") }>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8L18.74 5.74A9.75 9.75 0 0 0 12 3C11 3 10.03 3.16 9.13 3.47"></path><path d="M8 16H3v5"></path><path d="M3 12C3 9.51 4 7.26 5.64 5.64"></path><path d="m3 16 2.26 2.26A9.75 9.75 0 0 0 12 21c2.49 0 4.74-1 6.36-2.64"></path><path d="M21 12c0 1-.16 1.97-.47 2.87"></path><path d="M21 3v5h-5"></path><path d="M22 22 2 2"></path></svg>
+						<span>{ T(ctx, "post.refresh") }</span>
+					</button>
+				}
+				if prefs.DisableVisitRedditConfirmation == "on" {
+					<a class="post-action-btn" title={ T(ctx, "post.goto_reddit") } href={ templ.SafeURL("https://www.reddit.com" + post.Permalink) } target="_blank" rel="nofollow noopener noreferrer">
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path><path d="M8 12h.01"></path><path d="M12 12h.01"></path><path d="M16 12h.01"></path></svg>
+						<span>{ T(ctx, "post.reddit") }</span>
+					</a>
+				} else {
+					<a class="post-action-btn" title={ T(ctx, "post.goto_reddit") } href={ templ.SafeURL("https://www.reddit.com" + post.Permalink) } target="_blank" rel="nofollow noopener noreferrer" data-leave-modal>
+						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path><path d="M8 12h.01"></path><path d="M12 12h.01"></path><path d="M16 12h.01"></path></svg>
+						<span>{ T(ctx, "post.reddit") }</span>
+					</a>
+					@visitRedditConfirmation(post.Permalink)
+				}
+			</div>
+		</div>
+		<h1 class="post_title">
+			if len(post.Flair.FlairParts) > 0 {
+				<a href={ templ.SafeURL("/r/" + post.Community + "/search?q=flair_name%3A%22" + post.Flair.Text + "%22&restrict_sr=on") } class="post_flair" style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }>@renderFlair(post.Flair.FlairParts)</a>
+			}
+			{ post.Title }
+			if post.Flags.NSFW {
+				{ " " }<small class="nsfw">{ T(ctx, "flag.nsfw") }</small>
+			}
+			if post.Flags.Spoiler {
+				{ " " }<small class="spoiler">{ T(ctx, "flag.spoiler") }</small>
+			}
+		</h1>
+		if post.PostType == "image" {
+			<div class="post_media_content">
+				<a href={ templ.SafeURL(post.Media.URL) } class="post_media_image">
+					if post.Media.Height == 0 || post.Media.Width == 0 {
+						<img width="100%" height="100%" loading="lazy" alt={ T(ctx, "alt.post_image") } src={ post.Media.URL }/>
+					} else {
+						<svg width={ i64(post.Media.Width) + "px" } height={ i64(post.Media.Height) + "px" } xmlns="http://www.w3.org/2000/svg">
+							<image width="100%" height="100%" href={ templ.SafeURL(post.Media.URL) }></image>
+							<desc><img loading="lazy" alt={ T(ctx, "alt.post_image") } src={ post.Media.URL }/></desc>
+						</svg>
+					}
+				</a>
+			</div>
+		} else if post.PostType == "video" || post.PostType == "gif" {
+			if prefs.UseHLS == "on" && post.Media.AltURL != "" {
+				<script src="/hls.min.js"></script>
+				<div class="post_media_content">
+					<video
+						class="post_media_video short"
+						if prefs.AutoplayVideos == "on" {
+							data-viewport-autoplay
+						}
+						if post.Media.Width > 0 && post.Media.Height > 0 {
+							width={ i64(post.Media.Width) }
+							height={ i64(post.Media.Height) }
+						}
+						poster={ post.Media.Poster }
+						preload="metadata"
+						controls
+					>
+						<source src={ post.Media.AltURL } type="application/vnd.apple.mpegurl"/>
+						<source src={ post.Media.URL } type="video/mp4"/>
+					</video>
+				</div>
+				<script src="/playHLSVideo.js"></script>
+			} else {
+				<div class="post_media_content">
+					<video
+						class="post_media_video"
+						src={ post.Media.URL }
+						controls
+						if prefs.AutoplayVideos == "on" {
+							data-viewport-autoplay
+						}
+						loop
+					><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
+				</div>
+			}
+		} else if post.PostType == "gallery" {
+			<div class="gallery">
+				for _, g := range post.Gallery {
+					<figure>
+						<a href={ templ.SafeURL(g.URL) }><img loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ g.URL }/></a>
+						<figcaption>
+							<p>{ g.Caption }</p>
+							if g.OutboundURL != "" {
+								<p><a class="outbound_url" href={ templ.SafeURL(g.OutboundURL) } rel="nofollow">{ g.OutboundURL }</a></p>
+							}
+						</figcaption>
+					</figure>
+				}
+			</div>
+		} else if post.PostType == "link" {
+			<a id="post_url" href={ templ.SafeURL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
+		}
+		<div class="post_body">
+			@templ.Raw(string(post.Body))
+			@poll(post.Poll)
+		</div>
+		<div class="post_score" title={ post.Score[1] }>
+			if prefs.HideScore != "on" {
+				{ post.Score[0] }
+			} else {
+				&#x2022;
+			}
+			<span class="label">{ " " + T(ctx, "post.upvotes") }</span>
+		</div>
+		<div class="post_footer">
+			<ul id="post_links">
+				<li><a href={ templ.SafeURL(post.Permalink) }><span class="desktop_item">{ T(ctx, "post.permalink") }</span><span class="mobile_item">{ T(ctx, "post.permalink_short") }</span></a></li>
+				if post.NumDuplicates > 0 {
+					<li><a href={ templ.SafeURL("/r/" + post.Community + "/duplicates/" + post.ID) }><span class="desktop_item">{ T(ctx, "post.duplicates") }</span><span class="mobile_item">{ T(ctx, "post.duplicates_short") }</span></a></li>
+				}
+				if post.PostType == "link" {
+					<li class="desktop_item"><a target="_blank" href={ templ.SafeURL("https://archive.is/latest/" + post.Media.URL) }>{ T(ctx, "post.archiveis") }</a></li>
+					<li class="mobile_item"><a target="_blank" href={ templ.SafeURL("https://archive.is/latest/" + post.Media.URL) }>{ T(ctx, "post.archive_short") }</a></li>
+				}
+				if post.Media.DownloadName != "" {
+					<li>
+						<a href={ templ.SafeURL(post.Media.URL) } download={ post.Media.DownloadName }>
+							<span class="mobile_item">{ T(ctx, "post.download_short") }</span>
+							<span class="desktop_item">{ T(ctx, "post.download") }</span>
+						</a>
+					</li>
+				}
+			</ul>
+			<p>{ i64(post.UpvoteRatio) }%<span id="upvoted">{ " " + T(ctx, "post.upvoted") }</span></p>
+		</div>
+	</div>
+}

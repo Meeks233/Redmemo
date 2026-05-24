@@ -1,0 +1,117 @@
+package render
+
+// fuckreddit.templ ports templates/fuckreddit.html — the degrade/cooldown page
+// (and its "all clear" state) with a server-driven countdown.
+
+templ fuckRedditTitle(d FuckRedditPageData) {
+	if d.Reason != "" {
+		{ T(ctx, "fr.unavailable") + " — " + d.BrandName }
+	} else {
+		{ T(ctx, "fr.allright") + " — " + d.BrandName }
+	}
+}
+
+templ fuckRedditPage(d FuckRedditPageData) {
+	@layout(d.BasePage, pageSlots{Title: fuckRedditTitle(d), Content: fuckRedditContent(d)})
+}
+
+templ fuckRedditContent(d FuckRedditPageData) {
+	<div id="error">
+		<div class="prefs">
+			<fieldset>
+				if d.Reason != "" {
+					<legend>{ T(ctx, "fr.exhausted") }</legend>
+					<div class="error-icon">
+						<svg class="heart-broken lucide-heart-crack" xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+							<g class="heart-half left">
+								<path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path>
+								<path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path>
+							</g>
+							<g class="heart-half right">
+								<path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path>
+								<path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path>
+							</g>
+						</svg>
+					</div>
+					<p id="fr-reason-text">{ frReasonText(ctx, d.Reason) }</p>
+					<p>
+						{ T(ctx, "fr.reset_at") }
+						<span id="fr-countdown" data-from={ d.From } if d.Freeze { data-freeze="1" }>
+							if d.Freeze {
+								99:99
+							} else {
+								--:--
+							}
+						</span>
+					</p>
+					if d.From != "" {
+						<div class="fr-actions">
+							<a class="fr-go-reddit" href={ templ.SafeURL("https://www.reddit.com" + d.From) } target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm={ T(ctx, "fr.access_directly") }>
+								<span class="fr-go-reddit-emoji" aria-hidden="true">😈</span>
+								<span>{ T(ctx, "fr.access_directly") }</span>
+							</a>
+						</div>
+					}
+				} else {
+					<legend>{ T(ctx, "fr.allright") }</legend>
+					<div class="error-icon">
+						<svg class="heart-alive" xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+							<path class="heart-shape" d="M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572" stroke="#22c55e" fill="rgba(34,197,94,0.15)"></path>
+							<path class="ecg-line" d="M3 12h2l2 -3l3 6l2 -3h3" stroke="#22c55e" fill="none"></path>
+						</svg>
+					</div>
+					<p>{ T(ctx, "fr.congrats") }</p>
+				}
+			</fieldset>
+		</div>
+	</div>
+	if d.Reason != "" && d.From != "" {
+		<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. -->
+		@visitRedditConfirmation(d.From)
+	}
+	if d.Reason != "" {
+		@templ.JSONScript("fr-reason-texts", frReasonTexts(ctx))
+		<script>
+			// /fuckreddit countdown — server is the sole source of truth. Poll
+			// /api/status every 1s, render current_reset, swap reason text when the
+			// active tier changes, and redirect back once the degrade lifts.
+			(function(){
+				var el = document.getElementById('fr-countdown');
+				if (!el) return;
+				if (el.getAttribute('data-freeze') === '1') return;
+				var reasonEl = document.getElementById('fr-reason-text');
+				var fromPath = el.getAttribute('data-from') || '';
+				var REASON_TEXTS = {};
+				try { REASON_TEXTS = JSON.parse(document.getElementById('fr-reason-texts').textContent); } catch (e) {}
+				function fmt(s) {
+					if (s < 0) s = 0;
+					var m = Math.floor(s / 60);
+					var r = s % 60;
+					return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+				}
+				var lastReason = null;
+				var redirecting = false;
+				function poll() {
+					fetch('/api/status').then(function(r){ return r.json(); }).then(function(d){
+						var reason = d.current_reason || '';
+						if (!reason) {
+							if (redirecting) return;
+							redirecting = true;
+							window.location.replace(fromPath || '/');
+							return;
+						}
+						if (reason !== lastReason) {
+							lastReason = reason;
+							if (reasonEl && REASON_TEXTS[reason]) {
+								reasonEl.textContent = REASON_TEXTS[reason];
+							}
+						}
+						el.textContent = fmt(d.current_reset || 0);
+					}).catch(function(){});
+				}
+				poll();
+				setInterval(poll, 1000);
+			})();
+		</script>
+	}
+}

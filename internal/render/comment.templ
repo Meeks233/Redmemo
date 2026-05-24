@@ -1,0 +1,59 @@
+package render
+
+import "github.com/redmemo/redmemo/internal/reddit"
+
+// commentTree ports comment.html: a recursive comment thread, or a
+// "load more replies" link for collapsed "more" nodes. Locale comes from ctx;
+// per-comment prefs ride on the Comment itself.
+templ commentTree(c reddit.Comment) {
+	if c.Kind == "more" && c.ParentKind == "t1" {
+		<a class="deeper_replies" href={ templ.SafeURL(c.PostLink + c.ParentID) }>&rarr; { T(ctx, "comment.more_replies", c.MoreCount) }</a>
+	} else if c.Kind == "t1" {
+		<div id={ c.ID } class="comment">
+			<div class="comment_left">
+				<p class="comment_score" title={ c.Score[1] }>
+					if c.Prefs.HideScore != "on" {
+						{ c.Score[0] }
+					} else {
+						&#x2022;
+					}
+				</p>
+				<div class="line"></div>
+			</div>
+			<details class="comment_right" if !c.Collapsed || c.Highlighted { open }>
+				<summary class="comment_data">
+					if c.Author.Name != "[deleted]" {
+						<a class={ "comment_author", c.Author.Distinguished, templ.KV("op", c.Author.Name == c.PostAuthor) } href={ templ.SafeURL("/user/" + c.Author.Name) }>u/{ c.Author.Name }</a>
+					} else {
+						<span class={ "comment_author", c.Author.Distinguished }>u/[deleted]</span>
+					}
+					if len(c.Author.Flair.FlairParts) > 0 {
+						<small class="author_flair">@renderFlair(c.Author.Flair.FlairParts)</small>
+					}
+					<a href={ templ.SafeURL(c.PostLink + c.ID + "/?context=3#" + c.ID) } class="created" title={ c.Created }>{ c.RelTime }</a>
+					if c.Edited[0] != "" {
+						<span class="edited" title={ c.Edited[1] }>{ T(ctx, "comment.edited", c.Edited[0]) }</span>
+					}
+					if len(c.Awards) > 0 && c.Prefs.HideAwards != "on" {
+						<span class="dot">&bull;</span>
+						for _, aw := range c.Awards {
+							<span class="award" title={ aw.Name }>
+								<img alt={ aw.Name } src={ aw.IconURL } width="16" height="16"/>
+							</span>
+						}
+					}
+				</summary>
+				if c.IsFiltered {
+					<div class={ "comment_body_filtered", templ.KV("highlighted", c.Highlighted) }>{ T(ctx, "comment.filtered") }</div>
+				} else {
+					<div class={ "comment_body", templ.KV("highlighted", c.Highlighted) }>@templ.Raw(string(c.Body))</div>
+				}
+				<blockquote class="replies">
+					for _, r := range c.Replies {
+						@commentTree(r)
+					}
+				</blockquote>
+			</details>
+		</div>
+	}
+}

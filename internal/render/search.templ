@@ -1,0 +1,194 @@
+package render
+
+import "github.com/redmemo/redmemo/internal/reddit"
+
+// search.templ ports templates/search.html, including the "search_post_list"
+// fragment shared with the "Load More" partial requests.
+
+templ searchTitle(d SearchPageData) {
+	{ T(ctx, "search.page_title", d.BrandName, d.Params.Query) }
+}
+
+// searchPostList renders search hits: post cards for links/self posts, compact
+// comment cards for comment hits. Used by the full page and the partial=1 frag.
+templ searchPostList(posts []reddit.Post, prefs reddit.Preferences, lazy bool) {
+	for _, p := range posts {
+		if p.Title != "" {
+			@postInList(p, prefs, lazy)
+		} else {
+			<div class="comment">
+				<div class="comment_left">
+					<p class="comment_score" title={ p.Score[1] }>
+						if prefs.HideScore != "on" {
+							{ p.Score[0] }
+						} else {
+							&#x2022;
+						}
+					</p>
+					<div class="line"></div>
+				</div>
+				<details class="comment_right" open>
+					<summary class="comment_data">
+						<a class="comment_link" href={ templ.SafeURL(p.Permalink) }>{ T(ctx, "search.comment_link") }</a>
+						<span class="created" title={ p.Created }>{ p.RelTime }</span>
+					</summary>
+					<p class="comment_body">@templ.Raw(string(p.Body))</p>
+				</details>
+			</div>
+		}
+	}
+}
+
+templ searchPage(d SearchPageData) {
+	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d)})
+}
+
+templ searchContent(d SearchPageData) {
+	@offlineBanner(d.IsOffline)
+	@degradedBanner(d.DegradedReason)
+	<div id="column_one">
+		<form id="search_sort">
+			<div class="search_widget_divider_box">
+				<input id="search" type="text" name="q" placeholder={ T(ctx, "search.placeholder") } value={ d.Params.Query } title={ T(ctx, "search.placeholder") }/>
+				<div class="search_widget_divider_box">
+					if d.Sub != "" {
+						<div id="inside">
+							<input type="checkbox" name="restrict_sr" id="restrict_sr" if d.Params.RestrictSR { checked }/>
+							<label for="restrict_sr" class="search_label">{ T(ctx, "search.in", "r/"+d.Sub) }</label>
+						</div>
+					}
+					if d.Params.Type == "sr_user" {
+						<input type="hidden" name="type" value="sr_user"/>
+					}
+					<select id="sort_options" name="sort" title={ T(ctx, "search.sort_title") }>
+						for _, s := range searchSorts {
+							<option value={ s } if s == d.Params.Sort { selected }>{ T(ctx, "sort."+s) }</option>
+						}
+					</select>
+					if d.Params.Sort != "new" {
+						<select id="timeframe" name="t" title="Timeframe">
+							for _, tf := range timeframes {
+								<option value={ tf } if tf == d.Params.Timeframe { selected }>{ T(ctx, "time."+tf) }</option>
+							}
+						</select>
+					}
+				</div>
+			</div>
+			<button id="sort_submit" class="submit">@submitSVG()</button>
+		</form>
+		if !d.IsFiltered {
+			if len(d.Subreddits) > 0 || d.Params.Type == "sr_user" {
+				<div id="search_subreddits">
+					if d.Params.Type == "sr_user" {
+						<a href={ templ.SafeURL("?q=" + d.Params.Query + "&sort=" + d.Params.Sort + "&t=" + d.Params.Timeframe) } class="search_subreddit" id="more_subreddits">&larr; { T(ctx, "search.back_results") }</a>
+					}
+					for _, sr := range d.Subreddits {
+						<a href={ templ.SafeURL("/r/" + sr.Name) } class="search_subreddit">
+							<div class="search_subreddit_left">
+								if sr.Icon != "" {
+									<img loading="lazy" src={ sr.Icon } alt={ T(ctx, "search.sr_icon_alt", sr.Name) }/>
+								}
+							</div>
+							<div class="search_subreddit_right">
+								<p class="search_subreddit_header">
+									<span class="search_subreddit_name">r/{ sr.Name }</span>
+									<span class="dot">&bull;</span>
+									<span class="search_subreddit_members" title={ T(ctx, "search.members", sr.Members[1]) }>{ T(ctx, "search.members", sr.Members[0]) }</span>
+								</p>
+								<p class="search_subreddit_description">{ sr.Description }</p>
+							</div>
+						</a>
+					}
+					if d.Params.Type != "sr_user" {
+						<a href={ templ.SafeURL("?q=" + d.Params.Query + "&sort=" + d.Params.Sort + "&t=" + d.Params.Timeframe + "&type=sr_user") } class="search_subreddit" id="more_subreddits">{ T(ctx, "search.more_subreddits") } &rarr;</a>
+					}
+				</div>
+			}
+		}
+		if d.AllPostsHiddenNSFW {
+			<span class="listing_warn">{ T(ctx, "listing.all_nsfw") }</span>
+		}
+		if d.NoPosts {
+			<center>{ T(ctx, "listing.no_posts") }</center>
+		}
+		if d.AllPostsFiltered {
+			<span class="listing_warn">{ T(ctx, "listing.all_filtered") }</span>
+		} else if d.IsFiltered {
+			<span class="listing_warn">{ T(ctx, "listing.filtered_from", "r/"+d.Sub) }</span>
+		} else if d.Params.Type != "sr_user" {
+			<div id="search_results">
+				@searchPostList(d.Posts, d.Prefs, d.Prefs.LazyMedia == "on" && !d.IsOffline)
+			</div>
+		}
+		if d.Prefs.UseHLS == "on" {
+			<script src="/hls.min.js"></script>
+			<script src="/playHLSVideo.js"></script>
+		}
+		if d.Params.Type != "sr_user" && !d.NoPosts && d.Params.After != "" {
+			<footer id="search_more_footer">
+				<button
+					type="button"
+					id="search_load_more"
+					class="load-more-btn"
+					data-q={ d.Params.Query }
+					data-sub={ d.Sub }
+					data-sort={ d.Params.Sort }
+					data-t={ d.Params.Timeframe }
+					data-after={ d.Params.After }
+					data-label={ T(ctx, "loadmore.label") }
+					data-loading={ T(ctx, "loadmore.loading") }
+					data-quota={ T(ctx, "loadmore.quota") }
+					data-no-more={ T(ctx, "loadmore.no_more") }
+					data-failed={ T(ctx, "loadmore.failed") }
+					accesskey="N"
+				>
+					<span class="load-more-spinner" aria-hidden="true">
+						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"></path><path d="m16.2 7.8 2.9-2.9"></path><path d="M18 12h4"></path><path d="m16.2 16.2 2.9 2.9"></path><path d="M12 18v4"></path><path d="m4.9 19.1 2.9-2.9"></path><path d="M2 12h4"></path><path d="m4.9 4.9 2.9 2.9"></path></svg>
+					</span>
+					<span class="load-more-label">{ T(ctx, "loadmore.label") }</span>
+				</button>
+				<span id="search_more_msg" class="listing_warn" style="display:none"></span>
+			</footer>
+			<script>
+				(function() {
+					var btn = document.getElementById('search_load_more');
+					var msg = document.getElementById('search_more_msg');
+					var results = document.getElementById('search_results');
+					if (!btn || !results) return;
+					var label = btn.querySelector('.load-more-label');
+					var loading = false;
+					function finish(text) { msg.textContent = text; msg.style.display = ''; btn.style.display = 'none'; }
+					function reset() { btn.classList.remove('loading'); btn.disabled = false; label.textContent = btn.dataset.label; loading = false; }
+					btn.addEventListener('click', function() {
+						if (loading) return;
+						loading = true;
+						btn.disabled = true;
+						btn.classList.add('loading');
+						label.textContent = btn.dataset.loading;
+						var d = btn.dataset;
+						var base = d.sub ? '/r/' + encodeURIComponent(d.sub) + '/search' : '/search';
+						var url = base + '?partial=1'
+							+ '&q=' + encodeURIComponent(d.q)
+							+ '&sort=' + encodeURIComponent(d.sort || '')
+							+ '&t=' + encodeURIComponent(d.t || '')
+							+ '&after=' + encodeURIComponent(d.after || '');
+						fetch(url).then(function(r) {
+							var degraded = r.headers.get('X-Degraded');
+							var next = r.headers.get('X-Next-After') || '';
+							return r.text().then(function(html) { return { degraded: degraded, next: next, html: html }; });
+						}).then(function(res) {
+							if (res.degraded) { finish(btn.dataset.quota); return; }
+							if (!res.html.trim()) { finish(btn.dataset.noMore); return; }
+							var tmp = document.createElement('div');
+							tmp.innerHTML = res.html;
+							while (tmp.firstChild) results.appendChild(tmp.firstChild);
+							if (!res.next) { finish(btn.dataset.noMore); return; }
+							btn.dataset.after = res.next;
+							reset();
+						}).catch(function() { msg.textContent = btn.dataset.failed; msg.style.display = ''; reset(); });
+					});
+				})();
+			</script>
+		}
+	</div>
+}

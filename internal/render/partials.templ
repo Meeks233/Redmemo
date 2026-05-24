@@ -1,0 +1,261 @@
+package render
+
+import "github.com/redmemo/redmemo/internal/reddit"
+
+// partials.templ ports the shared presentational components of partials.html to
+// typed templ components. The original html/template defines remain in
+// partials.html for the pages not yet migrated; these are the versions consumed
+// by migrated (templ) pages.
+
+// offlineBanner shows the local-archive notice when a page is served offline.
+templ offlineBanner(isOffline bool) {
+	if isOffline {
+		<div class="offline-banner">
+			<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+			<span>{ T(ctx, "banner.offline") }</span>
+		</div>
+	}
+}
+
+// degradedBanner links to /fuckreddit when the page is served degraded.
+templ degradedBanner(reason string) {
+	if reason != "" {
+		<a class="degraded-banner" href={ templ.SafeURL("/fuckreddit?reason=" + reason) }>
+			<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+			<span>{ T(ctx, "banner.degraded") }</span>
+		</a>
+	}
+}
+
+// renderFlair renders rich-text flair parts (emoji spans + text spans).
+templ renderFlair(parts []reddit.FlairPart) {
+	for _, fp := range parts {
+		if fp.Type == "emoji" {
+			<span class="emoji" style={ flairEmojiStyle(fp.Value) }></span>
+		} else if fp.Type == "text" && fp.Value != "" {
+			<span>{ fp.Value }</span>
+		}
+	}
+}
+
+// submitSVG is the search/sort submit arrow.
+templ submitSVG() {
+	<svg width="15" viewBox="0 0 110 100" fill="none" stroke-width="10" stroke-linecap="round">
+		<path d="M20 50 H100"></path>
+		<path d="M75 15 L100 50 L75 85"></path>
+		&rarr;
+	</svg>
+}
+
+// searchbox renders the nav search form. root is the optional subreddit scope
+// (e.g. "/r/golang"); query pre-fills the input.
+templ searchbox(root, query string) {
+	<form action={ templ.SafeURL(searchAction(root)) } id="searchbox">
+		<input id="search" type="text" name="q" placeholder={ T(ctx, "search.placeholder") } title={ T(ctx, "search.placeholder") } value={ query }/>
+		if root != "" && root != "/r/" {
+			<div id="inside">
+				<input type="checkbox" name="restrict_sr" id="restrict_sr" checked/>
+				<label for="restrict_sr" class="search_label" title={ T(ctx, "search.restrict_title") }>{ T(ctx, "search.in", root) }</label>
+			</div>
+		}
+		<button class="submit">
+			@submitSVG()
+		</button>
+	</form>
+}
+
+// poll renders a post poll, mirroring the old "poll" define exactly.
+templ poll(p *reddit.Poll) {
+	if p != nil {
+		<div class="post_poll">
+			<span>{ T(ctx, "poll.votes", p.TotalVoteCount) }</span>
+			<span title={ p.VotingEndTimestamp[1] }>{ p.VotingEndTimestamp[0] }</span>
+			for _, opt := range p.Options {
+				<div class="poll_option">
+					if opt.VoteCount != nil {
+						<div class="poll_chart" style="width: 100%"></div>
+						<span>{ u64p(opt.VoteCount) }</span>
+					} else {
+						<div class="poll_chart most_voted"></div>
+						<span></span>
+					}
+					<span>{ opt.Text }</span>
+				</div>
+			}
+		</div>
+	}
+}
+
+// postInList is the listing card (the old "post_in_list" define). lazy defers
+// media loading via data-src/data-poster, hydrated by lazyMedia.js.
+templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
+	<div class={ "post", templ.KV("stickied", post.Flags.Stickied), templ.KV("post_blurred", isBlurredInList(post, prefs)) } id={ post.ID }>
+		<p class="post_header">
+			<a class="post_subreddit" href={ templ.SafeURL("/" + communityPath(post.Community)) }>{ communityPath(post.Community) }</a>
+			<span class="dot">&bull;</span>
+			<a class={ "post_author", post.Author.Distinguished } href={ templ.SafeURL("/user/" + post.Author.Name) }>u/{ post.Author.Name }</a>
+			<span class="dot">&bull;</span>
+			<span class="created" title={ post.Created }>{ post.RelTime }</span>
+			if post.ArchivedRelTime != "" {
+				<span class="dot">&bull;</span>
+				<span class="archived" title={ post.ArchivedTime }>{ T(ctx, "post.archived", post.ArchivedRelTime) }</span>
+			}
+			if len(post.Awards) > 0 && prefs.HideAwards != "on" {
+				for _, aw := range post.Awards {
+					<span class="award" title={ aw.Name }>
+						<img alt={ aw.Name } src={ aw.IconURL } width="16" height="16"/>
+					</span>
+				}
+			}
+		</p>
+		<h2 class="post_title">
+			if len(post.Flair.FlairParts) > 0 {
+				<a
+					href={ templ.SafeURL("/r/" + post.Community + "/search?q=flair_name%3A%22" + post.Flair.Text + "%22&restrict_sr=on") }
+					class="post_flair"
+					style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }
+					dir="ltr"
+				>@renderFlair(post.Flair.FlairParts)</a>
+			}
+			<a href={ templ.SafeURL(post.Permalink) }>{ post.Title }</a>
+			if post.Flags.NSFW {
+				{ " " }<small class="nsfw">{ T(ctx, "flag.nsfw") }</small>
+			}
+			if post.Flags.Spoiler {
+				{ " " }<small class="spoiler">{ T(ctx, "flag.spoiler") }</small>
+			}
+		</h2>
+		if prefs.Layout == "" || prefs.Layout == "card" {
+			if post.PostType == "image" {
+				<div class="post_media_content">
+					<a href={ templ.SafeURL(post.Media.URL) } class="post_media_image">
+						if lazy {
+							<img
+								class="lazy-media"
+								if post.Media.Width > 0 && post.Media.Height > 0 {
+									width={ i64(post.Media.Width) }
+									height={ i64(post.Media.Height) }
+								} else {
+									width="100%"
+									height="100%"
+								}
+								alt={ T(ctx, "alt.post_image") }
+								data-src={ post.Media.URL }
+							/>
+						} else if post.Media.Height == 0 || post.Media.Width == 0 {
+							<img width="100%" height="100%" loading="lazy" alt={ T(ctx, "alt.post_image") } src={ post.Media.URL }/>
+						} else {
+							<svg width={ i64(post.Media.Width) + "px" } height={ i64(post.Media.Height) + "px" } xmlns="http://www.w3.org/2000/svg">
+								<image width="100%" height="100%" href={ templ.SafeURL(post.Media.URL) }></image>
+								<desc><img loading="lazy" alt={ T(ctx, "alt.post_image") } src={ post.Media.URL }/></desc>
+							</svg>
+						}
+					</a>
+				</div>
+			} else if post.PostType == "gif" || post.PostType == "video" {
+				if playAsGif(post) {
+					<div class="post_media_content">
+						<video
+							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
+							if lazy {
+								data-src={ post.Media.URL }
+							} else {
+								src={ post.Media.URL }
+							}
+							if post.Media.Width > 0 && post.Media.Height > 0 {
+								width={ i64(post.Media.Width) }
+								height={ i64(post.Media.Height) }
+							}
+							autoplay
+							loop
+							muted
+							playsinline
+							preload="auto"
+						></video>
+					</div>
+				} else if prefs.UseHLS == "on" && post.Media.AltURL != "" {
+					<div class="post_media_content">
+						<video
+							class="post_media_video short"
+							if prefs.AutoplayVideos == "on" {
+								data-viewport-autoplay
+							}
+							if post.Media.Width > 0 && post.Media.Height > 0 {
+								width={ i64(post.Media.Width) }
+								height={ i64(post.Media.Height) }
+							}
+							poster={ post.Media.Poster }
+							controls
+							preload="metadata"
+						>
+							<source src={ post.Media.AltURL } type="application/vnd.apple.mpegurl"/>
+							<source src={ post.Media.URL } type="video/mp4"/>
+						</video>
+					</div>
+				} else {
+					<div class="post_media_content">
+						<video
+							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
+							if lazy {
+								data-src={ post.Media.URL }
+								data-poster={ post.Media.Poster }
+							} else {
+								src={ post.Media.URL }
+								poster={ post.Media.Poster }
+							}
+							if post.Media.Width > 0 && post.Media.Height > 0 {
+								width={ i64(post.Media.Width) }
+								height={ i64(post.Media.Height) }
+							}
+							preload="metadata"
+							controls
+							if prefs.AutoplayVideos == "on" {
+								data-viewport-autoplay
+							}
+						><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
+					</div>
+				}
+			}
+		}
+		if post.PostType != "self" && post.PostType != "image" && post.PostType != "video" && post.PostType != "gif" {
+			<a
+				class={ "post_thumbnail", templ.KV("no_thumbnail", post.Thumbnail.URL == "") }
+				if post.PostType == "link" {
+					href={ templ.SafeURL(post.Media.URL) }
+				} else {
+					href={ templ.SafeURL(post.Permalink) }
+				}
+				rel="nofollow"
+			>
+				if post.Thumbnail.URL != "" {
+					<div style={ thumbBoxStyle(post.Thumbnail.Width, post.Thumbnail.Height) }>
+						<svg width={ i64(post.Thumbnail.Width) + "px" } height={ i64(post.Thumbnail.Height) + "px" } xmlns="http://www.w3.org/2000/svg">
+							<image width="100%" height="100%" href={ templ.SafeURL(post.Thumbnail.URL) }></image>
+							<desc><img loading="lazy" alt={ T(ctx, "alt.thumbnail") } src={ post.Thumbnail.URL }/></desc>
+						</svg>
+					</div>
+				}
+				<span>
+					if post.PostType == "link" {
+						{ post.Domain }
+					} else {
+						{ post.PostType }
+					}
+				</span>
+			</a>
+		}
+		<div class="post_score" title={ post.Score[1] }>
+			if prefs.HideScore != "on" {
+				{ post.Score[0] }
+			} else {
+				&#x2022;
+			}
+			<span class="label">{ " " + T(ctx, "post.upvotes") }</span>
+		</div>
+		<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+		@poll(post.Poll)
+		<div class="post_footer">
+			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>{ post.Comments[0] } { commentsWord(post.Comments[1]) }</a>
+		</div>
+	</div>
+}

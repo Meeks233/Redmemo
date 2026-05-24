@@ -1,0 +1,116 @@
+package render
+
+// user.templ ports templates/user.html (profile overview/comments/submitted).
+
+templ userTitle(d UserPageData) {
+	{ T(ctx, "user.page_title", d.User.Name, d.User.Name, d.BrandName) }
+}
+
+templ userPage(d UserPageData) {
+	@layout(d.BasePage, pageSlots{
+		Title:  userTitle(d),
+		Search: searchbox("", ""),
+		Body:   userBody(d),
+	})
+}
+
+templ userBody(d UserPageData) {
+	<main>
+		@degradedBanner(d.DegradedReason)
+		if !d.IsFiltered {
+			<div id="column_one">
+				<form id="sort">
+					<div id="listing_options">
+						for _, l := range userListings {
+							<a if l == d.Listing { class="selected" } href={ templ.SafeURL("/user/" + d.User.Name + "/" + l) }>{ T(ctx, "listing."+l) }</a>
+						}
+					</div>
+					<select id="sort_select" name="sort">
+						for _, s := range userSorts {
+							<option value={ s } if s == d.Sort[0] { selected }>{ T(ctx, "sort."+s) }</option>
+						}
+					</select>
+					if d.Sort[0] == "top" || d.Sort[0] == "controversial" {
+						<select id="timeframe" name="t">
+							for _, tf := range timeframes {
+								<option value={ tf } if tf == d.Sort[1] { selected }>{ T(ctx, "time."+tf) }</option>
+							}
+						</select>
+					}
+					<button id="sort_submit" class="submit">@submitSVG()</button>
+				</form>
+				if d.AllPostsHiddenNSFW {
+					<center>{ T(ctx, "listing.all_nsfw") }</center>
+				}
+				if d.NoPosts {
+					<center>{ T(ctx, "listing.no_posts") }</center>
+				}
+				if d.AllPostsFiltered {
+					<center>{ T(ctx, "listing.all_filtered") }</center>
+				} else {
+					<div id="posts">
+						for _, p := range d.Posts {
+							if p.Title != "" {
+								@postInList(p, d.Prefs, d.Prefs.LazyMedia == "on")
+							} else {
+								<div class="comment user-comment">
+									<div class="comment_left">
+										<p class="comment_score" title={ p.Score[1] }>
+											if d.Prefs.HideScore != "on" {
+												{ p.Score[0] }
+											} else {
+												&#x2022;
+											}
+										</p>
+										<div class="line"></div>
+									</div>
+									<details class="comment_right" open>
+										<summary class="comment_data">
+											<a class="comment_link" href={ templ.SafeURL(p.Permalink + "#" + p.ID) } title={ p.LinkTitle }>{ p.LinkTitle }</a>
+											<div class="user_comment_data_divider">
+												<span class="created-in">&nbsp;{ T(ctx, "user.in") }&nbsp;</span>
+												<a class="comment_subreddit" href={ templ.SafeURL("/r/" + p.Community) }>r/{ p.Community }</a>
+												<span class="dot">&bull;</span>
+												<span class="created" title={ p.Created }>&nbsp;{ p.RelTime }</span>
+											</div>
+										</summary>
+										<p class="comment_body">@templ.Raw(string(p.Body))</p>
+									</details>
+								</div>
+							}
+						}
+						if d.Prefs.UseHLS == "on" {
+							<script src="/hls.min.js"></script>
+							<script src="/playHLSVideo.js"></script>
+						}
+					</div>
+				}
+				<footer>
+					if d.Ends[0] != "" {
+						<a href={ templ.SafeURL("?sort=" + d.Sort[0] + "&t=" + d.Sort[1] + "&before=" + d.Ends[0]) } accesskey="P">{ T(ctx, "nav.prev") }</a>
+					}
+					if d.Ends[1] != "" {
+						<a href={ templ.SafeURL("?sort=" + d.Sort[0] + "&t=" + d.Sort[1] + "&after=" + d.Ends[1]) } accesskey="N">{ T(ctx, "nav.next") }</a>
+					}
+				</footer>
+			</div>
+		}
+		<aside>
+			if d.IsFiltered {
+				<center>{ T(ctx, "listing.filtered_from", "u/"+d.User.Name) }</center>
+			}
+			<div class="panel" id="user">
+				<img loading="lazy" id="user_icon" src={ d.User.Icon } alt={ T(ctx, "user.icon_alt") }/>
+				<h1 id="user_title">{ d.User.Title }</h1>
+				<p id="user_name">u/{ d.User.Name }</p>
+				<div id="user_description">{ d.User.Description }</div>
+				<div id="user_details">
+					<label>{ T(ctx, "user.karma") }</label>
+					<label>{ T(ctx, "user.created") }</label>
+					<div>{ i64(d.User.Karma) }</div>
+					<div>{ d.User.Created }</div>
+				</div>
+			</div>
+		</aside>
+	</main>
+}

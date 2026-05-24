@@ -1,0 +1,153 @@
+package render
+
+import "strconv"
+
+// subreddit.templ ports templates/subreddit.html. It reuses the shared templ
+// components (layout, searchbox, banners, postInList) and reads locale from ctx.
+
+templ subredditTitle(d SubredditPageData) {
+	if d.Sub.Title != "" {
+		{ d.Sub.Title }
+	} else if d.Sub.Name != "" {
+		{ d.Sub.Name }
+	} else {
+		{ d.BrandName }
+	}
+}
+
+templ subredditPage(d SubredditPageData) {
+	@layout(d.BasePage, pageSlots{
+		Title:  subredditTitle(d),
+		Search: searchbox("/r/"+d.Sub.Name, ""),
+		Body:   subredditBody(d),
+	})
+}
+
+templ subredditBody(d SubredditPageData) {
+	<main>
+		@offlineBanner(d.IsOffline)
+		@degradedBanner(d.DegradedReason)
+		if !d.IsFiltered {
+			<div id="column_one">
+				<form id="sort">
+					<div id="sort_options">
+						if d.HomepageSort != "" {
+							<a if d.HomepageSort == "new" { class="selected" } href="/?sort=new" onclick="return switchSort(this,'new')">{ T(ctx, "sort.new") }</a>
+							<a if d.HomepageSort == "new_archive" { class="selected" } href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">{ T(ctx, "sort.archive") }</a>
+							<a if d.HomepageSort == "top" { class="selected" } href="/?sort=top" onclick="return switchSort(this,'top')">{ T(ctx, "sort.top") }</a>
+							<a if d.HomepageSort == "notorious" { class="selected" } href="/?sort=notorious" onclick="return switchSort(this,'notorious')">{ T(ctx, "sort.notorious") }</a>
+						} else {
+							for _, m := range sortMethods {
+								<a if m == d.Sort[0] { class="selected" } href={ templ.SafeURL(sortHref(d.Sub.Name, m)) }>{ T(ctx, "sort."+m) }</a>
+							}
+						}
+					</div>
+					if d.HomepageSort == "" && (d.Sort[0] == "top" || d.Sort[0] == "controversial") {
+						<select id="timeframe" name="t" title="Timeframe">
+							for _, tf := range timeframes {
+								<option value={ tf } if tf == d.Sort[1] { selected }>{ T(ctx, "time."+tf) }</option>
+							}
+						</select>
+						<button id="sort_submit" class="submit">@submitSVG()</button>
+					}
+				</form>
+				if d.AllPostsHiddenNSFW && !d.Sub.NSFW {
+					<center>{ T(ctx, "listing.all_nsfw") }</center>
+				}
+				if d.NoPosts {
+					if d.HomepageSort != "" {
+						<div class="empty-state">
+							if d.HasOAuth {
+								<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 1 7.38 16.75"></path><path d="m16 12-4-4-4 4"></path><path d="M12 16V8"></path><path d="M2.5 8.875a10 10 0 0 0-.5 3"></path><path d="M2.83 16a10 10 0 0 0 2.43 3.4"></path><path d="M4.636 5.235a10 10 0 0 1 .891-.857"></path><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"></path></svg>
+								<p>{ T(ctx, "empty.no_posts_month") }</p>
+							} else {
+								<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.114 4.462A14.5 14.5 0 0 1 12 2a10 10 0 0 1 9.313 13.643"></path><path d="M15.557 15.556A14.5 14.5 0 0 1 12 22 10 10 0 0 1 4.929 4.929"></path><path d="M15.892 10.234A14.5 14.5 0 0 0 12 2a10 10 0 0 0-3.643.687"></path><path d="M17.656 12H22"></path><path d="M19.071 19.071A10 10 0 0 1 12 22 14.5 14.5 0 0 1 8.44 8.45"></path><path d="M2 12h10"></path><path d="m2 2 20 20"></path></svg>
+								<p>{ T(ctx, "empty.reddit_blocked") }</p>
+							}
+						</div>
+					} else {
+						<center>{ T(ctx, "listing.no_posts") }</center>
+					}
+				}
+				if d.AllPostsFiltered {
+					<center>{ T(ctx, "listing.all_filtered") }</center>
+				} else {
+					<div id="posts">
+						for _, p := range d.Posts {
+							<hr class="sep"/>
+							@postInList(p, d.Prefs, d.Prefs.LazyMedia == "on" && !d.IsOffline)
+						}
+						if d.Prefs.UseHLS == "on" {
+							<script src="/hls.min.js"></script>
+							<script src="/playHLSVideo.js"></script>
+						}
+					</div>
+				}
+				if d.HomepageSort != "" {
+					<div id="infinite-loader" data-sort={ d.HomepageSort } data-offset={ strconv.Itoa(len(d.Posts)) } data-interval={ d.Prefs.ScrollInterval }>
+						<div id="load-spinner" style="display:none;text-align:center;padding:1em;">
+							<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1.5s linear infinite"><path d="M12 2v4"></path><path d="m16.2 7.8 2.9-2.9"></path><path d="M18 12h4"></path><path d="m16.2 16.2 2.9 2.9"></path><path d="M12 18v4"></path><path d="m4.9 19.1 2.9-2.9"></path><path d="M2 12h4"></path><path d="m4.9 4.9 2.9 2.9"></path></svg>
+						</div>
+						<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">{ T(ctx, "scroll.no_more") }</div>
+					</div>
+					<script src="/infiniteScroll.js"></script>
+				} else {
+					<footer>
+						if d.Ends[0] != "" {
+							<a href={ templ.SafeURL("?sort=" + d.Sort[0] + "&t=" + d.Sort[1] + "&before=" + d.Ends[0]) } accesskey="P">{ T(ctx, "nav.prev") }</a>
+						}
+						if d.Ends[1] != "" {
+							<a href={ templ.SafeURL("?sort=" + d.Sort[0] + "&t=" + d.Sort[1] + "&after=" + d.Ends[1]) } accesskey="N">{ T(ctx, "nav.next") }</a>
+						}
+					</footer>
+				}
+			</div>
+		}
+		if d.IsFiltered || (showRealSub(d.Sub.Name) && d.Prefs.HideSidebarAndSummary != "on") {
+			<aside>
+				if d.IsFiltered {
+					<center>{ T(ctx, "listing.filtered_from", "r/"+d.Sub.Name) }</center>
+				}
+				if showRealSub(d.Sub.Name) {
+					<details class="panel" id="subreddit" open>
+						<summary id="subreddit_label">{ T(ctx, "sidebar.subreddit") }</summary>
+						if d.Sub.Wiki {
+							<div id="top">
+								<div>{ T(ctx, "sidebar.posts") }</div>
+								<a href={ templ.SafeURL("/r/" + d.Sub.Name + "/wiki/index") }>{ T(ctx, "sidebar.wiki") }</a>
+							</div>
+						}
+						<div id="sub_meta">
+							<img loading="lazy" id="sub_icon" src={ d.Sub.Icon } alt={ T(ctx, "sidebar.icon_alt", d.Sub.Name) }/>
+							<h1 id="sub_title">{ d.Sub.Title }</h1>
+							<p id="sub_name">r/{ d.Sub.Name }</p>
+							<p id="sub_description">{ d.Sub.Description }</p>
+							<div id="sub_details">
+								<label>{ T(ctx, "sidebar.members") }</label>
+								<label>{ T(ctx, "sidebar.active") }</label>
+								<div title={ d.Sub.Members[1] }>{ d.Sub.Members[0] }</div>
+								<div title={ d.Sub.Active[1] }>{ d.Sub.Active[0] }</div>
+							</div>
+							<div id="sub_actions">
+								<div id="sub_subscription">
+									<form action={ templ.SafeURL("/r/" + d.Sub.Name + "/subscribe?redirect=" + d.RedirectURL) } method="POST">
+										<button class="subscribe">{ T(ctx, "sidebar.subscribe") }</button>
+									</form>
+								</div>
+								<div id="sub_filter">
+									<form action={ templ.SafeURL("/r/" + d.Sub.Name + "/filter?redirect=" + d.RedirectURL) } method="POST">
+										<button class="filter">{ T(ctx, "sidebar.filter") }</button>
+									</form>
+								</div>
+							</div>
+						</div>
+					</details>
+					<details class="panel" id="sidebar">
+						<summary id="sidebar_label">{ T(ctx, "sidebar.sidebar") }</summary>
+						<div id="sidebar_contents">@templ.Raw(string(d.Sub.Info))</div>
+					</details>
+				}
+			</aside>
+		}
+	</main>
+}
