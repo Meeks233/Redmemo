@@ -3,6 +3,7 @@ module github.com/redmemo/redmemo
 go 1.26.2
 
 require (
+	github.com/abema/go-mp4 v1.6.0
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/bogdanfinn/fhttp v0.6.8
 	github.com/bogdanfinn/tls-client v1.14.0

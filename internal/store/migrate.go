@@ -151,8 +151,8 @@ var migrations = []string{
 	// v13: audio-track verdict for muxed v.redd.it entries. Lives on the same
 	// media_index row as the muxed/silent cached file. NULL = never checked;
 	// 'has_audio' = mux succeeded; 'silent' = Reddit returned 4xx for every
-	// audio candidate (skip mux permanently). Transient failures (ffmpeg
-	// missing, network 5xx) never write this column — the next request retries.
+	// audio candidate (skip mux permanently). Transient failures (network 5xx,
+	// mux errors) never write this column — the next request retries.
 	`ALTER TABLE media_index ADD COLUMN IF NOT EXISTS audio_state TEXT
 		CHECK (audio_state IS NULL OR audio_state IN ('has_audio','silent'));`,
 
@@ -169,7 +169,7 @@ var migrations = []string{
 	// attempts; once it crosses the abandon threshold the row moves to the
 	// 'abandoned' state and L5 stops actively retrying it (a later user view
 	// revives it with a fresh budget). last_audio_attempt_at gates retry
-	// cooldown so a popular broken video does not storm ffmpeg.
+	// cooldown so a popular broken video does not storm the muxer.
 	`ALTER TABLE media_index ADD COLUMN IF NOT EXISTS audio_fail_count INT NOT NULL DEFAULT 0;
 	 ALTER TABLE media_index ADD COLUMN IF NOT EXISTS last_audio_attempt_at TIMESTAMPTZ;
 	 ALTER TABLE media_index DROP CONSTRAINT IF EXISTS media_index_audio_state_check;

@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -20,9 +19,6 @@ import (
 )
 
 var (
-	ffmpegPathOnce sync.Once
-	ffmpegPath     string
-
 	muxableSegment = regexp.MustCompile(`^(?:DASH|CMAF)_\d+\.mp4$`)
 
 	muxKeyPrefix = "muxed:"
@@ -33,15 +29,15 @@ var (
 	audioProbeRetryDelay = 1 * time.Second
 
 	// muxRetryCooldown throttles re-attempts on a still-broken video so a
-	// popular clip doesn't storm ffmpeg. A user view inside this window reuses
+	// popular clip doesn't storm the muxer. A user view inside this window reuses
 	// the emergency silent copy without launching a fresh attempt.
 	muxRetryCooldown = 2 * time.Minute
 
 	// muxInflight deduplicates concurrent mux work per video URL. A browser
 	// opens several requests for one <video> (preload probe, playback, range
 	// seeks), often on separate connections; without dedup each would launch
-	// its own ffmpeg writing the same output path, and a request serving that
-	// file while a sibling ffmpeg rewrites it ships a half-written, audio-less
+	// its own mux writing the same output path, and a request serving that
+	// file while a sibling mux rewrites it ships a half-written, audio-less
 	// MP4. Callers all wait on the single shared result instead.
 	muxInflightMu sync.Mutex
 	muxInflight   = map[string]*muxCall{}
@@ -51,15 +47,6 @@ type muxCall struct {
 	done chan struct{}
 	meta *store.MediaMeta
 	err  error
-}
-
-func findFfmpeg() string {
-	ffmpegPathOnce.Do(func() {
-		if p, err := exec.LookPath("ffmpeg"); err == nil {
-			ffmpegPath = p
-		}
-	})
-	return ffmpegPath
 }
 
 // IsMuxableVideoSegment reports whether a v.redd.it path points at a DASH/CMAF
@@ -175,7 +162,7 @@ func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL stri
 // "ready" is only returned once the muxed file is recorded as 'has_audio' AND
 // physically on disk — the exact gate ServeMuxed uses to serve it. This keeps
 // the viewer's "reload to view" prompt from racing ahead of a servable file
-// (e.g. while ffmpeg is still finishing, the audio_state write is mid-flight,
+// (e.g. while the mux is still finishing, the audio_state write is mid-flight,
 // or the evictor has just reclaimed the file).
 func (p *Proxy) AudioStatus(videoURL string) string {
 	key := muxCacheKey(videoURL)
@@ -202,7 +189,7 @@ func (p *Proxy) AudioStatus(videoURL string) string {
 }
 
 // muxSem caps concurrent background mux jobs so a page full of fresh videos
-// doesn't spawn dozens of simultaneous ffmpeg processes.
+// doesn't spawn dozens of simultaneous mux jobs.
 var muxSem = make(chan struct{}, 4)
 
 // startBackgroundMux runs the mux for videoURL off the request path. It is a
@@ -243,7 +230,7 @@ func (p *Proxy) startBackgroundMux(videoURL, key string, meta *store.MediaMeta) 
 
 // muxOnce runs downloadMuxed/downloadSilent for videoURL at most once across
 // concurrent callers. The leader's work runs on a detached context: a client
-// disconnecting mid-mux must not abort the download/ffmpeg that other waiters
+// disconnecting mid-mux must not abort the download/mux that other waiters
 // (and the on-disk cache) depend on. Waiters, however, honor their own ctx so
 // a gone caller doesn't block on an unrelated request's mux.
 func (p *Proxy) muxOnce(ctx context.Context, videoURL, key string, silent bool) (*store.MediaMeta, error) {
@@ -282,8 +269,8 @@ func (p *Proxy) muxOnce(ctx context.Context, videoURL, key string, silent bool) 
 // video-only file as an emergency silent copy and parks the row 'failed'
 // (or 'abandoned' once retries are exhausted) — it returns that copy with no
 // error, so the viewer gets instant playback while L5 retries the audio.
-// ffmpeg errors, missing ffmpeg, and video-download failures write no row at
-// all, so the next request retries from scratch.
+// Mux errors and video-download failures write no row at all, so the next
+// request retries from scratch.
 func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store.MediaMeta, error) {
 	tmpDir, err := os.MkdirTemp("", "redmemo-mux-")
 	if err != nil {
@@ -352,24 +339,14 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		stagingPath = videoTmp
 		verdict = "silent"
 	} else {
-		// We have an audio file; ffmpeg must be available to mux.
-		if findFfmpeg() == "" {
-			return nil, fmt.Errorf("ffmpeg not installed; cannot mux audio")
-		}
-		// ffmpeg writes into the same temp dir; publishContent moves the final
-		// file to its content-addressed home only after we know its hash.
+		// We have an audio file. Combine it with the video in-process via the
+		// pure-Go fragmented-MP4 muxer (muxmp4.go) — no external ffmpeg. The
+		// muxed file lands in the same temp dir; publishContent moves it to its
+		// content-addressed home only after we know its hash.
 		muxedTmp := filepath.Join(tmpDir, "muxed.mp4")
-		cmd := exec.CommandContext(ctx, findFfmpeg(),
-			"-y", "-loglevel", "error",
-			"-i", videoTmp, "-i", audioTmp,
-			"-c", "copy",
-			"-map", "0:v:0", "-map", "1:a:0",
-			"-movflags", "+faststart",
-			"-f", "mp4",
-			muxedTmp)
-		if out, ferr := cmd.CombinedOutput(); ferr != nil {
+		if err := muxFragmentedMP4(videoTmp, audioTmp, muxedTmp); err != nil {
 			os.Remove(muxedTmp)
-			return nil, fmt.Errorf("ffmpeg: %w: %s", ferr, strings.TrimSpace(string(out)))
+			return nil, fmt.Errorf("mux audio/video: %w", err)
 		}
 		stagingPath = muxedTmp
 		verdict = "has_audio"
@@ -464,7 +441,7 @@ func publishToCache(srcPath, outPath string) error {
 	return nil
 }
 
-// downloadSilent fetches just the raw video (no audio probe, no ffmpeg) for
+// downloadSilent fetches just the raw video (no audio probe, no mux) for
 // videos we've previously confirmed have no audio track.
 func (p *Proxy) downloadSilent(ctx context.Context, videoURL, key string) (*store.MediaMeta, error) {
 	tmpDir, err := os.MkdirTemp("", "redmemo-silent-")
