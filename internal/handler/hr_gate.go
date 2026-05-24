@@ -10,6 +10,8 @@ import (
 // upstream Reddit call and instead serve archived content with a banner.
 //
 // Reasons (in priority order):
+//   - "hr_redis_down" — HR rate-limit store (Redis) unreachable; gate fails
+//     closed and re-probes Redis with exponential backoff.
 //   - "hr_l1" / "hr_l2" / "hr_l3" — HR cooldown active.
 //   - "quota_exhausted" — no OAuth token has remaining quota.
 //   - ""                — clear to proceed upstream.

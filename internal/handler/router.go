@@ -128,11 +128,11 @@ func (h *Handler) Routes() http.Handler {
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)
 
-	// Legacy redlib media paths — reconstruct CDN URLs and serve via media proxy
-	mux.HandleFunc("GET /img/", h.handleRedlibMedia)
-	mux.HandleFunc("GET /preview/", h.handleRedlibMedia)
-	mux.HandleFunc("GET /thumb/", h.handleRedlibMedia)
-	mux.HandleFunc("GET /emoji/", h.handleRedlibMedia)
+	// Image CDN Proxy
+	mux.HandleFunc("GET /img/", h.handleImageProxy)
+	mux.HandleFunc("GET /preview/", h.handleImageProxy)
+	mux.HandleFunc("GET /thumb/", h.handleImageProxy)
+	mux.HandleFunc("GET /emoji/", h.handleImageProxy)
 
 	// Video proxy — v.redd.it
 	mux.HandleFunc("GET /vid/", h.handleVideoProxy)

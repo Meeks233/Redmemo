@@ -57,16 +57,9 @@ func New(cfg config.RateLimitConfig, budget BudgetSource) *Manager {
 	}
 }
 
-// CanRequestRedlib reports whether a request can be forwarded to redlib.
-func (m *Manager) CanRequestRedlib() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return !m.exhausted && m.remaining > m.safetyBuffer
-}
-
-// CanRequestFallback reports whether a fallback request using own OAuth tokens
+// CanRequest reports whether request using own OAuth tokens
 // is possible. It checks Redis for any token with remaining quota.
-func (m *Manager) CanRequestFallback(ctx context.Context) bool {
+func (m *Manager) CanRequest(ctx context.Context) bool {
 	if m.budget == nil {
 		return false
 	}
@@ -79,15 +72,10 @@ func (m *Manager) CanRequestFallback(ctx context.Context) bool {
 
 // CanPrefetch reports whether prefetching is allowed and the available budget.
 // Budget is capped at safetyBuffer per window so prefetch never starves user
-// requests. Uses own OAuth tokens; additionally when the redlib window is about
-// to reset (< 2 min remaining), unused redlib quota is released for prefetch.
+// requests.
 func (m *Manager) CanPrefetch(ctx context.Context) (bool, int) {
 	m.mu.RLock()
 	windowBudget := m.safetyBuffer - m.prefetchUsed
-	redlibBudget := 0
-	if !m.exhausted && time.Until(m.resetAt) < 2*time.Minute && m.remaining > 0 {
-		redlibBudget = m.remaining
-	}
 	m.mu.RUnlock()
 
 	if windowBudget <= 0 {
@@ -102,10 +90,7 @@ func (m *Manager) CanPrefetch(ctx context.Context) (bool, int) {
 		}
 	}
 
-	available := oauthBudget + redlibBudget
-	if available > windowBudget {
-		available = windowBudget
-	}
+	available := min(oauthBudget, windowBudget)
 	return available > 0, available
 }
 
@@ -131,25 +116,8 @@ func (m *Manager) Status() StatusSnapshot {
 	}
 }
 
-// Increment records one request forwarded to redlib.
-func (m *Manager) Increment() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.remaining--
-	m.used++
-}
-
-// OnRedlibRateLimited is called when redlib returns a rate-limited response.
-func (m *Manager) OnRedlibRateLimited() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.remaining = 0
-	m.exhausted = true
-}
-
 // OnRequestComplete parses Reddit's X-Ratelimit-* headers from a direct API
-// response (own OAuth token) and updates state accordingly. This is only useful
-// when RedMemo makes its own requests (fallback/prefetch), not for redlib proxy.
+// response (own OAuth token) and updates state accordingly.
 func (m *Manager) OnRequestComplete(headers http.Header) {
 	remainStr := headers.Get("X-Ratelimit-Remaining")
 	resetStr := headers.Get("X-Ratelimit-Reset")

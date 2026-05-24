@@ -14,7 +14,14 @@ import (
 func newTestManager(t *testing.T) (*Manager, *miniredis.Miniredis) {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	// Fail fast when miniredis is closed mid-test (redis-down cases): no
+	// retries and short timeouts keep those tests quick.
+	client := redis.NewClient(&redis.Options{
+		Addr:        mr.Addr(),
+		MaxRetries:  -1,
+		DialTimeout: 200 * time.Millisecond,
+		ReadTimeout: 200 * time.Millisecond,
+	})
 	t.Cleanup(func() { _ = client.Close() })
 	m := NewManager(client, config.HRLimitConfig{
 		Enabled:     true,
@@ -160,6 +167,121 @@ func TestCooldownReason_ReturnsMostSevere(t *testing.T) {
 	}
 	if until <= time.Now().Unix() {
 		t.Fatalf("until=%d should be in future (now=%d)", until, time.Now().Unix())
+	}
+}
+
+func TestAdmit_RedisDownFailsClosed(t *testing.T) {
+	m, mr := newTestManager(t)
+	mr.Close() // simulate Redis going down
+
+	ok, reason := m.Admit(context.Background())
+	if ok || reason != "hr_redis_down" {
+		t.Fatalf("redis down: ok=%v reason=%q, want false/hr_redis_down", ok, reason)
+	}
+}
+
+func TestAdmit_RedisDownExponentialBackoff(t *testing.T) {
+	m, mr := newTestManager(t)
+	mr.Close()
+
+	now := time.Unix(1000, 0)
+	m.SetClock(func() time.Time { return now })
+	ctx := context.Background()
+
+	// First failure: backoff starts at the minimum.
+	if ok, _ := m.Admit(ctx); ok {
+		t.Fatal("want blocked on first failure")
+	}
+	if m.backoff != redisBackoffMin {
+		t.Fatalf("backoff=%v, want %v", m.backoff, redisBackoffMin)
+	}
+
+	// Within the backoff window: blocked without re-probing, backoff steady.
+	if ok, _ := m.Admit(ctx); ok {
+		t.Fatal("want blocked within backoff window")
+	}
+	if m.backoff != redisBackoffMin {
+		t.Fatalf("backoff grew within window: %v", m.backoff)
+	}
+
+	// Past the probe time: the next failed probe doubles the backoff.
+	now = now.Add(redisBackoffMin + time.Millisecond)
+	if ok, _ := m.Admit(ctx); ok {
+		t.Fatal("want blocked after probe window")
+	}
+	if m.backoff != 2*redisBackoffMin {
+		t.Fatalf("backoff=%v, want %v", m.backoff, 2*redisBackoffMin)
+	}
+}
+
+func TestAdmit_RedisDownBackoffCapped(t *testing.T) {
+	m, mr := newTestManager(t)
+	mr.Close()
+
+	now := time.Unix(1000, 0)
+	m.SetClock(func() time.Time { return now })
+	ctx := context.Background()
+
+	for i := 0; i < 20; i++ {
+		if ok, _ := m.Admit(ctx); ok {
+			t.Fatal("want blocked while redis down")
+		}
+		now = now.Add(m.backoff + time.Millisecond)
+		if m.backoff > redisBackoffMax {
+			t.Fatalf("backoff exceeded cap: %v > %v", m.backoff, redisBackoffMax)
+		}
+	}
+	if m.backoff != redisBackoffMax {
+		t.Fatalf("backoff did not settle at cap: %v", m.backoff)
+	}
+}
+
+func TestAdmit_RecoversWhenRedisBack(t *testing.T) {
+	m, _ := newTestManager(t) // miniredis is up
+
+	// Pretend we were in redis-down backoff with the probe window elapsed.
+	m.backoff = redisBackoffMax
+	m.nextProbe = m.now().Add(-time.Second)
+
+	ok, reason := m.Admit(context.Background())
+	if !ok || reason != "" {
+		t.Fatalf("recovery: ok=%v reason=%q, want true/empty", ok, reason)
+	}
+	if m.backoff != 0 {
+		t.Fatalf("backoff not cleared after recovery: %v", m.backoff)
+	}
+}
+
+func TestRedisDownReset_RecoversOnPing(t *testing.T) {
+	m, _ := newTestManager(t) // miniredis is up
+
+	m.backoff = redisBackoffMin
+	m.nextProbe = m.now().Add(-time.Second) // probe window elapsed
+
+	down, _ := m.RedisDownReset(context.Background())
+	if down {
+		t.Fatal("want recovered (down=false) when redis is reachable")
+	}
+	if m.backoff != 0 {
+		t.Fatalf("backoff not cleared: %v", m.backoff)
+	}
+}
+
+func TestRedisDownReset_StaysDownWithinWindow(t *testing.T) {
+	m, mr := newTestManager(t)
+	mr.Close()
+
+	now := time.Unix(2000, 0)
+	m.SetClock(func() time.Time { return now })
+	m.backoff = redisBackoffMin
+	m.nextProbe = now.Add(redisBackoffMin)
+
+	down, until := m.RedisDownReset(context.Background())
+	if !down {
+		t.Fatal("want down within backoff window")
+	}
+	if until != m.nextProbe.Unix() {
+		t.Fatalf("until=%d, want %d", until, m.nextProbe.Unix())
 	}
 }
 

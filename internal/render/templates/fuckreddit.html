@@ -29,6 +29,8 @@
 					{{ T "fr.hr_l2" }}
 				{{- else if eq .Reason "hr_l3" -}}
 					{{ T "fr.hr_l3" }}
+				{{- else if eq .Reason "hr_redis_down" -}}
+					{{ T "fr.hr_redis_down" }}
 				{{- end -}}
 			</p>
 			<p>{{ T "fr.reset_at" }} <span id="fr-countdown" data-from="{{ .From }}"{{ if .Freeze }} data-freeze="1"{{ end }}>{{ if .Freeze }}99:99{{ else }}--:--{{ end }}</span></p>
@@ -80,7 +82,8 @@
 		'quota_exhausted': '{{ T "fr.quota_exhausted" }}',
 		'hr_l1': '{{ T "fr.hr_l1" }}',
 		'hr_l2': '{{ T "fr.hr_l2" }}',
-		'hr_l3': '{{ T "fr.hr_l3" }}'
+		'hr_l3': '{{ T "fr.hr_l3" }}',
+		'hr_redis_down': '{{ T "fr.hr_redis_down" }}'
 	};
 
 	function fmt(s) {

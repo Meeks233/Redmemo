@@ -35,15 +35,15 @@ var sharedTemplates = []string{
 
 // pageTemplates maps a page name to its template file.
 var pageTemplates = map[string]string{
-	"subreddit.html": "templates/subreddit.html",
-	"post.html":      "templates/post.html",
-	"search.html":    "templates/search.html",
-	"user.html":      "templates/user.html",
-	"settings.html":  "templates/settings.html",
-	"archive.html":      "templates/archive.html",
+	"subreddit.html":   "templates/subreddit.html",
+	"post.html":        "templates/post.html",
+	"search.html":      "templates/search.html",
+	"user.html":        "templates/user.html",
+	"settings.html":    "templates/settings.html",
+	"archive.html":     "templates/archive.html",
 	"archive_hub.html": "templates/archive_hub.html",
-	"error.html":      "templates/error.html",
-	"fuckreddit.html": "templates/fuckreddit.html",
+	"error.html":       "templates/error.html",
+	"fuckreddit.html":  "templates/fuckreddit.html",
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
@@ -210,7 +210,7 @@ type ArchivePageData struct {
 	TotalPages         int
 	AllPostsHiddenNSFW bool
 	HasPrev            bool
-	HasNext    bool
+	HasNext            bool
 }
 
 type TokenView struct {
@@ -481,8 +481,9 @@ type FuckRedditPageData struct {
 	BasePage
 	ResetSeconds int
 	// Reason explains why the user landed here: "hr_l1"/"hr_l2"/"hr_l3"
-	// (HR rate-limit cooldown), "quota_exhausted" (OAuth budget drained),
-	// or "" (no failure — render the healthy state).
+	// (HR rate-limit cooldown), "hr_redis_down" (rate-limit store unreachable),
+	// "quota_exhausted" (OAuth budget drained), or "" (no failure — render the
+	// healthy state).
 	Reason string
 	// From is the reddit path the user was trying to reach (validated to
 	// /r/, /user/, or /search prefixes). Empty when there is no origin

@@ -23,7 +23,7 @@ func (h *Handler) staticHandler() http.Handler {
 	return h.renderer.StaticHandler()
 }
 
-func (h *Handler) handleRedlibMedia(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	cdnURL := pathToCDNURL(r.URL.Path, r.URL.RawQuery)
 	if cdnURL == "" {
 		http.NotFound(w, r)
@@ -262,11 +262,18 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	budget, _ := h.oauthHolder.RemainingBudget(r.Context())
 	reset, window := h.oauthHolder.EarliestReset()
 
-	// HR cooldown (most-severe active tier).
+	// HR cooldown (most-severe active tier). Redis-down backoff takes
+	// precedence: when Redis is unreachable the gate fails closed and the
+	// tier cooldowns can't even be read.
 	hrReset := 0
 	hrReason := ""
 	if h.hr != nil {
-		if reason, until := h.hr.CooldownReason(r.Context()); reason != "" && until > 0 {
+		if down, until := h.hr.RedisDownReset(r.Context()); down {
+			hrReason = "hr_redis_down"
+			if secs := until - time.Now().Unix(); secs > 0 {
+				hrReset = int(secs)
+			}
+		} else if reason, until := h.hr.CooldownReason(r.Context()); reason != "" && until > 0 {
 			if secs := until - time.Now().Unix(); secs > 0 {
 				hrReset = int(secs)
 				hrReason = reason

@@ -21,71 +21,6 @@ func newTestManager(windowSize, safety int) *Manager {
 	}, nil)
 }
 
-func TestCanRequestRedlib_Fresh(t *testing.T) {
-	m := newTestManager(600, 50)
-	if !m.CanRequestRedlib() {
-		t.Error("fresh manager should allow requests")
-	}
-}
-
-func TestCanRequestRedlib_AtSafetyBuffer(t *testing.T) {
-	m := newTestManager(100, 50)
-	m.mu.Lock()
-	m.remaining = 50
-	m.mu.Unlock()
-	if m.CanRequestRedlib() {
-		t.Error("should not allow when remaining == safety buffer")
-	}
-}
-
-func TestCanRequestRedlib_BelowBuffer(t *testing.T) {
-	m := newTestManager(100, 50)
-	m.mu.Lock()
-	m.remaining = 10
-	m.mu.Unlock()
-	if m.CanRequestRedlib() {
-		t.Error("should not allow when remaining < safety buffer")
-	}
-}
-
-func TestCanRequestRedlib_Exhausted(t *testing.T) {
-	m := newTestManager(600, 50)
-	m.mu.Lock()
-	m.exhausted = true
-	m.mu.Unlock()
-	if m.CanRequestRedlib() {
-		t.Error("should not allow when exhausted")
-	}
-}
-
-func TestIncrement(t *testing.T) {
-	m := newTestManager(100, 0)
-	initial := m.Status().Remaining
-	m.Increment()
-	s := m.Status()
-	if s.Remaining != initial-1 {
-		t.Errorf("remaining after Increment: got %d, want %d", s.Remaining, initial-1)
-	}
-	if s.Used != 1 {
-		t.Errorf("used after Increment: got %d, want 1", s.Used)
-	}
-}
-
-func TestOnRedlibRateLimited(t *testing.T) {
-	m := newTestManager(600, 50)
-	m.OnRedlibRateLimited()
-	s := m.Status()
-	if s.Remaining != 0 {
-		t.Errorf("remaining should be 0, got %d", s.Remaining)
-	}
-	if !s.Exhausted {
-		t.Error("should be exhausted")
-	}
-	if m.CanRequestRedlib() {
-		t.Error("should not allow requests after rate limited")
-	}
-}
-
 func TestOnRequestComplete_ParsesHeaders(t *testing.T) {
 	m := newTestManager(600, 50)
 	h := http.Header{}
@@ -128,9 +63,6 @@ func TestOnRequestComplete_EmptyHeaders(t *testing.T) {
 
 func TestResetWindow(t *testing.T) {
 	m := newTestManager(600, 50)
-	m.Increment()
-	m.Increment()
-	m.OnRedlibRateLimited()
 	m.ResetWindow()
 	s := m.Status()
 	if s.Remaining != 600 {
@@ -144,31 +76,31 @@ func TestResetWindow(t *testing.T) {
 	}
 }
 
-func TestCanRequestFallback_NilBudget(t *testing.T) {
+func TestCanRequest_NilBudget(t *testing.T) {
 	m := newTestManager(600, 50)
-	if m.CanRequestFallback(context.Background()) {
+	if m.CanRequest(context.Background()) {
 		t.Error("should return false with nil budget source")
 	}
 }
 
-func TestCanRequestFallback_WithBudget(t *testing.T) {
+func TestCanRequest_WithBudget(t *testing.T) {
 	m := New(config.RateLimitConfig{
 		WindowSize:     600,
 		WindowDuration: 10 * time.Minute,
 		SafetyBuffer:   50,
 	}, &mockBudget{budget: 100})
-	if !m.CanRequestFallback(context.Background()) {
+	if !m.CanRequest(context.Background()) {
 		t.Error("should allow fallback with budget > 0")
 	}
 }
 
-func TestCanRequestFallback_ZeroBudget(t *testing.T) {
+func TestCanRequest_ZeroBudget(t *testing.T) {
 	m := New(config.RateLimitConfig{
 		WindowSize:     600,
 		WindowDuration: 10 * time.Minute,
 		SafetyBuffer:   50,
 	}, &mockBudget{budget: 0})
-	if m.CanRequestFallback(context.Background()) {
+	if m.CanRequest(context.Background()) {
 		t.Error("should not allow fallback with zero budget")
 	}
 }

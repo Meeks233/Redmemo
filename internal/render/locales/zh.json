@@ -282,6 +282,7 @@
   "fr.hr_l1": "HR 速率限制 L1 触发:过去 5 秒内上游请求过多。",
   "fr.hr_l2": "HR 速率限制 L2 触发:过去 30 秒内上游请求过多。",
   "fr.hr_l3": "HR 速率限制 L3 触发:过去 5 分钟内上游请求过多。",
+  "fr.hr_redis_down": "HR 速率限制存储(Redis)不可达:已阻断上游流量,并以指数退避重试,直至其恢复。",
   "fr.reset_at": "重置时间:",
   "fr.access_directly": "直接访问 Reddit",
   "fr.congrats": "恭喜 — Reddit 还没制裁你……还是已经制裁了?"
