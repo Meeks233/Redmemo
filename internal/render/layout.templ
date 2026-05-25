@@ -91,13 +91,21 @@ templ layout(p BasePage, s pageSlots) {
 					</div>
 				</footer>
 			}
-			<script src="/quotaRing.js"></script>
-			<script src="/videoAutoplay.js"></script>
-			<script src="/videoPreload.js"></script>
-			<script src="/lazyMedia.js"></script>
-			<script src="/imageReload.js"></script>
-			<script src="/audioSync.js"></script>
-			<script src="/redditModal.js"></script>
+			// Chrome scripts every page needs: the nav quota ring and the
+			// leave-to-Reddit modal handler (a no-op early-return when no modal
+			// is present). defer keeps them off the parser's critical path.
+			<script src="/quotaRing.js" defer></script>
+			<script src="/redditModal.js" defer></script>
+			// Media machinery only ships on pages that render posts. Each of
+			// these installs a document-scoped MutationObserver, so loading them
+			// on chrome-only pages (settings/error/fuckreddit) is pure overhead.
+			if s.Media {
+				<script src="/lazyMedia.js" defer></script>
+				<script src="/videoAutoplay.js" defer></script>
+				<script src="/videoPreload.js" defer></script>
+				<script src="/audioSync.js" defer></script>
+				<script src="/imageReload.js" defer></script>
+			}
 		</body>
 	</html>
 }

@@ -75,6 +75,7 @@ func archiveHubPage(d ArchiveHubPageData) templ.Component {
 			Title:   archiveHubTitle(d),
 			Search:  searchbox("", ""),
 			Content: archiveHubContent(d),
+			Media:   true,
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -140,7 +141,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var7 string
 					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(s)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 33, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 34, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 					if templ_7745c5c3_Err != nil {
@@ -153,7 +154,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(s)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 33, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 34, Col: 51}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -173,7 +174,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.placeholder"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 38, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 39, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
@@ -186,7 +187,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.placeholder"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 38, Col: 145}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 39, Col: 145}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
@@ -199,7 +200,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.Query)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 38, Col: 176}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 39, Col: 176}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -212,7 +213,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.source_mode_title"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 41, Col: 145}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 42, Col: 145}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -225,7 +226,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.whitelist"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 48, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 49, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -238,7 +239,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.submit"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 50, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 51, Col: 80}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -259,7 +260,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.time"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 54, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 55, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -282,7 +283,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.any"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 56, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 57, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 		if templ_7745c5c3_Err != nil {
@@ -300,7 +301,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(v)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 58, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 59, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -323,7 +324,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "time."+v))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 58, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 59, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -351,7 +352,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.custom"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 60, Col: 110}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 61, Col: 110}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
@@ -374,7 +375,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.From)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 64, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 65, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
@@ -387,7 +388,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.from"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 64, Col: 156}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 65, Col: 156}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -400,7 +401,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.from"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 64, Col: 201}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 65, Col: 201}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -413,7 +414,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.To)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 66, Col: 110}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 67, Col: 110}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -426,7 +427,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var24 string
 		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.to"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 66, Col: 148}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 67, Col: 148}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
@@ -439,7 +440,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.to"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 66, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 67, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
@@ -452,7 +453,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.type"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 69, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 70, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -475,7 +476,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var27 string
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.any"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 71, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 72, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -498,7 +499,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.type_nsfw"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 72, Col: 109}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 73, Col: 109}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -521,7 +522,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.type_sfw"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 73, Col: 106}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 74, Col: 106}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -534,7 +535,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.media"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 77, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 78, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
@@ -557,7 +558,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.any"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 79, Col: 96}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 80, Col: 96}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -580,7 +581,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.media_image"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 80, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 81, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
@@ -603,7 +604,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.media_video"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 81, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 82, Col: 114}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
@@ -616,7 +617,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.score"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 85, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 86, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {
@@ -629,7 +630,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var35 string
 		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.score"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 86, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 87, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 		if templ_7745c5c3_Err != nil {
@@ -662,7 +663,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.Score)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 90, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 91, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
@@ -675,7 +676,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.any"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 90, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 91, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
@@ -688,7 +689,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_search.score"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 90, Col: 196}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 91, Col: 196}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
@@ -701,7 +702,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 93, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 94, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
@@ -714,7 +715,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.SearchParams.SourceMode)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 94, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 95, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 		if templ_7745c5c3_Err != nil {
@@ -754,7 +755,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var41 templ.SafeURL
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(sortBase + "new"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 296, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 297, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 		if templ_7745c5c3_Err != nil {
@@ -767,7 +768,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "sort.new"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 296, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 297, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 		if templ_7745c5c3_Err != nil {
@@ -790,7 +791,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var43 templ.SafeURL
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(sortBase + "top"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 297, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 298, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
@@ -803,7 +804,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "sort.top"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 297, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 298, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
@@ -826,7 +827,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var45 templ.SafeURL
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(sortBase + "all"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 298, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 299, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 		if templ_7745c5c3_Err != nil {
@@ -839,7 +840,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.sort_all"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 298, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 299, Col: 120}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
@@ -863,7 +864,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var47 string
 				templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.title_new"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 306, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 307, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 				if templ_7745c5c3_Err != nil {
@@ -877,7 +878,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var48 string
 				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.title_top"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 308, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 309, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 				if templ_7745c5c3_Err != nil {
@@ -891,7 +892,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var49 string
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.title_all", len(d.Subs)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 310, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 311, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -910,7 +911,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var50 string
 				templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.hint", d.MinPosts))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 313, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 314, Col: 73}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 				if templ_7745c5c3_Err != nil {
@@ -934,7 +935,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var51 string
 					templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.empty_min", d.MinPosts))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 319, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 320, Col: 51}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 					if templ_7745c5c3_Err != nil {
@@ -944,7 +945,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var52 string
 					templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.empty"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 321, Col: 35}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 322, Col: 35}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 					if templ_7745c5c3_Err != nil {
@@ -968,7 +969,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var53 string
 					templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue("archive-letter-" + g.Letter)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 327, Col: 76}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 328, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 					if templ_7745c5c3_Err != nil {
@@ -981,7 +982,7 @@ func archiveHubContent(d ArchiveHubPageData) templ.Component {
 					var templ_7745c5c3_Var54 string
 					templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(g.Letter)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 328, Col: 50}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 329, Col: 50}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 					if templ_7745c5c3_Err != nil {
@@ -1060,7 +1061,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.results_title", d.SearchTotal))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 351, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 352, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 		if templ_7745c5c3_Err != nil {
@@ -1078,7 +1079,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 			var templ_7745c5c3_Var57 string
 			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_search.no_results"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 353, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 354, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 			if templ_7745c5c3_Err != nil {
@@ -1125,7 +1126,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var58 templ.SafeURL
 				templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/archive?" + d.SearchQS + "&sort=" + d.Sort + "&page=" + strconv.Itoa(d.SearchPage-1)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 367, Col: 116}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 368, Col: 116}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 				if templ_7745c5c3_Err != nil {
@@ -1138,7 +1139,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var59 string
 				templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "nav.prev"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 367, Col: 153}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 368, Col: 153}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 				if templ_7745c5c3_Err != nil {
@@ -1157,7 +1158,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var60 templ.SafeURL
 				templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/archive?" + d.SearchQS + "&sort=" + d.Sort + "&page=" + strconv.Itoa(d.SearchPage+1)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 370, Col: 116}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 371, Col: 116}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 				if templ_7745c5c3_Err != nil {
@@ -1170,7 +1171,7 @@ func archiveSearchResults(d ArchiveHubPageData) templ.Component {
 				var templ_7745c5c3_Var61 string
 				templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "nav.next"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 370, Col: 153}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 371, Col: 153}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 				if templ_7745c5c3_Err != nil {
@@ -1222,7 +1223,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 		var templ_7745c5c3_Var63 templ.SafeURL
 		templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/archive/r/" + e.Name))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 378, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 379, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 		if templ_7745c5c3_Err != nil {
@@ -1235,7 +1236,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 		var templ_7745c5c3_Var64 string
 		templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(archiveSubCardTitle(ctx, e))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 378, Col: 111}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 379, Col: 111}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 		if templ_7745c5c3_Err != nil {
@@ -1253,7 +1254,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 			var templ_7745c5c3_Var65 string
 			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue("/proxy/media?url=" + e.IconURL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 381, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 382, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 			if templ_7745c5c3_Err != nil {
@@ -1266,7 +1267,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 			var templ_7745c5c3_Var66 string
 			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue("r/" + e.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 381, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 382, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 			if templ_7745c5c3_Err != nil {
@@ -1294,7 +1295,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 			var templ_7745c5c3_Var67 string
 			templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_hub.dead_title"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 389, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 390, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 			if templ_7745c5c3_Err != nil {
@@ -1307,7 +1308,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 			var templ_7745c5c3_Var68 string
 			templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "archive_hub.banned"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 389, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 390, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 			if templ_7745c5c3_Err != nil {
@@ -1325,7 +1326,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(e.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 391, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 392, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 		if templ_7745c5c3_Err != nil {
@@ -1343,7 +1344,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 			var templ_7745c5c3_Var70 string
 			templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "flag.nsfw"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 393, Col: 46}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 394, Col: 46}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 			if templ_7745c5c3_Err != nil {
@@ -1361,7 +1362,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 		var templ_7745c5c3_Var71 string
 		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "archive_hub.posts", e.PostCount))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 396, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 397, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 		if templ_7745c5c3_Err != nil {

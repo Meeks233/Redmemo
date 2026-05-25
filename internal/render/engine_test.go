@@ -25,15 +25,17 @@ func TestNewEngine(t *testing.T) {
 	if e == nil {
 		t.Fatal("New() returned nil")
 	}
-	if e.pages == nil {
-		t.Fatal("pages should not be nil")
+	// Every page renders through templ now; the engine only carries a
+	// locale-bound translator per supported language (consumed via i18nContext).
+	if e.translators == nil {
+		t.Fatal("translators should not be nil")
 	}
-	if len(e.pages) != len(SupportedLangs) {
-		t.Errorf("language sets = %d, want %d", len(e.pages), len(SupportedLangs))
+	if len(e.translators) != len(SupportedLangs) {
+		t.Errorf("translator sets = %d, want %d", len(e.translators), len(SupportedLangs))
 	}
 	for _, lang := range SupportedLangs {
-		if len(e.pages[lang]) != len(pageTemplates) {
-			t.Errorf("pages[%s] count = %d, want %d", lang, len(e.pages[lang]), len(pageTemplates))
+		if e.translators[lang] == nil {
+			t.Errorf("translators[%s] is nil", lang)
 		}
 	}
 }

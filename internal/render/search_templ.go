@@ -200,7 +200,7 @@ func searchPage(d SearchPageData) templ.Component {
 			templ_7745c5c3_Var10 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d)}).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d), Media: true}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

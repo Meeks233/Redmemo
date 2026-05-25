@@ -10,7 +10,7 @@ templ archiveTitle(d ArchivePageData) {
 }
 
 templ archivePage(d ArchivePageData) {
-	@layout(d.BasePage, pageSlots{Title: archiveTitle(d), Body: archiveBody(d)})
+	@layout(d.BasePage, pageSlots{Title: archiveTitle(d), Body: archiveBody(d), Media: true})
 }
 
 templ archiveBody(d ArchivePageData) {

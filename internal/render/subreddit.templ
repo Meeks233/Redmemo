@@ -20,6 +20,7 @@ templ subredditPage(d SubredditPageData) {
 		Title:  subredditTitle(d),
 		Search: searchbox("/r/"+d.Sub.Name, ""),
 		Body:   subredditBody(d),
+		Media:  true,
 	})
 }
 

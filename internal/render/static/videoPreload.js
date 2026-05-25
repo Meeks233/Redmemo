@@ -33,6 +33,9 @@
     });
   }
 
+  // Scope to <main> so nav/footer chrome mutations don't trigger rescans; all
+  // posts (including infinite-scroll appends) live inside it.
+  var observeRoot = document.querySelector("main") || document.body;
   var mo = window.MutationObserver && new MutationObserver(scheduleObserve);
-  if (mo) mo.observe(document.body, { childList: true, subtree: true });
+  if (mo) mo.observe(observeRoot, { childList: true, subtree: true });
 })();

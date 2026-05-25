@@ -10,10 +10,9 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "github.com/redmemo/redmemo/internal/reddit"
 
-// partials.templ ports the shared presentational components of partials.html to
-// typed templ components. The original html/template defines remain in
-// partials.html for the pages not yet migrated; these are the versions consumed
-// by migrated (templ) pages.
+// partials.templ holds the shared presentational components (banners, flair,
+// search box, poll, listing card) as typed templ components. Every page renders
+// through templ now; the old html/template partials.html has been removed.
 
 // offlineBanner shows the local-archive notice when a page is served offline.
 func offlineBanner(isOffline bool) templ.Component {
@@ -45,7 +44,7 @@ func offlineBanner(isOffline bool) templ.Component {
 			var templ_7745c5c3_Var2 string
 			templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "banner.offline"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 15, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 14, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 			if templ_7745c5c3_Err != nil {
@@ -90,7 +89,7 @@ func degradedBanner(reason string) templ.Component {
 			var templ_7745c5c3_Var4 templ.SafeURL
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/fuckreddit?reason=" + reason))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 23, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 22, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -103,7 +102,7 @@ func degradedBanner(reason string) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "banner.degraded"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 25, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 24, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -149,7 +148,7 @@ func renderFlair(parts []reddit.FlairPart) templ.Component {
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(flairEmojiStyle(fp.Value))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 34, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 33, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -167,7 +166,7 @@ func renderFlair(parts []reddit.FlairPart) templ.Component {
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fp.Value)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 36, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 35, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -243,7 +242,7 @@ func searchbox(root, query string) templ.Component {
 		var templ_7745c5c3_Var11 templ.SafeURL
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(searchAction(root)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 53, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 52, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -256,7 +255,7 @@ func searchbox(root, query string) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "search.placeholder"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 54, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 53, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -269,7 +268,7 @@ func searchbox(root, query string) templ.Component {
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "search.placeholder"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 54, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 53, Col: 123}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -282,7 +281,7 @@ func searchbox(root, query string) templ.Component {
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(query)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 54, Col: 139}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 53, Col: 139}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -300,7 +299,7 @@ func searchbox(root, query string) templ.Component {
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "search.restrict_title"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 58, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 57, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 			if templ_7745c5c3_Err != nil {
@@ -313,7 +312,7 @@ func searchbox(root, query string) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "search.in", root))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 58, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 57, Col: 119}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -370,7 +369,7 @@ func poll(p *reddit.Poll) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "poll.votes", p.TotalVoteCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 71, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 70, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -383,7 +382,7 @@ func poll(p *reddit.Poll) templ.Component {
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.VotingEndTimestamp[1])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 72, Col: 40}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 71, Col: 40}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
@@ -396,7 +395,7 @@ func poll(p *reddit.Poll) templ.Component {
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(p.VotingEndTimestamp[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 72, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 71, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -419,7 +418,7 @@ func poll(p *reddit.Poll) templ.Component {
 					var templ_7745c5c3_Var21 string
 					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(u64p(opt.VoteCount))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 77, Col: 33}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 76, Col: 33}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 					if templ_7745c5c3_Err != nil {
@@ -442,7 +441,7 @@ func poll(p *reddit.Poll) templ.Component {
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(opt.Text)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 82, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 81, Col: 21}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 				if templ_7745c5c3_Err != nil {
@@ -510,7 +509,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 92, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 91, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
@@ -523,7 +522,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var27 templ.SafeURL
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/" + communityPath(post.Community)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 94, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 93, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -536,7 +535,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(communityPath(post.Community))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 94, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 93, Col: 120}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -571,7 +570,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var31 templ.SafeURL
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/user/" + post.Author.Name))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 96, Col: 106}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 95, Col: 106}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -584,7 +583,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(post.Author.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 96, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 95, Col: 129}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
@@ -597,7 +596,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var33 string
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Created)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 98, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 97, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
@@ -610,7 +609,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(post.RelTime)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 98, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 97, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {
@@ -628,7 +627,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.ArchivedTime)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 101, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 100, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -641,7 +640,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archived", post.ArchivedRelTime))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 101, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 100, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -661,7 +660,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var37 string
 				templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 105, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 104, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 				if templ_7745c5c3_Err != nil {
@@ -674,7 +673,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var38 string
 				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 106, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 105, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 				if templ_7745c5c3_Err != nil {
@@ -687,7 +686,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var39 string
 				templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.IconURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 106, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 105, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 				if templ_7745c5c3_Err != nil {
@@ -711,7 +710,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var40 templ.SafeURL
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/r/" + post.Community + "/search?q=flair_name%3A%22" + post.Flair.Text + "%22&restrict_sr=on"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 114, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 113, Col: 121}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -724,7 +723,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 116, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 115, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -750,7 +749,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var42 templ.SafeURL
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 120, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 119, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 		if templ_7745c5c3_Err != nil {
@@ -763,7 +762,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(post.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 120, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 119, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
@@ -777,7 +776,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 122, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 121, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -790,7 +789,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "flag.nsfw"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 122, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 121, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -805,7 +804,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var46 string
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 125, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 124, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 			if templ_7745c5c3_Err != nil {
@@ -818,7 +817,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var47 string
 			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "flag.spoiler"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 125, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 124, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 			if templ_7745c5c3_Err != nil {
@@ -842,7 +841,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var48 templ.SafeURL
 				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 131, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 130, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 				if templ_7745c5c3_Err != nil {
@@ -865,7 +864,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var49 string
 						templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 136, Col: 38}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 135, Col: 38}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 						if templ_7745c5c3_Err != nil {
@@ -878,7 +877,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var50 string
 						templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 137, Col: 40}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 136, Col: 40}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 						if templ_7745c5c3_Err != nil {
@@ -901,7 +900,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var51 string
 					templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.post_image"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 142, Col: 38}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 141, Col: 38}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 					if templ_7745c5c3_Err != nil {
@@ -914,7 +913,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var52 string
 					templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 143, Col: 33}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 142, Col: 33}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 					if templ_7745c5c3_Err != nil {
@@ -932,7 +931,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var53 string
 					templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.post_image"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 146, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 145, Col: 84}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 					if templ_7745c5c3_Err != nil {
@@ -945,7 +944,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var54 string
 					templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 146, Col: 107}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 145, Col: 107}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 					if templ_7745c5c3_Err != nil {
@@ -963,7 +962,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var55 string
 					templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width) + "px")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 148, Col: 48}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 147, Col: 48}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 					if templ_7745c5c3_Err != nil {
@@ -976,7 +975,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var56 string
 					templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height) + "px")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 148, Col: 89}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 147, Col: 89}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 					if templ_7745c5c3_Err != nil {
@@ -989,7 +988,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var57 string
 					templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(post.Media.URL))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 149, Col: 78}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 148, Col: 78}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 					if templ_7745c5c3_Err != nil {
@@ -1002,7 +1001,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var58 string
 					templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.post_image"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 150, Col: 64}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 149, Col: 64}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 					if templ_7745c5c3_Err != nil {
@@ -1015,7 +1014,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 150, Col: 87}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 149, Col: 87}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 					if templ_7745c5c3_Err != nil {
@@ -1066,7 +1065,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var62 string
 						templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 161, Col: 33}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 160, Col: 33}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 						if templ_7745c5c3_Err != nil {
@@ -1084,7 +1083,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var63 string
 						templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 163, Col: 28}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 162, Col: 28}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 						if templ_7745c5c3_Err != nil {
@@ -1103,7 +1102,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var64 string
 						templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 166, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 165, Col: 37}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 						if templ_7745c5c3_Err != nil {
@@ -1116,7 +1115,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var65 string
 						templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 167, Col: 39}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 166, Col: 39}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 						if templ_7745c5c3_Err != nil {
@@ -1150,7 +1149,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var66 string
 						templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 184, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 183, Col: 37}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 						if templ_7745c5c3_Err != nil {
@@ -1163,7 +1162,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var67 string
 						templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 185, Col: 39}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 184, Col: 39}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 						if templ_7745c5c3_Err != nil {
@@ -1181,7 +1180,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var68 string
 					templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.Poster)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 187, Col: 33}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 186, Col: 33}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 					if templ_7745c5c3_Err != nil {
@@ -1194,7 +1193,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var69 string
 					templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.AltURL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 191, Col: 38}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 190, Col: 38}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 					if templ_7745c5c3_Err != nil {
@@ -1207,7 +1206,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var70 string
 					templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 192, Col: 35}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 191, Col: 35}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 					if templ_7745c5c3_Err != nil {
@@ -1252,7 +1251,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var73 string
 						templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 200, Col: 33}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 199, Col: 33}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 						if templ_7745c5c3_Err != nil {
@@ -1265,7 +1264,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var74 string
 						templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.Poster)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 201, Col: 39}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 200, Col: 39}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 						if templ_7745c5c3_Err != nil {
@@ -1283,7 +1282,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var75 string
 						templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 203, Col: 28}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 202, Col: 28}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 						if templ_7745c5c3_Err != nil {
@@ -1296,7 +1295,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var76 string
 						templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.Poster)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 204, Col: 34}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 203, Col: 34}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 						if templ_7745c5c3_Err != nil {
@@ -1315,7 +1314,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var77 string
 						templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 207, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 206, Col: 37}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 						if templ_7745c5c3_Err != nil {
@@ -1328,7 +1327,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						var templ_7745c5c3_Var78 string
 						templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 208, Col: 39}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 207, Col: 39}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 						if templ_7745c5c3_Err != nil {
@@ -1356,7 +1355,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var79 templ.SafeURL
 					templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 215, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 214, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 					if templ_7745c5c3_Err != nil {
@@ -1369,7 +1368,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 					var templ_7745c5c3_Var80 string
 					templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "media.video"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 215, Col: 72}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 214, Col: 72}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 					if templ_7745c5c3_Err != nil {
@@ -1413,7 +1412,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var83 templ.SafeURL
 				templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 224, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 223, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 				if templ_7745c5c3_Err != nil {
@@ -1431,7 +1430,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var84 templ.SafeURL
 				templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 226, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 225, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 				if templ_7745c5c3_Err != nil {
@@ -1454,7 +1453,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var85 string
 				templ_7745c5c3_Var85, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(thumbBoxStyle(post.Thumbnail.Width, post.Thumbnail.Height))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 231, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 230, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 				if templ_7745c5c3_Err != nil {
@@ -1467,7 +1466,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var86 string
 				templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Thumbnail.Width) + "px")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 232, Col: 51}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 231, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 				if templ_7745c5c3_Err != nil {
@@ -1480,7 +1479,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var87 string
 				templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Thumbnail.Height) + "px")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 232, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 231, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
 				if templ_7745c5c3_Err != nil {
@@ -1493,7 +1492,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var88 string
 				templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(post.Thumbnail.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 233, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 232, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 				if templ_7745c5c3_Err != nil {
@@ -1506,7 +1505,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var89 string
 				templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.thumbnail"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 234, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 233, Col: 62}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 				if templ_7745c5c3_Err != nil {
@@ -1519,7 +1518,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var90 string
 				templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Thumbnail.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 234, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 233, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
 				if templ_7745c5c3_Err != nil {
@@ -1538,7 +1537,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var91 string
 				templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(post.Domain)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 240, Col: 19}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 239, Col: 19}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 				if templ_7745c5c3_Err != nil {
@@ -1548,7 +1547,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 				var templ_7745c5c3_Var92 string
 				templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(post.PostType)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 242, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 241, Col: 21}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 				if templ_7745c5c3_Err != nil {
@@ -1567,7 +1566,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var93 string
 		templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Score[1])
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 247, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 246, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
@@ -1581,7 +1580,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 			var templ_7745c5c3_Var94 string
 			templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinStringErrs(post.Score[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 249, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 248, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 			if templ_7745c5c3_Err != nil {
@@ -1604,7 +1603,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var95 string
 		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvotes"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 253, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 252, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var95))
 		if templ_7745c5c3_Err != nil {
@@ -1633,7 +1632,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var96 templ.SafeURL
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 258, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 257, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
 		if templ_7745c5c3_Err != nil {
@@ -1646,7 +1645,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Comments[1] + " " + commentsWord(post.Comments[1]))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 258, Col: 130}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 257, Col: 130}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
@@ -1659,7 +1658,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var98 string
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(post.Comments[0])
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 258, Col: 151}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 257, Col: 151}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 		if templ_7745c5c3_Err != nil {
@@ -1672,7 +1671,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 		var templ_7745c5c3_Var99 string
 		templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(commentsWord(post.Comments[1]))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 258, Col: 186}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 257, Col: 186}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 		if templ_7745c5c3_Err != nil {

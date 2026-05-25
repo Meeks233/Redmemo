@@ -2,8 +2,6 @@ package render
 
 import (
 	"embed"
-	"fmt"
-	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
@@ -13,35 +11,15 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
-
 //go:embed static
 var staticFS embed.FS
 
 type Engine struct {
-	// pages is indexed by language code, then by page name. Each language has
-	// its own fully-parsed template set with a FuncMap bound to that locale.
-	pages map[string]map[string]*template.Template
 	// translators is the locale-bound T function per language, used by the
 	// templ render path (which reads it from context via i18nContext).
 	translators map[string]func(key string, args ...any) string
 	cfg         config.RenderConfig
 }
-
-// sharedTemplates are parsed into every page template set. comment.html has
-// been ported to templ (comment.templ); base/partials remain for the html
-// pages not yet migrated.
-var sharedTemplates = []string{
-	"templates/base.html",
-	"templates/partials.html",
-}
-
-// pageTemplates maps a page name to its template file. Every page has now been
-// ported to templ; the map is empty and the html/template scaffolding below
-// (pages/pageSet/renderPage, base.html, partials.html) is retained pending a
-// separate decommission pass.
-var pageTemplates = map[string]string{}
 
 func New(cfg config.RenderConfig) (*Engine, error) {
 	locales, err := loadLocales()
@@ -50,25 +28,11 @@ func New(cfg config.RenderConfig) (*Engine, error) {
 	}
 	defaultLoc := locales[DefaultLang]
 
-	pages := make(map[string]map[string]*template.Template, len(SupportedLangs))
 	translators := make(map[string]func(key string, args ...any) string, len(SupportedLangs))
 	for _, lang := range SupportedLangs {
 		translators[lang] = translator(locales[lang], defaultLoc)
-		funcs := templateFuncs(locales[lang], defaultLoc, lang)
-		langPages := make(map[string]*template.Template, len(pageTemplates))
-		for name, pagePath := range pageTemplates {
-			files := make([]string, 0, len(sharedTemplates)+1)
-			files = append(files, sharedTemplates...)
-			files = append(files, pagePath)
-			tmpl, err := template.New("").Funcs(funcs).ParseFS(templateFS, files...)
-			if err != nil {
-				return nil, fmt.Errorf("parse %s [%s]: %w", name, lang, err)
-			}
-			langPages[name] = tmpl
-		}
-		pages[lang] = langPages
 	}
-	return &Engine{pages: pages, translators: translators, cfg: cfg}, nil
+	return &Engine{translators: translators, cfg: cfg}, nil
 }
 
 type BasePage struct {
@@ -260,23 +224,6 @@ func (e *Engine) basePage(url string, prefs reddit.Preferences) BasePage {
 		BrandName: e.cfg.BrandName,
 		Version:   "0.1.0",
 	}
-}
-
-// pageSet returns the template set for lang, falling back to DefaultLang when
-// lang is unknown (e.g. an empty or stale cookie value).
-func (e *Engine) pageSet(lang string) map[string]*template.Template {
-	if set, ok := e.pages[lang]; ok {
-		return set
-	}
-	return e.pages[DefaultLang]
-}
-
-func (e *Engine) renderPage(w io.Writer, lang, name string, data any) error {
-	tmpl, ok := e.pageSet(lang)[name]
-	if !ok {
-		return fmt.Errorf("template %q not found", name)
-	}
-	return tmpl.ExecuteTemplate(w, name, data)
 }
 
 // filterNSFW is the single chokepoint that enforces the user's show_nsfw
@@ -516,7 +463,9 @@ func (e *Engine) StaticHandler() http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	fs := http.FileServerFS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+		// Every static asset is referenced with a ?v=<Version> cache-buster, so a
+		// new build changes the URL — the response itself can be cached for a year.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		fs.ServeHTTP(w, r)
 	})
 }

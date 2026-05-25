@@ -205,7 +205,10 @@
                     scan();
                 });
             }
-            new MutationObserver(scheduleScan).observe(document.body, {
+            // Scope to <main> so nav/footer chrome mutations don't trigger
+            // rescans; all videos (including infinite-scroll appends) are inside it.
+            var observeRoot = document.querySelector("main") || document.body;
+            new MutationObserver(scheduleScan).observe(observeRoot, {
                 childList: true,
                 subtree: true,
             });

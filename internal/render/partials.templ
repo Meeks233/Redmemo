@@ -2,10 +2,9 @@ package render
 
 import "github.com/redmemo/redmemo/internal/reddit"
 
-// partials.templ ports the shared presentational components of partials.html to
-// typed templ components. The original html/template defines remain in
-// partials.html for the pages not yet migrated; these are the versions consumed
-// by migrated (templ) pages.
+// partials.templ holds the shared presentational components (banners, flair,
+// search box, poll, listing card) as typed templ components. Every page renders
+// through templ now; the old html/template partials.html has been removed.
 
 // offlineBanner shows the local-archive notice when a page is served offline.
 templ offlineBanner(isOffline bool) {

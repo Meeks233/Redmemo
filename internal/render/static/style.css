@@ -1244,13 +1244,49 @@ video.lazy-media:not([src]) {
 img.lazy-media:not([src]),
 video.lazy-media:not([src]) {
     background-color: var(--highlighted);
+    background-image: linear-gradient(100deg, transparent 20%, rgba(128, 128, 128, 0.35) 50%, transparent 80%);
+    background-repeat: no-repeat;
+    background-size: 200% 100%;
+    background-position: -150% 0;
+    animation: media-loading-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Video slots keep the static frame glyph behind the shimmer; image slots show
+   the animated loader instead (see .post_media_image.media-loading::after). */
+video.lazy-media:not([src]) {
     background-image:
         linear-gradient(100deg, transparent 20%, rgba(128, 128, 128, 0.35) 50%, transparent 80%),
         url("data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' width='100' height='100' xmlns='http://www.w3.org/2000/svg'><path d='M15,20 h70 a10,10 0 0 1 10,10 v45 a10,10 0 0 1 -10,10 h-70 a10,10 0 0 1 -10,-10 v-45 a10,10 0 0 1 10,-10 z' fill='none' stroke='rgba(128,128,128,0.5)' stroke-width='3' /><path d='M15,75 l25,-35 l15,20 l10,-10 l20, 25 z' stroke='none' fill='rgba(128,128,128,0.5)' /><circle cx='75' cy='35' r='7' stroke='none' fill='rgba(128,128,128,0.5)'/></svg>");
     background-repeat: no-repeat, no-repeat;
     background-size: 200% 100%, auto;
     background-position: -150% 0, 50% 50%;
-    animation: media-loading-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Animated loader for a post image whose pixels have not arrived yet. It
+   replaces the old static picture-frame placeholder: imageReload.js marks the
+   slot .media-loading while the <img> is unhydrated or downloading, then clears
+   it on load so the real image paints through. */
+.post_media_image {
+    position: relative;
+}
+
+.post_media_image.media-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 36px;
+    height: 36px;
+    margin: -18px 0 0 -18px;
+    background: center / contain no-repeat
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='rgba(128,128,128,0.8)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 2v4'/><path d='m16.2 7.8 2.9-2.9'/><path d='M18 12h4'/><path d='m16.2 16.2 2.9 2.9'/><path d='M12 18v4'/><path d='m4.9 19.1 2.9-2.9'/><path d='M2 12h4'/><path d='m4.9 4.9 2.9 2.9'/></svg>");
+    animation: media-loading-spin 1s linear infinite;
+    pointer-events: none;
+    z-index: 2;
+}
+
+@keyframes media-loading-spin {
+    to { transform: rotate(360deg); }
 }
 
 @keyframes media-loading-shimmer {
@@ -1263,9 +1299,16 @@ video.lazy-media:not([src]) {
     img.lazy-media:not([src]),
     video.lazy-media:not([src]) {
         animation: none;
+        background-position: 50% 50%;
+    }
+
+    video.lazy-media:not([src]) {
         background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' width='100' height='100' xmlns='http://www.w3.org/2000/svg'><path d='M15,20 h70 a10,10 0 0 1 10,10 v45 a10,10 0 0 1 -10,10 h-70 a10,10 0 0 1 -10,-10 v-45 a10,10 0 0 1 10,-10 z' fill='none' stroke='rgba(128,128,128,0.5)' stroke-width='3' /><path d='M15,75 l25,-35 l15,20 l10,-10 l20, 25 z' stroke='none' fill='rgba(128,128,128,0.5)' /><circle cx='75' cy='35' r='7' stroke='none' fill='rgba(128,128,128,0.5)'/></svg>");
         background-size: auto;
-        background-position: 50% 50%;
+    }
+
+    .post_media_image.media-loading::after {
+        animation: none;
     }
 }
 

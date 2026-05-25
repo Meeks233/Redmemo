@@ -43,6 +43,7 @@ templ postPage(d PostPageData) {
 		HeadExtra: postHead(d),
 		Search:    searchbox("/r/"+d.Post.Community, ""),
 		Content:   postContent(d),
+		Media:     true,
 	})
 }
 

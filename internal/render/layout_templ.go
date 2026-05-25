@@ -398,7 +398,17 @@ func layout(p BasePage, s pageSlots) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<script src=\"/quotaRing.js\"></script><script src=\"/videoAutoplay.js\"></script><script src=\"/videoPreload.js\"></script><script src=\"/lazyMedia.js\"></script><script src=\"/imageReload.js\"></script><script src=\"/audioSync.js\"></script><script src=\"/redditModal.js\"></script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<script src=\"/quotaRing.js\" defer></script><script src=\"/redditModal.js\" defer></script>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if s.Media {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<script src=\"/lazyMedia.js\" defer></script> <script src=\"/videoAutoplay.js\" defer></script> <script src=\"/videoPreload.js\" defer></script> <script src=\"/audioSync.js\" defer></script> <script src=\"/imageReload.js\" defer></script>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

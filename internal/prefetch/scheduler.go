@@ -25,6 +25,12 @@ import (
 // when nil (e.g. in tests) the scheduler simply skips the wait.
 type TokenWaiter interface {
 	WaitForToken(ctx context.Context) bool
+	// TokenInstalled distinguishes cold start (no token ever installed — block
+	// on WaitForToken) from a post-install transient where the token is present
+	// but momentarily unusable (rate-limited or refreshing). In the latter case
+	// WaitForToken's one-shot signal has already fired, so it returns instantly
+	// and blocking is pointless.
+	TokenInstalled() bool
 }
 
 type MediaDownloader interface {
@@ -504,12 +510,27 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
 				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
 				s.recordUpstream(ctx)
-				// If the session token wasn't installed yet, block until it is
-				// and retry on the OAuth path. Falling back to publicCli here
-				// would emit an unauthenticated request from the same IP that's
-				// about to carry the session token — a stealth tell we won't
-				// accept. No fallback.
+				// Token() returns nil for three distinct reasons; ErrNoTokenAvailable
+				// collapses them. Disambiguate before reacting:
+				//   - no token ever installed (cold start) → block until the
+				//     first token+UA pair lands, then retry on the OAuth path.
+				//   - token installed but momentarily unusable (rate-limited or
+				//     refreshing) → tokenReady already fired, so WaitForToken
+				//     would return instantly and the retry would fail identically.
+				//     Don't emit a misleading "blocking" warn or spin a no-op
+				//     retry; skip this sub for the round (quota resets within
+				//     ~10 min, next round is 15-30 min out).
+				// Either way, no publicCli fallback: emitting an unauthenticated
+				// request from the same IP that's about to carry the session
+				// token is a stealth tell we won't accept.
 				if errors.Is(fetchErr, reddit.ErrNoTokenAvailable) && s.tokenWaiter != nil {
+					if s.tokenWaiter.TokenInstalled() {
+						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token temporarily unusable (rate-limited or refreshing), skipping this round", sub, round+1)
+						if s.subStatus != nil {
+							s.subStatus.RecordFailure(sub, "token temporarily unusable")
+						}
+						return
+					}
 					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
 					if s.tokenWaiter.WaitForToken(ctx) {
 						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)

@@ -38,6 +38,14 @@
         return img.currentSrc || img.getAttribute("src") || "";
     }
 
+    // setLoading toggles the animated lucide loader on the image's slot. The
+    // host carries the spinner (an <img> can't render a ::after), shown while
+    // the picture is unhydrated or still downloading and cleared once it paints.
+    function setLoading(img, on) {
+        var host = img.closest(".post_media_image");
+        if (host) host.classList.toggle("media-loading", on);
+    }
+
     // stripFrag drops the #... cache-buster doReload appends, so the polled
     // status path and reload base URL stay stable across retries.
     function stripFrag(url) {
@@ -160,6 +168,7 @@
     }
 
     function onError(img) {
+        setLoading(img, false); // hand the slot over to the error/poll spinner
         var src = stripFrag(currentSrc(img));
         if (!src) return;
         var u;
@@ -193,6 +202,7 @@
     }
 
     function onLoad(img) {
+        setLoading(img, false); // pixels arrived — drop the loader, show the image
         var st = img.imageReloadState;
         if (st && !st.done) finish(st); // the reload (or a late load) succeeded
     }
@@ -202,10 +212,17 @@
         img.imageReloadWatched = true;
         img.addEventListener("error", function () { onError(img); });
         img.addEventListener("load", function () { onLoad(img); });
-        // Already broken before this script ran (image above the fold whose
-        // request failed during initial page load).
-        if (img.complete && img.naturalWidth === 0 && currentSrc(img)) {
+        if (img.complete && img.naturalWidth > 0) {
+            // Already painted (served from cache before this ran) — no loader.
+            setLoading(img, false);
+        } else if (img.complete && img.naturalWidth === 0 && currentSrc(img)) {
+            // Already broken before this script ran (image above the fold whose
+            // request failed during initial page load).
             onError(img);
+        } else {
+            // A lazy slot still awaiting its src, or a download in flight: show
+            // the animated loader until the load/error event resolves it.
+            setLoading(img, true);
         }
     }
 
@@ -220,7 +237,11 @@
         scan();
         // Infinite scroll appends posts after load — watch them as they arrive.
         if (window.MutationObserver) {
-            new MutationObserver(scan).observe(document.body, {
+            // Scope to <main> so nav/footer chrome mutations don't trigger
+            // rescans; all post images (including infinite-scroll appends) are
+            // inside it.
+            var observeRoot = document.querySelector("main") || document.body;
+            new MutationObserver(scan).observe(observeRoot, {
                 childList: true,
                 subtree: true,
             });

@@ -22,6 +22,11 @@ type pageSlots struct {
 	Body          templ.Component
 	Content       templ.Component
 	Footer        templ.Component
+	// Media gates the media-only scripts (lazy load, autoplay, preload, audio
+	// sync, image reload). Content pages that render posts set it; chrome-only
+	// pages (settings, error, fuckreddit) leave it false so they don't ship —
+	// or run a global MutationObserver for — media machinery they never use.
+	Media bool
 }
 
 // i18nState carries the locale-bound translator and the resolved <html lang>

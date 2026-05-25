@@ -40,7 +40,7 @@ templ searchPostList(posts []reddit.Post, prefs reddit.Preferences, lazy bool) {
 }
 
 templ searchPage(d SearchPageData) {
-	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d)})
+	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d), Media: true})
 }
 
 templ searchContent(d SearchPageData) {

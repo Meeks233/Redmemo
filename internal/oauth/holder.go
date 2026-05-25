@@ -503,6 +503,22 @@ func (p *TokenHolder) WaitForToken(ctx context.Context) bool {
 	}
 }
 
+// TokenInstalled reports whether a real OAuth token has ever been installed
+// (the one-shot tokenReady signal has fired). It deliberately does NOT report
+// current usability: an installed token still makes Token() return nil while it
+// is expired-and-refreshing or rate-limited (RateRemaining <= 0). Callers use
+// this to tell a cold-start "no token yet" — where blocking on WaitForToken is
+// correct — apart from the post-install "token momentarily unusable" case,
+// where WaitForToken returns instantly and a retry would fail identically.
+func (p *TokenHolder) TokenInstalled() bool {
+	select {
+	case <-p.tokenReady:
+		return true
+	default:
+		return false
+	}
+}
+
 // RemainingBudget implements ratelimit.BudgetSource.
 func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()

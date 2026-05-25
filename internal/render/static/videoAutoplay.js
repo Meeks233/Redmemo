@@ -145,8 +145,12 @@
     // freezes the page as it grows. We only need to notice videos that gain
     // the data-viewport-autoplay marker; node insertions are caught by
     // childList. The full-document rescan is also debounced to one per frame.
+    //
+    // Scope to <main> so the observer ignores mutations in the nav/footer
+    // chrome — all posts (including infinite-scroll appends) live inside it.
+    var observeRoot = document.querySelector("main") || document.body;
     new MutationObserver(scheduleObserve)
-      .observe(document.body, {
+      .observe(observeRoot, {
         childList: true,
         subtree: true,
         attributeFilter: ["data-viewport-autoplay"],
