@@ -1,0 +1,532 @@
+package render
+
+import (
+	"strings"
+
+	"github.com/redmemo/redmemo/internal/reddit"
+)
+
+// settings.templ ports templates/settings.html — the preferences page. Most
+// controls are plain form fields bound to d.Prefs; the homepage/prefetch sub
+// pickers are progressively enhanced by subPicker.js, whose seed data is handed
+// over through @templ.JSONScript islands rather than inlined string literals.
+
+templ settingsTitle(d SettingsPageData) {
+	{ T(ctx, "settings.page_title", d.BrandName) }
+}
+
+templ settingsPage(d SettingsPageData) {
+	@layout(d.BasePage, pageSlots{
+		Title:   settingsTitle(d),
+		Search:  searchbox("", ""),
+		Content: settingsContent(d),
+	})
+}
+
+templ settingsContent(d SettingsPageData) {
+	<div id="settings-wrapper">
+		if d.Prefs.EnableDebug == "on" {
+			<div class="debug-banner">
+				<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+				<span>{ T(ctx, "settings.debug_warn_pre") }<a href="/debug">{ T(ctx, "settings.debug_warn_link") }</a>{ T(ctx, "settings.debug_warn_post") }</span>
+			</div>
+		}
+		<div id="settings">
+			<div class="settings-column">
+				<form action="/settings" method="POST">
+					<div class="prefs">
+						<fieldset>
+							<legend>{ T(ctx, "settings.appearance") }</legend>
+							<div class="prefs-group">
+								<label for="theme">{ T(ctx, "settings.theme") }</label>
+								<select name="theme" id="theme">
+									for _, t := range d.Prefs.AvailableThemes {
+										<option value={ t } selected?={ t == d.Prefs.Theme }>{ reddit.Capitalize(t) }</option>
+									}
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="lang">{ T(ctx, "settings.language") }</label>
+								<select name="lang" id="lang">
+									<option value="en" selected?={ d.Prefs.Lang == "en" }>English</option>
+									<option value="zh" selected?={ d.Prefs.Lang == "zh" }>中文</option>
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="layout">{ T(ctx, "settings.layout") }</label>
+								<select name="layout" id="layout">
+									for _, l := range layoutOptions {
+										<option value={ l } selected?={ l == d.Prefs.Layout }>{ T(ctx, "layout."+l) }</option>
+									}
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="wide">{ T(ctx, "settings.wide") }</label>
+								<input type="hidden" value="off" name="wide"/>
+								<input type="checkbox" name="wide" id="wide" checked?={ d.Prefs.Wide == "on" }/>
+							</div>
+						</fieldset>
+						<fieldset>
+							<legend>{ T(ctx, "settings.interface") }</legend>
+							<div class="prefs-group">
+								<label for="remove_default_feeds">{ T(ctx, "settings.remove_home") }</label>
+								<input type="hidden" value="off" name="remove_default_feeds"/>
+								<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" checked?={ d.Prefs.RemoveDefaultFeeds == "on" } onchange="toggleRemoveHome(this)"/>
+							</div>
+							<input type="hidden" name="front_page_subs" id="front_page_subs_hidden" value={ frontPageSubsValue(d.Prefs.FrontPageSubs) }/>
+							<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value={ frontPageSubsModeValue(d.Prefs.FrontPageSubsMode) }/>
+							<input type="hidden" name="show_all_subs" id="show_all_subs_hidden" value={ showAllSubsValue(d.Prefs.ShowAllSubs) }/>
+							<div class="prefs-group">
+								<label for="post_sort" title={ T(ctx, "settings.post_sort_title") }>{ T(ctx, "settings.post_sort") }</label>
+								<select name="post_sort">
+									<option value="new" selected?={ d.Prefs.PostSort == "new" }>{ T(ctx, "sort.new") }</option>
+									<option value="new_archive" selected?={ d.Prefs.PostSort == "new_archive" }>{ T(ctx, "sort.archive") }</option>
+									<option value="top" selected?={ d.Prefs.PostSort == "top" }>{ T(ctx, "sort.top") }</option>
+									<option value="notorious" selected?={ d.Prefs.PostSort == "notorious" }>{ T(ctx, "sort.notorious") }</option>
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="comment_sort">{ T(ctx, "settings.comment_sort") }</label>
+								<select name="comment_sort" id="comment_sort">
+									<option value="new" selected?={ d.Prefs.CommentSort == "new" }>{ T(ctx, "sort.new") }</option>
+									<option value="new_archive" selected?={ d.Prefs.CommentSort == "new_archive" }>{ T(ctx, "sort.archive") }</option>
+									<option value="top" selected?={ d.Prefs.CommentSort == "top" }>{ T(ctx, "sort.top") }</option>
+									<option value="notorious" selected?={ d.Prefs.CommentSort == "notorious" }>{ T(ctx, "sort.notorious") }</option>
+								</select>
+							</div>
+						</fieldset>
+						<fieldset>
+							<legend>{ T(ctx, "settings.content") }</legend>
+							<div class="prefs-group">
+								<label for="video_quality">{ T(ctx, "settings.video_quality") }</label>
+								<select name="video_quality" id="video_quality">
+									for _, q := range videoQualities {
+										<option value={ q } selected?={ q == d.Prefs.VideoQuality }>{ T(ctx, "quality."+q) }</option>
+									}
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="blur_spoiler">{ T(ctx, "settings.blur_spoiler") }</label>
+								<input type="hidden" value="off" name="blur_spoiler"/>
+								<input type="checkbox" name="blur_spoiler" id="blur_spoiler" checked?={ d.Prefs.BlurSpoiler == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="show_nsfw">{ T(ctx, "settings.show_nsfw") }</label>
+								<input type="hidden" value="off" name="show_nsfw"/>
+								<input type="checkbox" name="show_nsfw" id="show_nsfw" checked?={ d.Prefs.ShowNSFW == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="blur_nsfw">{ T(ctx, "settings.blur_nsfw") }</label>
+								<input type="hidden" value="off" name="blur_nsfw"/>
+								<input type="checkbox" name="blur_nsfw" id="blur_nsfw" checked?={ d.Prefs.BlurNSFW == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="autoplay_videos">{ T(ctx, "settings.autoplay") }</label>
+								<input type="hidden" value="off" name="autoplay_videos"/>
+								<input type="checkbox" name="autoplay_videos" id="autoplay_videos" checked?={ d.Prefs.AutoplayVideos == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="lazy_media" title={ T(ctx, "settings.lazy_media_title") }>{ T(ctx, "settings.lazy_media") }</label>
+								<input type="hidden" value="off" name="lazy_media"/>
+								<input type="checkbox" name="lazy_media" id="lazy_media" checked?={ d.Prefs.LazyMedia == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="fixed_navbar">{ T(ctx, "settings.fixed_navbar") }</label>
+								<input type="hidden" value="off" name="fixed_navbar"/>
+								<input type="checkbox" name="fixed_navbar" checked?={ d.Prefs.FixedNavbar == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="scroll_interval">{ T(ctx, "settings.scroll_interval") }</label>
+								<input type="number" name="scroll_interval" id="scroll_interval" min="1" step="1" value={ d.Prefs.ScrollInterval } style="width:60px"/>
+							</div>
+							<div class="prefs-group">
+								<label for="hide_sidebar_and_summary">{ T(ctx, "settings.hide_sidebar") }</label>
+								<input type="hidden" value="off" name="hide_sidebar_and_summary"/>
+								<input type="checkbox" name="hide_sidebar_and_summary" checked?={ d.Prefs.HideSidebarAndSummary == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="use_hls">{ T(ctx, "settings.use_hls") }</label>
+								<input type="hidden" value="off" name="use_hls"/>
+								<input type="checkbox" name="use_hls" id="use_hls" checked?={ d.Prefs.UseHLS == "on" } onchange="toggleHLS(this)"/>
+							</div>
+							<div class="prefs-group">
+								<label for="hide_hls_notification">{ T(ctx, "settings.hide_hls_notif") }</label>
+								<input type="hidden" value="off" name="hide_hls_notification"/>
+								<input type="checkbox" name="hide_hls_notification" id="hide_hls_notification" checked?={ d.Prefs.HideHLSNotification == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="hide_awards">{ T(ctx, "settings.hide_awards") }</label>
+								<input type="hidden" value="off" name="hide_awards"/>
+								<input type="checkbox" name="hide_awards" id="hide_awards" checked?={ d.Prefs.HideAwards == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="hide_score">{ T(ctx, "settings.hide_score") }</label>
+								<input type="hidden" value="off" name="hide_score"/>
+								<input type="checkbox" name="hide_score" id="hide_score" checked?={ d.Prefs.HideScore == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="disable_visit_reddit_confirmation">{ T(ctx, "settings.disable_visit_confirm") }</label>
+								<input type="hidden" value="off" name="disable_visit_reddit_confirmation"/>
+								<input type="checkbox" name="disable_visit_reddit_confirmation" checked?={ d.Prefs.DisableVisitRedditConfirmation == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="fetch_sub_about" title={ T(ctx, "settings.fetch_sub_about_title") }>{ T(ctx, "settings.fetch_sub_about") }</label>
+								<input type="hidden" value="off" name="fetch_sub_about"/>
+								<input type="checkbox" name="fetch_sub_about" id="fetch_sub_about" checked?={ d.Prefs.FetchSubAbout == "on" }/>
+							</div>
+						</fieldset>
+					</div>
+					<div id="save-bar">
+						<input id="save" type="submit" value={ T(ctx, "settings.save") }/>
+					</div>
+				</form>
+			</div>
+			<div class="settings-column">
+				<div class="prefs" id="sub_picker" style={ displayNoneIf(d.Prefs.RemoveDefaultFeeds == "on") }>
+					<fieldset>
+						<legend>{ T(ctx, "settings.homepage_subs") }</legend>
+						<div class="prefs-group" id="show_all_row">
+							<label for="show_all_subs">{ T(ctx, "settings.show_all_subs") }</label>
+							<input type="checkbox" id="show_all_subs" checked?={ d.Prefs.ShowAllSubs != "off" } onchange="toggleSubPicker(this)"/>
+						</div>
+						<div id="sub_filter" style={ displayNoneIf(d.Prefs.ShowAllSubs != "off") }>
+							<div class="sub-picker-mode">
+								<div class="mode-segmented">
+									<a class={ "mode-seg", templ.KV("selected", d.Prefs.FrontPageSubsMode != "blacklist") } data-mode="whitelist" onclick="setMode('whitelist')">{ T(ctx, "settings.whitelist") }</a>
+									<a class={ "mode-seg", templ.KV("selected", d.Prefs.FrontPageSubsMode == "blacklist") } data-mode="blacklist" onclick="setMode('blacklist')">{ T(ctx, "settings.blacklist") }</a>
+								</div>
+								<span class="mode-hint" id="mode_hint">
+									if d.Prefs.FrontPageSubsMode == "blacklist" {
+										{ T(ctx, "settings.mode_blacklist_hint") }
+									} else {
+										{ T(ctx, "settings.mode_whitelist_hint") }
+									}
+								</span>
+							</div>
+							<div class="sub-picker-selected" id="sub_selected">
+								if d.Prefs.FrontPageSubs != "all" && d.Prefs.FrontPageSubs != "" {
+									for _, s := range strings.Split(d.Prefs.FrontPageSubs, "+") {
+										<span class="sub-tag" data-sub={ s }>r/{ s }<button type="button" class="sub-tag-remove">&times;</button></span>
+									}
+								}
+							</div>
+							<div class="sub-picker-search">
+								<input type="text" id="sub_search" placeholder={ T(ctx, "settings.search_subs_placeholder") } autocomplete="off"/>
+							</div>
+							<div class="sub-picker-list" id="sub_list"></div>
+						</div>
+					</fieldset>
+				</div>
+				<div class="prefs" id="prefetch_settings">
+					<fieldset>
+						<legend>{ T(ctx, "settings.natural_prefetch") }</legend>
+						<div class="prefs-group">
+							<label for="enable_natural_prefetch">{ T(ctx, "settings.enable_np") }</label>
+							<input type="checkbox" id="enable_natural_prefetch" checked?={ d.Prefs.EnableNaturalPrefetch == "on" } onchange="togglePrefetch(this)"/>
+						</div>
+						<div class="prefetch-picker" id="prefetch_picker" style={ displayNoneIf(d.Prefs.EnableNaturalPrefetch != "on") }>
+							<div class="prefs-group">
+								<label for="prefetch_threshold">{ T(ctx, "settings.np_threshold") }</label>
+								<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value={ d.Prefs.PrefetchThreshold } style="width:60px" onchange="savePrefetchThreshold(this.value)"/>
+							</div>
+							<div class="sub-picker-selected" id="prefetch_sub_selected">
+								if d.Prefs.PrefetchSubs != "" {
+									for _, s := range strings.Split(d.Prefs.PrefetchSubs, "+") {
+										<span class="sub-tag" data-sub={ s }>r/{ s }<button type="button" class="sub-tag-remove">&times;</button></span>
+									}
+								}
+							</div>
+							<div class="sub-picker-search">
+								<input type="text" id="prefetch_sub_search" placeholder={ T(ctx, "settings.add_sub_placeholder") } autocomplete="off"/>
+							</div>
+							<div class="sub-picker-list" id="prefetch_sub_list"></div>
+						</div>
+					</fieldset>
+				</div>
+				<div class="prefs" id="instance_info">
+					<fieldset>
+						<legend>{ T(ctx, "settings.instance_info") }</legend>
+						<div class="prefs-group">
+							<label for="enable_debug">{ T(ctx, "settings.enable_debug") }</label>
+							<input type="checkbox" id="enable_debug" checked?={ d.Prefs.EnableDebug == "on" } onchange="toggleDebug(this)"/>
+						</div>
+						<table>
+							<tbody>
+								<tr>
+									<td>{ T(ctx, "settings.version") }</td>
+									<td>{ d.Version }</td>
+								</tr>
+								<tr>
+									<td>{ T(ctx, "settings.archived_posts") }</td>
+									<td>{ i64(d.PostCount) }</td>
+								</tr>
+								<tr>
+									<td>{ T(ctx, "settings.archived_subs") }</td>
+									<td>{ i64(d.SubredditCount) }</td>
+								</tr>
+								<tr>
+									<td>{ T(ctx, "settings.cached_media") }</td>
+									<td>{ i64(d.MediaCount) }</td>
+								</tr>
+								<tr>
+									<td>{ T(ctx, "settings.media_storage") }</td>
+									<td>{ d.MediaSize }</td>
+								</tr>
+								<tr>
+									<td>{ T(ctx, "settings.oauth_fallback") }</td>
+									<td>
+										if d.OAuthEnabled {
+											{ T(ctx, "settings.enabled") }
+										} else {
+											{ T(ctx, "settings.disabled") }
+										}
+									</td>
+								</tr>
+							</tbody>
+						</table>
+						if len(d.SubredditStats) > 0 {
+							<table>
+								<thead><tr><th>{ T(ctx, "settings.th_archived_sub") }</th><th>{ T(ctx, "settings.th_posts") }</th></tr></thead>
+								<tbody>
+									for _, s := range d.SubredditStats {
+										<tr>
+											<td><a href={ templ.SafeURL("/archive/r/" + s.Name) }>r/{ s.Name }</a></td>
+											<td>{ i64(s.PostCount) }</td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						}
+					</fieldset>
+				</div>
+			</div>
+		</div>
+	</div>
+	<script src="/subPicker.js"></script>
+	@templ.JSONScript("settings-archived-subs", d.ArchivedSubs)
+	@templ.JSONScript("settings-top-subs", settingsTopSubs(d.SubredditStats))
+	@templ.JSONScript("settings-live-subs", d.LiveSubs)
+	@templ.JSONScript("settings-selected-counts", d.SelectedCounts)
+	@templ.JSONScript("settings-mode-hints", settingsModeHints(ctx))
+	<script>
+		// Sub-picker seed data arrives via JSONScript islands (above) rather than
+		// inlined literals. _allSubs starts from the archived subs, gains any live
+		// subs not already present, inherits post counts from the top-subs table,
+		// and is finally reconciled against the selected-count map.
+		window._allSubs = (JSON.parse(document.getElementById('settings-archived-subs').textContent) || []).map(function(n) { return { name: n, posts: 0 }; });
+		window._topSubs = JSON.parse(document.getElementById('settings-top-subs').textContent) || [];
+		(function() {
+			var seen = {};
+			window._allSubs.forEach(function(s) { seen[s.name] = true; });
+			(JSON.parse(document.getElementById('settings-live-subs').textContent) || []).forEach(function(n) {
+				if (!seen[n]) { window._allSubs.push({ name: n, posts: 0 }); seen[n] = true; }
+			});
+			window._allSubs.forEach(function(s) {
+				for (var i = 0; i < window._topSubs.length; i++) {
+					if (window._topSubs[i].name === s.name) { s.posts = window._topSubs[i].posts; break; }
+				}
+			});
+			var _selCounts = JSON.parse(document.getElementById('settings-selected-counts').textContent) || {};
+			for (var _sc in _selCounts) {
+				var _found = false;
+				for (var _i = 0; _i < window._allSubs.length; _i++) {
+					if (window._allSubs[_i].name === _sc) {
+						if (_selCounts[_sc] > window._allSubs[_i].posts) window._allSubs[_i].posts = _selCounts[_sc];
+						_found = true; break;
+					}
+				}
+				if (!_found) window._allSubs.push({ name: _sc, posts: _selCounts[_sc] });
+			}
+			window._allSubs.sort(function(a, b) { return b.posts - a.posts; });
+		})();
+
+		var _modeHints = JSON.parse(document.getElementById('settings-mode-hints').textContent) || {};
+
+		var homePicker = SubPicker({
+			selectedId: 'sub_selected',
+			searchId: 'sub_search',
+			listId: 'sub_list',
+			onChange: function(sel) {
+				document.getElementById('front_page_subs_hidden').value = sel.join('+');
+				if (sel.length === 0) {
+					// Nothing selected — an empty filter is meaningless, revert to "Show all".
+					document.getElementById('show_all_subs').checked = true;
+					document.getElementById('show_all_subs_hidden').value = 'on';
+					document.getElementById('sub_filter').style.display = 'none';
+				}
+				checkDirty();
+			}
+		});
+
+		var prefetchPicker = SubPicker({
+			selectedId: 'prefetch_sub_selected',
+			searchId: 'prefetch_sub_search',
+			listId: 'prefetch_sub_list',
+			onChange: function(sel) {
+				var fd = new FormData();
+				fd.append('prefetch_subs', sel.join('+'));
+				fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+			}
+		});
+
+		function toggleSubPicker(cb) {
+			// "Show all subs" only toggles whether the filter is applied/shown.
+			// The whitelist/blacklist selection is preserved regardless.
+			document.getElementById('show_all_subs_hidden').value = cb.checked ? 'on' : 'off';
+			document.getElementById('sub_filter').style.display = cb.checked ? 'none' : '';
+			if (!cb.checked && homePicker) homePicker.render();
+			checkDirty();
+		}
+
+		function toggleRemoveHome(cb) {
+			document.getElementById('sub_picker').style.display = cb.checked ? 'none' : '';
+		}
+
+		function setMode(mode) {
+			document.getElementById('front_page_subs_mode').value = mode;
+			document.querySelectorAll('.mode-seg').forEach(function(el) {
+				el.classList.toggle('selected', el.dataset.mode === mode);
+			});
+			document.getElementById('mode_hint').textContent = _modeHints[mode] || '';
+			checkDirty();
+		}
+
+		var saveBar = document.getElementById('save-bar');
+		var form = document.querySelector('#settings form');
+
+		function serializeForm() {
+			var parts = [];
+			new FormData(form).forEach(function(v, k) { parts.push(k + '=' + v); });
+			return parts.join('&');
+		}
+
+		var initialSerialized = serializeForm();
+
+		function checkDirty() {
+			saveBar.classList.toggle('visible', serializeForm() !== initialSerialized);
+		}
+
+		form.addEventListener('change', checkDirty);
+		form.addEventListener('input', checkDirty);
+
+		function togglePrefetch(cb) {
+			if (cb.checked) {
+				cb.checked = false;
+				document.getElementById('prefetch-modal').classList.add('visible');
+			} else {
+				document.getElementById('prefetch_picker').style.display = 'none';
+				submitPrefetchSetting('off');
+			}
+		}
+
+		function confirmPrefetch() {
+			document.getElementById('prefetch-modal').classList.remove('visible');
+			document.getElementById('enable_natural_prefetch').checked = true;
+			document.getElementById('prefetch_picker').style.display = '';
+			submitPrefetchSetting('on');
+			if (prefetchPicker) prefetchPicker.render();
+		}
+
+		function cancelPrefetch() {
+			document.getElementById('prefetch-modal').classList.remove('visible');
+		}
+
+		function submitPrefetchSetting(val) {
+			var fd = new FormData();
+			fd.append('enable_natural_prefetch', val);
+			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+		}
+
+		function savePrefetchThreshold(val) {
+			var n = parseInt(val, 10);
+			if (isNaN(n) || n < 1 || n > 99) return;
+			var fd = new FormData();
+			fd.append('prefetch_threshold', String(n));
+			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
+		}
+
+		function toggleDebug(cb) {
+			if (cb.checked) {
+				cb.checked = false;
+				document.getElementById('debug-modal').classList.add('visible');
+			} else {
+				submitDebugSetting('off');
+			}
+		}
+
+		function confirmDebug() {
+			document.getElementById('debug-modal').classList.remove('visible');
+			document.getElementById('enable_debug').checked = true;
+			submitDebugSetting('on');
+		}
+
+		function cancelDebug() {
+			document.getElementById('debug-modal').classList.remove('visible');
+		}
+
+		function submitDebugSetting(val) {
+			var fd = new FormData();
+			fd.append('enable_debug', val);
+			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
+				.then(function() { location.reload(); });
+		}
+
+		function toggleHLS(cb) {
+			if (cb.checked) {
+				cb.checked = false;
+				document.getElementById('hls-modal').classList.add('visible');
+			} else {
+				submitHLSSetting('off');
+			}
+		}
+
+		function confirmHLS() {
+			document.getElementById('hls-modal').classList.remove('visible');
+			document.getElementById('use_hls').checked = true;
+			submitHLSSetting('on');
+		}
+
+		function cancelHLS() {
+			document.getElementById('hls-modal').classList.remove('visible');
+		}
+
+		function submitHLSSetting(val) {
+			var fd = new FormData();
+			fd.append('use_hls', val);
+			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
+				.then(function() { location.reload(); });
+		}
+	</script>
+	<div class="modal-overlay" id="prefetch-modal" onclick="if(event.target===this)cancelPrefetch()">
+		<div class="modal-box">
+			<h2>{ T(ctx, "settings.np_modal_title") }</h2>
+			<p>{ T(ctx, "settings.np_modal_body") }</p>
+			<div class="modal-actions">
+				<button class="modal-cancel" onclick="cancelPrefetch()">{ T(ctx, "settings.cancel") }</button>
+				<button class="modal-confirm" onclick="confirmPrefetch()">{ T(ctx, "settings.accept_risk") }</button>
+			</div>
+		</div>
+	</div>
+	<div class="modal-overlay" id="debug-modal" onclick="if(event.target===this)cancelDebug()">
+		<div class="modal-box">
+			<h2>{ T(ctx, "settings.debug_modal_title") }</h2>
+			<p>{ T(ctx, "settings.debug_modal_body") }</p>
+			<p>{ T(ctx, "settings.confirm_continue") }</p>
+			<div class="modal-actions">
+				<button class="modal-cancel" onclick="cancelDebug()">{ T(ctx, "settings.cancel") }</button>
+				<button class="modal-confirm" onclick="confirmDebug()">{ T(ctx, "settings.accept_risk") }</button>
+			</div>
+		</div>
+	</div>
+	<div class="modal-overlay" id="hls-modal" onclick="if(event.target===this)cancelHLS()">
+		<div class="modal-box">
+			<h2>{ T(ctx, "settings.hls_modal_title") }</h2>
+			<p>{ T(ctx, "settings.hls_modal_body") }</p>
+			<p>{ T(ctx, "settings.confirm_continue") }</p>
+			<div class="modal-actions">
+				<button class="modal-cancel" onclick="cancelHLS()">{ T(ctx, "settings.cancel") }</button>
+				<button class="modal-confirm" onclick="confirmHLS()">{ T(ctx, "settings.accept_risk") }</button>
+			</div>
+		</div>
+	</div>
+}

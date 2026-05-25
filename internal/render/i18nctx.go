@@ -233,6 +233,137 @@ func frReasonText(ctx context.Context, reason string) string {
 	return frReasonTexts(ctx)[reason]
 }
 
+// --- archive hub helpers ---
+
+// archiveTimeOptions are the preset time-range options on the /archive search
+// form (the old `list "hour" ... "year"`); "" (any) and "custom" bracket them.
+var archiveTimeOptions = []string{"hour", "day", "week", "month", "year"}
+
+// sourceModeClass returns the whitelist/blacklist class for the archive source
+// box; anything other than "blacklist" is treated as whitelist (the default).
+func sourceModeClass(mode string) string {
+	if mode == "blacklist" {
+		return "blacklist"
+	}
+	return "whitelist"
+}
+
+// archiveSortBase builds the base href (ending in "sort=") for the /archive sort
+// tabs, carrying the active search query string when a search is in progress.
+func archiveSortBase(search bool, qs string) string {
+	if search && qs != "" {
+		return "/archive?" + qs + "&sort="
+	}
+	return "/archive?sort="
+}
+
+// archiveSubCardTitle composes the title attr for an archive sub card: the sub
+// name plus optional NSFW/dead tags.
+func archiveSubCardTitle(ctx context.Context, e ArchiveHubEntry) string {
+	s := "r/" + e.Name
+	if e.NSFW {
+		s += T(ctx, "archive_hub.nsfw_tag")
+	}
+	if e.Dead {
+		s += T(ctx, "archive_hub.dead_tag")
+	}
+	return s
+}
+
+// archiveSubJS is the JSON shape the /archive source-picker script consumes.
+type archiveSubJS struct {
+	Name  string `json:"name"`
+	Posts int64  `json:"posts"`
+}
+
+// archiveSubsJS projects PickerSubs into the picker's JSON island (name + count).
+func archiveSubsJS(subs []SubredditStatView) []archiveSubJS {
+	out := make([]archiveSubJS, len(subs))
+	for i, s := range subs {
+		out[i] = archiveSubJS{Name: s.Name, Posts: s.PostCount}
+	}
+	return out
+}
+
+// archiveJSStrings are the localized strings the picker script needs at runtime
+// (whitelist/blacklist toggle label, empty-match notice).
+func archiveJSStrings(ctx context.Context) map[string]string {
+	return map[string]string{
+		"whitelist": T(ctx, "archive_search.whitelist"),
+		"blacklist": T(ctx, "archive_search.blacklist"),
+		"no_match":  T(ctx, "archive_search.source_no_match"),
+	}
+}
+
+// --- settings page helpers ---
+
+// layoutOptions / videoQualities are the option value sets the settings page
+// iterates over (the old `list ...` literals).
+var layoutOptions = []string{"card", "clean", "compact"}
+var videoQualities = []string{"best", "medium", "worst"}
+
+// displayNoneIf returns "display:none" when cond holds, else "" — mirrors the
+// old inline `style="{{ if ... }}display:none{{ end }}"`. SafeCSS bypasses
+// templ's style sanitizer so the empty case renders as a bare style="" too.
+func displayNoneIf(cond bool) templ.SafeCSS {
+	if cond {
+		return templ.SafeCSS("display:none")
+	}
+	return templ.SafeCSS("")
+}
+
+// frontPageSubsValue blanks the "all" sentinel for the hidden front_page_subs
+// input (the old `{{ if eq .Prefs.FrontPageSubs "all" }}{{ else }}...{{ end }}`).
+func frontPageSubsValue(v string) string {
+	if v == "all" {
+		return ""
+	}
+	return v
+}
+
+// frontPageSubsModeValue normalizes the homepage filter mode to "blacklist" or
+// "whitelist" (the old hidden-input default expression).
+func frontPageSubsModeValue(v string) string {
+	if v == "blacklist" {
+		return "blacklist"
+	}
+	return "whitelist"
+}
+
+// showAllSubsValue normalizes the show-all flag to "off" or "on".
+func showAllSubsValue(v string) string {
+	if v == "off" {
+		return "off"
+	}
+	return "on"
+}
+
+// subView is the {name, posts} shape the sub-picker JS consumes via JSONScript.
+type subView struct {
+	Name  string `json:"name"`
+	Posts int64  `json:"posts"`
+}
+
+// settingsTopSubs adapts the archived-sub stats into the JS sub shape used to
+// seed window._topSubs / window._allSubs post counts.
+func settingsTopSubs(stats []SubredditStatView) []subView {
+	out := make([]subView, 0, len(stats))
+	for _, s := range stats {
+		out = append(out, subView{Name: s.Name, Posts: s.PostCount})
+	}
+	return out
+}
+
+// settingsModeHints maps each whitelist/blacklist mode to its localized hint,
+// serialized for the client setMode() handler (replacing the old inline T()
+// interpolations in the page script).
+func settingsModeHints(ctx context.Context) map[string]string {
+	return map[string]string{
+		"whitelist": T(ctx, "settings.mode_whitelist_hint"),
+		"blacklist": T(ctx, "settings.mode_blacklist_hint"),
+	}
+}
+
 // orDash returns s, or an em dash when s is empty (the old `{{ or .X "—" }}`).
 func orDash(s string) string {
 	if s == "" {

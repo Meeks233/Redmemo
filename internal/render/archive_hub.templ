@@ -1,0 +1,399 @@
+package render
+
+import (
+	"strconv"
+	"strings"
+)
+
+// archive_hub.templ ports templates/archive_hub.html — the archive landing page:
+// the local-archive search form (with embedded source picker), sort tabs, and
+// either the archived-subreddit grid or the local-search result list.
+
+templ archiveHubTitle(d ArchiveHubPageData) {
+	{ T(ctx, "archive_hub.page_title", d.BrandName) }
+}
+
+templ archiveHubPage(d ArchiveHubPageData) {
+	@layout(d.BasePage, pageSlots{
+		Title:   archiveHubTitle(d),
+		Search:  searchbox("", ""),
+		Content: archiveHubContent(d),
+	})
+}
+
+templ archiveHubContent(d ArchiveHubPageData) {
+	<div id="archive-hub">
+		<form id="archive_search" method="get" action="/archive">
+			<div class="archive-search-bar">
+				<div class={ "archive-search-field", sourceModeClass(d.SearchParams.SourceMode) } id="archive_source_box">
+					<span class="archive-source-tags" id="archive_source_selected">
+						if d.SearchParams.Source != "" {
+							for _, s := range strings.Split(d.SearchParams.Source, "+") {
+								if s != "" {
+									<span class="sub-tag" data-sub={ s }>r/{ s }<button type="button" class="sub-tag-remove">&times;</button></span>
+								}
+							}
+						}
+					</span>
+					<input id="archive_q" type="text" name="q" placeholder={ T(ctx, "archive_search.placeholder") } title={ T(ctx, "archive_search.placeholder") } value={ d.SearchParams.Query } autocomplete="off"/>
+					<div class="archive-source-dropdown" id="archive_source_list"></div>
+				</div>
+				<button type="button" id="archive_source_mode_toggle" class="source-mode-toggle whitelist" title={ T(ctx, "archive_search.source_mode_title") }>
+					<svg class="source-mode-icon icon-whitelist" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path>
+					</svg>
+					<svg class="source-mode-icon icon-blacklist" xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M11 12H3"></path><path d="M16 6H3"></path><path d="M16 18H3"></path><path d="m19 10-4 4"></path><path d="m15 10 4 4"></path>
+					</svg>
+					<span id="archive_source_mode_label">{ T(ctx, "archive_search.whitelist") }</span>
+				</button>
+				<button class="submit" type="submit" title={ T(ctx, "archive_search.submit") }>@submitSVG()</button>
+			</div>
+			<div class="archive-search-filters">
+				<label class="archive-search-filter">
+					<span>{ T(ctx, "archive_search.time") }</span>
+					<select name="time" id="archive_search_time">
+						<option value="" if d.SearchParams.Time == "" { selected }>{ T(ctx, "archive_search.any") }</option>
+						for _, v := range archiveTimeOptions {
+							<option value={ v } if d.SearchParams.Time == v { selected }>{ T(ctx, "time."+v) }</option>
+						}
+						<option value="custom" if d.SearchParams.Time == "custom" { selected }>{ T(ctx, "archive_search.custom") }</option>
+					</select>
+				</label>
+				<span class="archive-search-range" id="archive_search_range" if d.SearchParams.Time != "custom" { hidden }>
+					<input type="date" name="from" id="archive_search_from" class="archive-search-date" value={ d.SearchParams.From } title={ T(ctx, "archive_search.from") } aria-label={ T(ctx, "archive_search.from") }/>
+					<span class="archive-search-range-sep">&rarr;</span>
+					<input type="date" name="to" id="archive_search_to" class="archive-search-date" value={ d.SearchParams.To } title={ T(ctx, "archive_search.to") } aria-label={ T(ctx, "archive_search.to") }/>
+				</span>
+				<label class="archive-search-filter">
+					<span>{ T(ctx, "archive_search.type") }</span>
+					<select name="type">
+						<option value="" if d.SearchParams.Type == "" { selected }>{ T(ctx, "archive_search.any") }</option>
+						<option value="nsfw" if d.SearchParams.Type == "nsfw" { selected }>{ T(ctx, "archive_search.type_nsfw") }</option>
+						<option value="sfw" if d.SearchParams.Type == "sfw" { selected }>{ T(ctx, "archive_search.type_sfw") }</option>
+					</select>
+				</label>
+				<label class="archive-search-filter">
+					<span>{ T(ctx, "archive_search.media") }</span>
+					<select name="media">
+						<option value="" if d.SearchParams.Media == "" { selected }>{ T(ctx, "archive_search.any") }</option>
+						<option value="image" if d.SearchParams.Media == "image" { selected }>{ T(ctx, "archive_search.media_image") }</option>
+						<option value="video" if d.SearchParams.Media == "video" { selected }>{ T(ctx, "archive_search.media_video") }</option>
+					</select>
+				</label>
+				<label class="archive-search-filter">
+					<span>{ T(ctx, "archive_search.score") }</span>
+					<select name="score_op" aria-label={ T(ctx, "archive_search.score") }>
+						<option value="gt" if d.SearchParams.ScoreOp != "lt" { selected }>&gt;</option>
+						<option value="lt" if d.SearchParams.ScoreOp == "lt" { selected }>&lt;</option>
+					</select>
+					<input type="number" name="score" class="archive-search-score" step="1" value={ d.SearchParams.Score } placeholder={ T(ctx, "archive_search.any") } aria-label={ T(ctx, "archive_search.score") }/>
+				</label>
+			</div>
+			<input type="hidden" name="source" id="archive_source_hidden" value={ d.SearchParams.Source }/>
+			<input type="hidden" name="source_mode" id="archive_source_mode" value={ d.SearchParams.SourceMode }/>
+		</form>
+		@templ.JSONScript("archive-subs-data", archiveSubsJS(d.PickerSubs))
+		@templ.JSONScript("archive-i18n", archiveJSStrings(ctx))
+		<script>
+		(function() {
+			var I18N = {};
+			try { I18N = JSON.parse(document.getElementById('archive-i18n').textContent); } catch (e) {}
+
+			// Time = "custom": reveal the two native date inputs after the Time
+			// select. They stay clickable, so the browser calendar re-opens any
+			// number of times; today caps the upper bound.
+			var timeSel = document.getElementById('archive_search_time');
+			var rangeBox = document.getElementById('archive_search_range');
+			if (timeSel && rangeBox) {
+				var today = new Date().toISOString().slice(0, 10);
+				var dateInputs = rangeBox.querySelectorAll('input[type=date]');
+				Array.prototype.forEach.call(dateInputs, function(d) {
+					d.max = today;
+				});
+				timeSel.addEventListener('change', function() {
+					rangeBox.hidden = timeSel.value !== 'custom';
+				});
+			}
+
+			var toggle = document.getElementById('archive_source_mode_toggle');
+			var modeHidden = document.getElementById('archive_source_mode');
+			var modeLabel = document.getElementById('archive_source_mode_label');
+			if (toggle && modeHidden) {
+				var modeField = document.getElementById('archive_source_box');
+				function applyMode(mode) {
+					var bl = mode === 'blacklist';
+					modeHidden.value = bl ? 'blacklist' : 'whitelist';
+					toggle.classList.toggle('blacklist', bl);
+					toggle.classList.toggle('whitelist', !bl);
+					if (modeField) {
+						modeField.classList.toggle('blacklist', bl);
+						modeField.classList.toggle('whitelist', !bl);
+					}
+					if (modeLabel) modeLabel.textContent = bl
+						? I18N.blacklist
+						: I18N.whitelist;
+				}
+				toggle.addEventListener('click', function() {
+					var next = modeHidden.value === 'blacklist' ? 'whitelist' : 'blacklist';
+					applyMode(next);
+					try { localStorage.setItem('archive_source_mode', next); } catch (e) {}
+				});
+				// Restore the last whitelist/blacklist choice from localStorage,
+				// unless this page already carries a source filter from the URL
+				// (in which case that search's mode must win).
+				var srcHidden = document.getElementById('archive_source_hidden');
+				var savedMode = null;
+				try { savedMode = localStorage.getItem('archive_source_mode'); } catch (e) {}
+				if (savedMode && !(srcHidden && srcHidden.value !== '')) {
+					applyMode(savedMode);
+				} else {
+					applyMode(modeHidden.value || 'whitelist');
+				}
+			}
+
+			// Source picker embedded in the main search box: typing matches
+			// subreddits, picked subs become pills, and the suggestion dropdown
+			// (all archived subs, most posts first) shows only while the input is
+			// focused — Google-style. The remaining text is the title query.
+			var box = document.getElementById('archive_source_box');
+			var tagsEl = document.getElementById('archive_source_selected');
+			var input = document.getElementById('archive_q');
+			var dd = document.getElementById('archive_source_list');
+			var hidden = document.getElementById('archive_source_hidden');
+			if (box && tagsEl && input && dd && hidden) {
+				var allSubs = [];
+				try { allSubs = JSON.parse(document.getElementById('archive-subs-data').textContent) || []; } catch (e) {}
+				var noMatch = I18N.no_match;
+
+				function selected() {
+					return Array.prototype.map.call(
+						tagsEl.querySelectorAll('.sub-tag'),
+						function(t) { return t.dataset.sub; });
+				}
+				function sync() { hidden.value = selected().join('+'); }
+				function tagList() {
+					return Array.prototype.slice.call(tagsEl.querySelectorAll('.sub-tag'));
+				}
+				function removeTag(span) {
+					var all = tagList();
+					var idx = all.indexOf(span);
+					span.remove();
+					sync();
+					renderList();
+					// Move focus to a neighbouring pill, or back to the input.
+					var rest = tagList();
+					if (rest.length === 0) input.focus();
+					else (rest[idx - 1] || rest[0]).focus();
+				}
+				function makeTag(name) {
+					var span = document.createElement('span');
+					span.className = 'sub-tag';
+					span.dataset.sub = name;
+					span.tabIndex = 0;
+					span.appendChild(document.createTextNode('r/' + name));
+					var btn = document.createElement('button');
+					btn.type = 'button';
+					btn.className = 'sub-tag-remove';
+					btn.textContent = '×';
+					btn.tabIndex = -1;
+					btn.addEventListener('mousedown', function(e) { e.preventDefault(); });
+					btn.addEventListener('click', function(e) {
+						e.stopPropagation();
+						removeTag(span);
+					});
+					span.appendChild(btn);
+					// A focused pill can be navigated with arrows and deleted with
+					// Backspace/Delete — so any pill is reachable, not just the last.
+					span.addEventListener('keydown', function(e) {
+						var all = tagList();
+						var idx = all.indexOf(span);
+						if (e.key === 'Backspace' || e.key === 'Delete') {
+							e.preventDefault();
+							removeTag(span);
+						} else if (e.key === 'ArrowLeft') {
+							e.preventDefault();
+							if (idx > 0) all[idx - 1].focus();
+						} else if (e.key === 'ArrowRight') {
+							e.preventDefault();
+							if (idx < all.length - 1) all[idx + 1].focus();
+							else input.focus();
+						}
+					});
+					return span;
+				}
+				function addSub(name) {
+					if (selected().indexOf(name) !== -1) return;
+					tagsEl.appendChild(makeTag(name));
+					sync();
+					input.value = '';
+					renderList();
+					input.focus();
+				}
+				function renderList() {
+					var q = input.value.toLowerCase().trim();
+					var sel = selected();
+					var rows = allSubs.filter(function(s) {
+						return sel.indexOf(s.name) === -1 &&
+							(!q || s.name.toLowerCase().indexOf(q) !== -1);
+					});
+					if (rows.length === 0) {
+						dd.innerHTML = '<div class="archive-source-empty"></div>';
+						dd.firstChild.textContent = noMatch;
+						return;
+					}
+					dd.innerHTML = '';
+					rows.forEach(function(s) {
+						var opt = document.createElement('div');
+						opt.className = 'archive-source-option';
+						var nm = document.createElement('span');
+						nm.textContent = 'r/' + s.name;
+						opt.appendChild(nm);
+						if (s.posts > 0) {
+							var cnt = document.createElement('span');
+							cnt.className = 'archive-source-count';
+							cnt.textContent = s.posts;
+							opt.appendChild(cnt);
+						}
+						opt.addEventListener('mousedown', function(e) { e.preventDefault(); });
+						opt.addEventListener('click', function() { addSub(s.name); });
+						dd.appendChild(opt);
+					});
+				}
+
+				// Rebuild server-rendered pills so their remove buttons work.
+				(function() {
+					var names = selected();
+					tagsEl.innerHTML = '';
+					names.forEach(function(n) { tagsEl.appendChild(makeTag(n)); });
+				})();
+
+				input.addEventListener('input', renderList);
+				// Backspace with the caret at the very start of the query moves
+				// focus onto the last pill; from there arrows navigate and
+				// Backspace deletes the chosen pill.
+				input.addEventListener('keydown', function(e) {
+					if (e.key !== 'Backspace') return;
+					if (input.selectionStart !== 0 || input.selectionEnd !== 0) return;
+					var all = tagList();
+					if (all.length === 0) return;
+					e.preventDefault();
+					all[all.length - 1].focus();
+				});
+				input.addEventListener('focus', function() {
+					renderList();
+					box.classList.add('open');
+				});
+				input.addEventListener('blur', function() {
+					box.classList.remove('open');
+				});
+			}
+		})();
+		</script>
+		<form id="sort">
+			<div id="sort_options">
+				{{ sortBase := archiveSortBase(d.Search, d.SearchQS) }}
+				<a if d.Sort == "new" { class="selected" } href={ templ.SafeURL(sortBase + "new") }>{ T(ctx, "sort.new") }</a>
+				<a if d.Sort == "top" { class="selected" } href={ templ.SafeURL(sortBase + "top") }>{ T(ctx, "sort.top") }</a>
+				<a if d.Sort == "all" { class="selected" } href={ templ.SafeURL(sortBase + "all") }>{ T(ctx, "archive_hub.sort_all") }</a>
+			</div>
+		</form>
+		if d.Search {
+			@archiveSearchResults(d)
+		} else {
+			<h1>
+				if d.Sort == "new" {
+					{ T(ctx, "archive_hub.title_new") }
+				} else if d.Sort == "top" {
+					{ T(ctx, "archive_hub.title_top") }
+				} else {
+					{ T(ctx, "archive_hub.title_all", len(d.Subs)) }
+				}
+				if d.Sort == "new" || d.Sort == "top" {
+					<small class="archive-hint">{ T(ctx, "archive_hub.hint", d.MinPosts) }</small>
+				}
+			</h1>
+			if len(d.Subs) == 0 {
+				<p class="archive-empty">
+					if d.Sort != "all" {
+						{ T(ctx, "archive_hub.empty_min", d.MinPosts) }
+					} else {
+						{ T(ctx, "archive_hub.empty") }
+					}
+				</p>
+			} else if d.Sort == "all" {
+				<div id="archive-alpha-groups">
+					for _, g := range d.AlphaGroups {
+						<section class="archive-alpha-group" id={ "archive-letter-" + g.Letter }>
+							<h2 class="archive-alpha-letter">{ g.Letter }</h2>
+							<div class="archive-sub-list">
+								for _, e := range g.Subs {
+									@archiveSubCard(e)
+								}
+							</div>
+						</section>
+					}
+				</div>
+			} else {
+				<div id="archive-sub-list">
+					for _, e := range d.Subs {
+						@archiveSubCard(e)
+					}
+				</div>
+			}
+		}
+	</div>
+}
+
+// archiveSearchResults renders the local-search result list with pagination.
+templ archiveSearchResults(d ArchiveHubPageData) {
+	<div id="archive-search-results">
+		<h1>{ T(ctx, "archive_search.results_title", d.SearchTotal) }</h1>
+		if len(d.SearchPosts) == 0 {
+			<p class="archive-empty">{ T(ctx, "archive_search.no_results") }</p>
+		} else {
+			<div id="posts">
+				for _, p := range d.SearchPosts {
+					<hr class="sep"/>
+					@postInList(p, d.Prefs, false)
+				}
+			</div>
+			if d.Prefs.UseHLS == "on" {
+				<script src="/hls.min.js"></script>
+				<script src="/playHLSVideo.js"></script>
+			}
+			<footer>
+				if d.SearchPage > 1 {
+					<a href={ templ.SafeURL("/archive?" + d.SearchQS + "&sort=" + d.Sort + "&page=" + strconv.Itoa(d.SearchPage-1)) } accesskey="P">{ T(ctx, "nav.prev") }</a>
+				}
+				if d.SearchPage < d.SearchPages {
+					<a href={ templ.SafeURL("/archive?" + d.SearchQS + "&sort=" + d.Sort + "&page=" + strconv.Itoa(d.SearchPage+1)) } accesskey="N">{ T(ctx, "nav.next") }</a>
+				}
+			</footer>
+		}
+	</div>
+}
+
+templ archiveSubCard(e ArchiveHubEntry) {
+	<a class="archive-sub-card" href={ templ.SafeURL("/archive/r/" + e.Name) } title={ archiveSubCardTitle(ctx, e) }>
+		<div class="archive-sub-icon">
+			if e.IconURL != "" {
+				<img src={ "/proxy/media?url=" + e.IconURL } alt={ "r/" + e.Name } width="40" height="40" loading="lazy"/>
+			} else {
+				<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10h.01"></path><path d="M15 10h.01"></path><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"></path></svg>
+			}
+		</div>
+		<div class="archive-sub-info">
+			<span class="archive-sub-name">
+				if e.Dead {
+					<span class="dead" title={ T(ctx, "archive_hub.dead_title") } aria-label={ T(ctx, "archive_hub.banned") }>🚫</span>
+				}
+				<span class="archive-sub-name-text">r/{ e.Name }</span>
+				if e.NSFW {
+					<small class="nsfw">{ T(ctx, "flag.nsfw") }</small>
+				}
+			</span>
+			<span class="archive-sub-count">{ T(ctx, "archive_hub.posts", e.PostCount) }</span>
+		</div>
+	</a>
+}

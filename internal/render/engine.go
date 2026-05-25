@@ -37,13 +37,11 @@ var sharedTemplates = []string{
 	"templates/partials.html",
 }
 
-// pageTemplates maps a page name to its template file. error/subreddit/post/
-// search/user/archive/fuckreddit have been ported to templ; only settings and
-// archive_hub remain on html/template.
-var pageTemplates = map[string]string{
-	"settings.html":    "templates/settings.html",
-	"archive_hub.html": "templates/archive_hub.html",
-}
+// pageTemplates maps a page name to its template file. Every page has now been
+// ported to templ; the map is empty and the html/template scaffolding below
+// (pages/pageSet/renderPage, base.html, partials.html) is retained pending a
+// separate decommission pass.
+var pageTemplates = map[string]string{}
 
 func New(cfg config.RenderConfig) (*Engine, error) {
 	locales, err := loadLocales()
@@ -374,7 +372,7 @@ func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
 		data.BrandName = e.cfg.BrandName
 	}
 	data.SearchPosts, _ = filterNSFW(data.SearchPosts, data.Prefs)
-	return e.renderPage(w, data.Prefs.Lang, "archive_hub.html", data)
+	return archiveHubPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
 func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
@@ -393,7 +391,7 @@ func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
-	return e.renderPage(w, data.Prefs.Lang, "settings.html", data)
+	return settingsPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
 type PrefetchStatusView struct {
