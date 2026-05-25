@@ -126,8 +126,30 @@
   // Kick off playback for videos already on-screen at first load.
   updatePlayback();
 
+  // Coalesce mutation bursts: many DOM changes in one frame (infinite-scroll
+  // appends, hydration) collapse into a single rescan on the next frame.
+  var observeScheduled = false;
+  function scheduleObserve() {
+    if (observeScheduled) return;
+    observeScheduled = true;
+    window.requestAnimationFrame(function () {
+      observeScheduled = false;
+      observeVideos();
+    });
+  }
+
   if (window.MutationObserver) {
-    new MutationObserver(function () { observeVideos(); })
-      .observe(document.body, { childList: true, subtree: true, attributes: true });
+    // attributeFilter, not a blanket attributes:true — the latter fires this
+    // callback on every attribute change anywhere in the document (styles,
+    // classes, lazy-load src swaps), which scans the whole tree each time and
+    // freezes the page as it grows. We only need to notice videos that gain
+    // the data-viewport-autoplay marker; node insertions are caught by
+    // childList. The full-document rescan is also debounced to one per frame.
+    new MutationObserver(scheduleObserve)
+      .observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributeFilter: ["data-viewport-autoplay"],
+      });
   }
 })();

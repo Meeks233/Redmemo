@@ -192,8 +192,20 @@
     function init() {
         scan();
         // Infinite scroll appends posts after load — watch them as they arrive.
+        // Coalesce mutation bursts into a single rescan per frame: appending a
+        // notice (showPending) is itself a childList mutation, and on a large
+        // infinitely-scrolled page a per-mutation full-document scan freezes it.
         if (window.MutationObserver) {
-            new MutationObserver(scan).observe(document.body, {
+            var scheduled = false;
+            function scheduleScan() {
+                if (scheduled) return;
+                scheduled = true;
+                window.requestAnimationFrame(function () {
+                    scheduled = false;
+                    scan();
+                });
+            }
+            new MutationObserver(scheduleScan).observe(document.body, {
                 childList: true,
                 subtree: true,
             });

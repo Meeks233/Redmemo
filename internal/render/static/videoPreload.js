@@ -21,6 +21,18 @@
 
   observeVideos();
 
-  var mo = window.MutationObserver && new MutationObserver(function () { observeVideos(); });
+  // Coalesce mutation bursts into one rescan per frame so a growing,
+  // infinitely-scrolled page doesn't run a full-document query per mutation.
+  var scheduled = false;
+  function scheduleObserve() {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(function () {
+      scheduled = false;
+      observeVideos();
+    });
+  }
+
+  var mo = window.MutationObserver && new MutationObserver(scheduleObserve);
   if (mo) mo.observe(document.body, { childList: true, subtree: true });
 })();

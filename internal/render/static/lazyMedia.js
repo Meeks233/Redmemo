@@ -67,6 +67,18 @@
   observePosts();
 
   // Infinite scroll appends new posts after load — observe them as they arrive.
-  var mo = window.MutationObserver && new MutationObserver(function () { observePosts(); });
+  // Coalesce mutation bursts into one rescan per frame so a growing page
+  // doesn't run a full-document query on every individual DOM mutation.
+  var scheduled = false;
+  function scheduleObserve() {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(function () {
+      scheduled = false;
+      observePosts();
+    });
+  }
+
+  var mo = window.MutationObserver && new MutationObserver(scheduleObserve);
   if (mo) mo.observe(document.body, { childList: true, subtree: true });
 })();
