@@ -7,6 +7,7 @@ services:
       - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:-redmemo_dev}@postgres:5432/redmemo?sslmode=disable
       - REDMEMO_REDIS_ADDR=redis:6379
       - REDMEMO_LEGACY_SYNC=false
+      - REDMEMO_SERVER_SECRET=${SERVER_SECRET:-redmemo}
     volumes:
       - ./config.yaml:/etc/redmemo/config.yaml:ro
       - media_data:/data/media

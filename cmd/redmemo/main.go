@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,8 +30,19 @@ import (
 
 func main() {
 	configPath := "config.yaml"
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
+	resetTOTP := false
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--reset-totp", "-reset-totp":
+			resetTOTP = true
+		case "-h", "--help":
+			log.Printf("usage: redmemo [config.yaml] [--reset-totp]")
+			return
+		default:
+			if !strings.HasPrefix(arg, "-") {
+				configPath = arg
+			}
+		}
 	}
 
 	// 1. Load config
@@ -65,6 +77,26 @@ func main() {
 	subStore := store.NewSubredditStore(db)
 	subIconStore := store.NewSubIconStore(db)
 	settingsStore := store.NewSettingsStore(db)
+	totpStore := store.NewTOTPStore(db)
+
+	// --reset-totp: one-shot administrative wipe of the enrolled TOTP secret.
+	// The next browser visit re-prompts for the server secret and re-renders
+	// the (new) QR. Exits immediately so a misconfigured cron / sysadmin
+	// retry never accidentally boots the server in a half-reset state.
+	if resetTOTP {
+		if err := totpStore.Reset(); err != nil {
+			log.Fatalf("reset-totp: %v", err)
+		}
+		log.Println("reset-totp: cleared. Next /settings visit will re-enroll.")
+		return
+	}
+
+	// Server-secret gate. Without it the settings UI is unreachable, so we
+	// refuse to listen at all rather than silently expose an open endpoint.
+	if strings.TrimSpace(cfg.Auth.ServerSecret) == "" {
+		log.Fatalf("auth: REDMEMO_SERVER_SECRET (or auth.server_secret) is required; refusing to start")
+	}
+	authMgr := handler.NewAuthManager(cfg.Auth.ServerSecret, totpStore)
 
 	// 5. Rebuild site_settings on every startup
 	//    Priority: env_override > legacy_sync > existing KV > default
@@ -186,7 +218,7 @@ func main() {
 		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
 		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, cfg,
-	)
+	).WithAuth(authMgr)
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,

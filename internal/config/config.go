@@ -13,6 +13,7 @@ import (
 
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
+	Auth      AuthConfig      `yaml:"auth"`
 	Legacy    LegacyConfig    `yaml:"legacy"`
 	Postgres  PostgresConfig  `yaml:"postgres"`
 	Redis     RedisConfig     `yaml:"redis"`
@@ -32,6 +33,14 @@ type HRLimitConfig struct {
 	L2Threshold int           `yaml:"l2_threshold"`
 	L3Window    time.Duration `yaml:"l3_window"`
 	L3Threshold int           `yaml:"l3_threshold"`
+}
+
+// AuthConfig gates the settings UI behind TOTP. ServerSecret is the
+// pre-shared secret required before TOTP enrollment or re-enrollment is
+// allowed; it MUST be supplied via REDMEMO_SERVER_SECRET — startup refuses
+// to launch the HTTP server without it.
+type AuthConfig struct {
+	ServerSecret string `yaml:"server_secret"`
 }
 
 type ServerConfig struct {
@@ -284,6 +293,7 @@ func applyEnvOverrides(cfg *Config) {
 		"REDMEMO_MEDIA_ROOT_PATH":   &cfg.Media.RootPath,
 		"REDMEMO_RENDER_BRAND_NAME": &cfg.Render.BrandName,
 		"REDMEMO_LEGACY_INSTANCE":   &cfg.Legacy.Instance,
+		"REDMEMO_SERVER_SECRET":     &cfg.Auth.ServerSecret,
 	}
 
 	for env, ptr := range envMap {

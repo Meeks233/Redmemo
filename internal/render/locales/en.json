@@ -17,7 +17,7 @@
   "modal.leave_cancel": "No, go back",
   "modal.leave_confirm": "Yes, take me to Reddit",
 
-  "search.placeholder": "Search · try sub:golang+rust · r:nsfw · u>100 · type:video",
+  "search.placeholder": "Search · try sub:linux · r:sfw · u>100 · type:video",
   "search.hint": "Constraints: sub:a+b (only these) · sub:-a-b (exclude) · r:nsfw · u>100 · c>10 · a:user · t:video|gif|image · after:YYYY-MM-DD",
   "search.restrict_title": "Restrict search to this subreddit",
   "search.in": "in %s",
@@ -286,6 +286,9 @@
   "fr.hr_l2": "HR rate limit L2 triggered: too many upstream requests within the past 30 seconds.",
   "fr.hr_l3": "HR rate limit L3 triggered: too many upstream requests within the past 5 minutes.",
   "fr.hr_redis_down": "HR rate-limit store (Redis) is unreachable: blocking upstream traffic and retrying with backoff until it recovers.",
+  "fr.totp_replay": "Warning — your TOTP secret may have been compromised. You are the second person to submit this correct code within the same 30-second window. The token was NOT issued. Rotate the secret immediately (redmemo --reset-totp).",
+  "fr.auth_locked": "Three wrong TOTP codes — this round is locked until the next 30-second window. Wait for your authenticator to roll over and try again.",
+  "fr.unsafe_env": "You declined to confirm the environment is safe. The /settings gate will not proceed until you re-enter from a trusted screen.",
   "fr.reset_at": "Reset at:",
   "fr.access_directly": "Access Reddit directly",
   "fr.congrats": "Congrats — Reddit hasn't sanctioned you yet… or has it?"

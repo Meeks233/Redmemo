@@ -258,6 +258,9 @@ func frReasonTexts(ctx context.Context) map[string]string {
 		"hr_l2":             T(ctx, "fr.hr_l2"),
 		"hr_l3":             T(ctx, "fr.hr_l3"),
 		"hr_redis_down":     T(ctx, "fr.hr_redis_down"),
+		"totp_replay":       T(ctx, "fr.totp_replay"),
+		"auth_locked":       T(ctx, "fr.auth_locked"),
+		"unsafe_env":        T(ctx, "fr.unsafe_env"),
 	}
 }
 
@@ -265,6 +268,19 @@ func frReasonTexts(ctx context.Context) map[string]string {
 // code (matching the old template's silent fall-through).
 func frReasonText(ctx context.Context, reason string) string {
 	return frReasonTexts(ctx)[reason]
+}
+
+// frReasonIsStatic reports whether the reason is a one-shot auth-gate verdict
+// (no server-side countdown, no /api/status mirror). The /fuckreddit page must
+// suppress the countdown row AND the status poller for these — otherwise the
+// poller sees an empty current_reason on its first tick and yanks the user back
+// to "/", as if the degrade had cleared.
+func frReasonIsStatic(reason string) bool {
+	switch reason {
+	case "auth_locked", "unsafe_env", "totp_replay":
+		return true
+	}
+	return false
 }
 
 // --- archive hub helpers ---
@@ -338,6 +354,10 @@ func tokenClass(hasBudget bool) string {
 	}
 	return "token-empty"
 }
+
+// ShowThemeStylesheet is the exported counterpart to showThemeStylesheet, used
+// by the handler-side auth gate which renders outside the templ layout.
+func ShowThemeStylesheet(theme string) bool { return showThemeStylesheet(theme) }
 
 // showThemeStylesheet reports whether a per-theme stylesheet <link> should be
 // emitted. style.css already ships dark + tokyoNight (and "system" defers to the

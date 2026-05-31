@@ -45,6 +45,15 @@ type Handler struct {
 	spoofedClient tls_client.HttpClient
 	cfg           *config.Config
 	siteDefaults  map[string]string
+	auth          *AuthManager
+}
+
+// WithAuth wires the settings auth gate. Optional — when nil the gate is
+// skipped (tests / dev setups without a server secret) but
+// requireSettingsAuth will fail closed.
+func (h *Handler) WithAuth(a *AuthManager) *Handler {
+	h.auth = a
+	return h
 }
 
 func New(
@@ -152,9 +161,12 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /archive", h.handleArchiveHub)
 	mux.HandleFunc("GET /archive/r/{sub}", h.handleArchiveSub)
 
-	// Settings
-	mux.HandleFunc("GET /settings", h.handleSettings)
-	mux.HandleFunc("POST /settings", h.handleSettingsSave)
+	// Settings — TOTP-gated. The same /settings POST endpoint serves both
+	// auth submissions (when no valid ephemeral token is held) and the actual
+	// settings save (when one is). The gate routes between the two.
+	mux.HandleFunc("GET /settings", h.requireSettingsAuth(h.handleSettings))
+	mux.HandleFunc("POST /settings", h.requireSettingsAuth(h.handleSettingsSave))
+	mux.HandleFunc("GET /settings/qr", h.handleAuthQR)
 
 	// Wiki
 	mux.HandleFunc("GET /r/{sub}/wiki/{page...}", h.handleWiki)

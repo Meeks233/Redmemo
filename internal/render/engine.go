@@ -560,6 +560,11 @@ func autoThemeStyle(day, night string) string {
 	return `<style type="text/css">` + autoThemeCSS(day, night) + `</style>`
 }
 
+// AutoThemeStyle exposes autoThemeStyle to packages outside render (e.g. the
+// handler-side auth gate, which assembles its own HTML and still needs the same
+// auto-palette injection used by the main layout).
+func AutoThemeStyle(day, night string) string { return autoThemeStyle(day, night) }
+
 func (e *Engine) StaticHandler() http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	fs := http.FileServerFS(sub)

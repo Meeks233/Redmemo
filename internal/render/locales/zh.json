@@ -17,7 +17,7 @@
   "modal.leave_cancel": "不,返回",
   "modal.leave_confirm": "是,带我去 Reddit",
 
-  "search.placeholder": "搜索 · 试试 sub:golang+rust · r:nsfw · u>100 · type:video",
+  "search.placeholder": "搜索 · 试试 sub:linux · r:sfw · u>100 · type:video",
   "search.hint": "可用约束：sub:甲+乙（仅这些）· sub:-甲-乙（排除）· r:nsfw · u>100 · c>10 · a:用户 · t:video|gif|image · after:YYYY-MM-DD",
   "search.restrict_title": "仅在此 subreddit 内搜索",
   "search.in": "在 %s 内",
@@ -286,6 +286,9 @@
   "fr.hr_l2": "HR 速率限制 L2 触发:过去 30 秒内上游请求过多。",
   "fr.hr_l3": "HR 速率限制 L3 触发:过去 5 分钟内上游请求过多。",
   "fr.hr_redis_down": "HR 速率限制存储(Redis)不可达:已阻断上游流量,并以指数退避重试,直至其恢复。",
+  "fr.totp_replay": "警告 — TOTP 密钥可能已被泄露!你是 30 秒内第二个输入正确代码的人。本次登录令牌未下发,请立即用 redmemo --reset-totp 轮换密钥。",
+  "fr.auth_locked": "TOTP 已连续输错三次 — 本轮已锁定,需等待下一个 30 秒窗口。等待你的认证器刷新后重试。",
+  "fr.unsafe_env": "你未确认环境安全。/settings 入口将拒绝继续,直到你在受信任的屏幕重新进入。",
   "fr.reset_at": "重置时间:",
   "fr.access_directly": "直接访问 Reddit",
   "fr.congrats": "恭喜 — Reddit 还没制裁你……还是已经制裁了?"

@@ -34,16 +34,18 @@ templ fuckRedditContent(d FuckRedditPageData) {
 						</svg>
 					</div>
 					<p id="fr-reason-text">{ frReasonText(ctx, d.Reason) }</p>
-					<p>
-						{ T(ctx, "fr.reset_at") }
-						<span id="fr-countdown" data-from={ d.From } if d.Freeze { data-freeze="1" }>
-							if d.Freeze {
-								99:99
-							} else {
-								--:--
-							}
-						</span>
-					</p>
+					if !frReasonIsStatic(d.Reason) {
+						<p>
+							{ T(ctx, "fr.reset_at") }
+							<span id="fr-countdown" data-from={ d.From } if d.Freeze { data-freeze="1" }>
+								if d.Freeze {
+									99:99
+								} else {
+									--:--
+								}
+							</span>
+						</p>
+					}
 					if d.From != "" {
 						<div class="fr-actions">
 							<a class="fr-go-reddit" href={ templ.SafeURL("https://www.reddit.com" + d.From) } target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm={ T(ctx, "fr.access_directly") }>
@@ -69,7 +71,7 @@ templ fuckRedditContent(d FuckRedditPageData) {
 		<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. -->
 		@visitRedditConfirmation(d.From)
 	}
-	if d.Reason != "" {
+	if d.Reason != "" && !frReasonIsStatic(d.Reason) {
 		@templ.JSONScript("fr-reason-texts", frReasonTexts(ctx))
 		<script>
 			// /fuckreddit countdown — server is the sole source of truth. Poll

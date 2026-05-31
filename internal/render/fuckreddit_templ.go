@@ -137,7 +137,12 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</p><p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !frReasonIsStatic(d.Reason) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -191,6 +196,7 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span></p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
+			}
 			}
 			if d.From != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"fr-actions\"><a class=\"fr-go-reddit\" href=\"")
@@ -283,7 +289,7 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if d.Reason != "" {
+		if d.Reason != "" && !frReasonIsStatic(d.Reason) {
 			templ_7745c5c3_Err = templ.JSONScript("fr-reason-texts", frReasonTexts(ctx)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
