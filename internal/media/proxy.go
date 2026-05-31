@@ -189,6 +189,51 @@ func (p *Proxy) IsCached(originalURL string) bool {
 	return p.cachedMedia(originalURL) != nil
 }
 
+// IsResident reports whether originalURL's media is recorded as physically
+// present in the cache — i.e. its dynamic existence score is not the -1
+// "absent" sentinel (migration v22). Unlike IsCached it trusts the score
+// column (one indexed read) instead of stat()-ing the disk, so the /random
+// media path can filter a whole candidate pool without a syscall per entry and
+// never redirect to a post whose bytes have been evicted/deleted. The score↔
+// file_path invariant (score = -1 <=> file_path IS NULL) keeps this in step
+// with the disk.
+func (p *Proxy) IsResident(originalURL string) bool {
+	key := originalURL
+	if isMuxableVRedditURL(originalURL) {
+		key = muxCacheKey(originalURL)
+	}
+	m, err := p.mediaStore.Resolve(key)
+	if err != nil || m == nil {
+		return false
+	}
+	if isNonMediaMIME(m.MIMEType) {
+		return false // poisoned HTML error page cached as media; not real bytes
+	}
+	return m.Score >= 0
+}
+
+// MediaScore returns the eviction score of the resident media for originalURL
+// and whether that media is genuinely cached. It mirrors IsResident's key
+// resolution (muxed video remapping, poisoned-MIME rejection, score↔file_path
+// invariant) but hands back the numeric score so the search layer can apply a
+// `score:` threshold. resident is false — and the score meaningless — for any
+// URL with no cache row, an evicted row (score < 0), or a poisoned row; callers
+// treat a non-resident asset as not matching any score: constraint.
+func (p *Proxy) MediaScore(originalURL string) (score float64, resident bool) {
+	key := originalURL
+	if isMuxableVRedditURL(originalURL) {
+		key = muxCacheKey(originalURL)
+	}
+	m, err := p.mediaStore.Resolve(key)
+	if err != nil || m == nil {
+		return -1, false
+	}
+	if isNonMediaMIME(m.MIMEType) {
+		return -1, false
+	}
+	return m.Score, m.Score >= 0
+}
+
 // IsFetching reports whether a download for originalURL is in flight right now
 // — typically an on-demand (foreground) fetch. The prefetch L2 layer uses it
 // to freeze its own duplicate task and let the on-demand fetch win.
@@ -280,7 +325,7 @@ func (p *Proxy) MediaStatus(originalURL string) string {
 // loaderSVG is an animated spinner served in place of an empty/broken image
 // when the upstream fetch is blocked, rate-limited, or otherwise unavailable.
 // SMIL animation runs even inside <img> contexts where scripts can't.
-const loaderSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-loader-icon lucide-loader"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/><animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></svg>`
+const loaderSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-loader-circle-icon lucide-loader-circle"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></svg>`
 
 func serveLoader(w http.ResponseWriter, status int) {
 	w.Header().Set("Content-Type", "image/svg+xml")
@@ -470,6 +515,10 @@ func (p *Proxy) getRangeWith(ctx context.Context, url string, start int64, extra
 // header (so callers can read Content-Type / total size) plus the bytes
 // written. A non-2xx first response returns its status with a non-nil error.
 func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, extra fhttp.Header, w io.Writer) (status int, hdr fhttp.Header, written int64, err error) {
+	// Throttle every CDN byte through the global media bandwidth bucket —
+	// see bwlimit.go. Wrapping at this single chokepoint covers Download,
+	// reverseProxy, and the mux audio/video probes uniformly.
+	w = newLimitedWriter(ctx, w)
 	offset := start
 	total := int64(-1)
 	for {

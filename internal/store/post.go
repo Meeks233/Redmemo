@@ -185,7 +185,13 @@ func (s *PostStore) ListNotorious(limit int) ([]*StoredPost, error) {
 	return scanPosts(rows)
 }
 
-func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, mode string, excludeNSFW bool) ([]*StoredPost, error) {
+// ListHomepage serves the curated homepage feed. The sort keyword drives the
+// time-window/order baseline (new/new_archive/top/notorious); the opts carry the
+// homepage filter, which is now the FULL unified search grammar — sub: scope,
+// author, media type, score/comments thresholds, date bounds and NSFW rating —
+// applied through the same WHERE builder as the /archive local search so the two
+// honour identical constraint semantics. opts.Limit/opts.Offset page the feed.
+func (s *PostStore) ListHomepage(sort string, opts ArchiveSearchOpts) ([]*StoredPost, error) {
 	var baseWhere, orderBy string
 	switch sort {
 	case "new_archive":
@@ -202,31 +208,14 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 		orderBy = "created_utc DESC"
 	}
 
-	where := baseWhere
-	var args []any
-	argN := 1
+	extra, args, argN := archiveFilterClauses(opts, 1)
+	where := baseWhere + extra
 
-	if len(subs) > 0 && mode == "whitelist" {
-		where += fmt.Sprintf(" AND subreddit = ANY($%d)", argN)
-		args = append(args, pq.Array(subs))
-		argN++
-	} else if len(subs) > 0 && mode == "blacklist" {
-		where += fmt.Sprintf(" AND subreddit != ALL($%d)", argN)
-		args = append(args, pq.Array(subs))
-		argN++
-	}
-
-	if excludeNSFW {
-		where += nsfwExcludeSQL
-	}
-
-	args = append(args, limit)
-	limitN := argN
-	argN++
-	args = append(args, offset)
+	limitN, offsetN := argN, argN+1
+	args = append(args, opts.Limit, opts.Offset)
 	q := fmt.Sprintf(`SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
 		       author, score, created_utc, first_seen, last_updated, source, media_done
-		FROM posts WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d`, where, orderBy, limitN, argN)
+		FROM posts WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d`, where, orderBy, limitN, offsetN)
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -236,78 +225,132 @@ func (s *PostStore) ListHomepage(sort string, limit, offset int, subs []string, 
 	return scanPosts(rows)
 }
 
-// RandomPostOpts filters the candidate pool for PostStore.Random.
-// All fields are optional; zero/empty values are skipped.
-type RandomPostOpts struct {
-	Subs      []string   // case-insensitive whitelist; empty = all subs
-	MinScore  *int       // post.score >= MinScore
-	After     *time.Time // created_utc >= After
-	Before    *time.Time // created_utc <= Before
-	NSFW      string     // "" | "include" (default) | "exclude" | "only"
-	MediaOnly bool       // only image/gallery/gif posts with cached media
+// GoldenRatio is the fractional golden ratio (√5−1)/2 — the additive low-
+// discrepancy step (x → frac(x + φ)) the random walk uses to rotate each new
+// round's origin, applied alongside the on-wrap Reshuffle. Successive rounds of
+// the same filter subset therefore enter a freshly-redrawn shuffle_key
+// permutation at maximally-spread points (a Weyl/Kronecker equidistributed
+// sequence), so consecutive full sweeps are maximally decorrelated.
+const GoldenRatio = 0.6180339887498949
+
+// RandomWalk returns up to n posts matching opts (plus media_done when mediaOnly)
+// in ascending shuffle_key order, traversing the circular arc that begins just
+// after `cursor` and ends back at `origin`. shuffle_key is a fixed random
+// permutation of the rows in [0,1); advancing a monotonic cursor across it is
+// sampling WITHOUT replacement — a full arc visits every matching row exactly
+// once — and each page is a plain btree range scan (WHERE shuffle_key > cursor
+// ORDER BY shuffle_key LIMIT n), O(log N), not the O(N log N) full sort that
+// ORDER BY RANDOM() pays.
+//
+// The arc is walked as up to two linear segments: the upper segment (keys above
+// cursor, climbing toward 1.0) and, once it is exhausted, the lower segment
+// ([0, origin], the part below the round's origin that wraps around past 1.0).
+// It returns the consumed posts, the new cursor (the largest key handed out) and
+// roundDone=true once the arc back to origin is spent — the caller then opens a
+// fresh round by rotating origin via GoldenRatio.
+//
+// When mediaOnly is true it additionally restricts to posts whose media has been
+// fetched (media_done = true); the /random media path uses it to walk a small
+// pool and redirect to the first entry whose bytes are genuinely on disk (see
+// handleRandom), honouring the endpoint's "never contacts Reddit" contract.
+func (s *PostStore) RandomWalk(opts ArchiveSearchOpts, mediaOnly bool, origin, cursor float64, n int) (posts []*StoredPost, newCursor float64, roundDone bool, err error) {
+	if n < 1 {
+		n = 1
+	}
+	newCursor = cursor
+
+	// Phase A: cursor sits at/above origin → we are still on the upper segment,
+	// climbing from cursor toward the top of the permutation.
+	if cursor >= origin {
+		upper, lastKey, err := s.randomWalkPage(opts, mediaOnly, cursor, false, 0, n)
+		if err != nil {
+			return nil, cursor, false, err
+		}
+		posts = upper
+		if len(upper) > 0 {
+			newCursor = lastKey
+		}
+		if len(posts) >= n {
+			return posts, newCursor, false, nil
+		}
+		// Upper segment exhausted. With origin == 0 there is nothing below it, so
+		// the whole permutation was the upper arc → the round is complete.
+		if origin <= 0 {
+			return posts, newCursor, true, nil
+		}
+		// Spill into the lower segment [0, origin] to top up the page.
+		need := n - len(posts)
+		lower, lowKey, err := s.randomWalkPage(opts, mediaOnly, -1, true, origin, need)
+		if err != nil {
+			return posts, newCursor, false, err
+		}
+		posts = append(posts, lower...)
+		if len(lower) > 0 {
+			newCursor = lowKey
+		}
+		// A short lower fill means the lower arc is spent too → round complete.
+		return posts, newCursor, len(lower) < need, nil
+	}
+
+	// Phase B: cursor already wrapped below origin → climb the lower segment up to
+	// origin, then the round closes.
+	lower, lastKey, err := s.randomWalkPage(opts, mediaOnly, cursor, true, origin, n)
+	if err != nil {
+		return nil, cursor, false, err
+	}
+	posts = lower
+	if len(lower) > 0 {
+		newCursor = lastKey
+	}
+	return posts, newCursor, len(lower) < n, nil
 }
 
-// Random returns a single random post matching the given filters, or
-// (nil, nil) if no post matches.
-func (s *PostStore) Random(opts RandomPostOpts) (*StoredPost, error) {
-	where := "1=1"
-	var args []any
-	argN := 1
+// Reshuffle redraws the entire shuffle_key permutation in one statement
+// (UPDATE posts SET shuffle_key = random()). The random walk calls it on every
+// round wrap-around so that a fresh sweep is a genuinely new permutation, not a
+// replay of the previous round's order — combined with the golden-ratio origin
+// rotation this maximises inter-round decorrelation. It is the one O(N) write in
+// the design; it fires only at the end of a full no-replacement sweep, never per
+// page.
+func (s *PostStore) Reshuffle() error {
+	if _, err := s.db.Exec(`UPDATE posts SET shuffle_key = random()`); err != nil {
+		return fmt.Errorf("reshuffle posts: %w", err)
+	}
+	return nil
+}
 
-	if len(opts.Subs) > 0 {
-		lower := make([]string, len(opts.Subs))
-		for i, sub := range opts.Subs {
-			lower[i] = strings.ToLower(sub)
-		}
-		where += fmt.Sprintf(" AND LOWER(subreddit) = ANY($%d)", argN)
-		args = append(args, pq.Array(lower))
+// randomWalkPage runs one keyset page of the random walk: the opts filter, plus
+// shuffle_key > low and (when hasHigh) shuffle_key <= high, ordered ascending and
+// capped at n. It returns the page and the largest shuffle_key it handed out.
+func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, mediaOnly bool, low float64, hasHigh bool, high float64, n int) ([]*StoredPost, float64, error) {
+	extra, args, argN := archiveFilterClauses(opts, 1)
+	where := "1=1" + extra
+	if mediaOnly {
+		where += " AND media_done = true"
+	}
+	where += fmt.Sprintf(" AND shuffle_key > $%d", argN)
+	args = append(args, low)
+	argN++
+	if hasHigh {
+		where += fmt.Sprintf(" AND shuffle_key <= $%d", argN)
+		args = append(args, high)
 		argN++
 	}
-	if opts.MinScore != nil {
-		where += fmt.Sprintf(" AND score >= $%d", argN)
-		args = append(args, *opts.MinScore)
-		argN++
-	}
-	if opts.After != nil {
-		where += fmt.Sprintf(" AND created_utc >= $%d", argN)
-		args = append(args, *opts.After)
-		argN++
-	}
-	if opts.Before != nil {
-		where += fmt.Sprintf(" AND created_utc <= $%d", argN)
-		args = append(args, *opts.Before)
-		argN++
-	}
-	switch opts.NSFW {
-	case "exclude":
-		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = false"
-	case "only":
-		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = true"
-	}
-	if opts.MediaOnly {
-		where += " AND media_done = true AND (json_data->>'PostType') IN ('image','gallery','gif')"
-	}
-
 	q := fmt.Sprintf(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source, media_done
+		       author, score, created_utc, first_seen, last_updated, source, media_done, shuffle_key
 		FROM posts
 		WHERE %s
-		ORDER BY RANDOM()
-		LIMIT 1`, where)
+		ORDER BY shuffle_key ASC
+		LIMIT $%d`, where, argN)
+	args = append(args, n)
 
-	p := &StoredPost{}
-	err := s.db.QueryRow(q, args...).Scan(
-		&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
-		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("random post: %w", err)
+		return nil, 0, fmt.Errorf("random walk page: %w", err)
 	}
-	return p, nil
+	defer rows.Close()
+	return scanPostsWithKey(rows)
 }
 
 func (s *PostStore) Search(query string, limit int, excludeNSFW bool) ([]*StoredPost, error) {
@@ -331,80 +374,137 @@ func (s *PostStore) Search(query string, limit int, excludeNSFW bool) ([]*Stored
 }
 
 // ArchiveSearchOpts filters the local posts archive for the /archive page's
-// purely-local search widget. All fields are optional; zero/empty values are
-// skipped so an all-empty opts set matches every archived post.
+// purely-local search box. All fields are optional; zero/empty values are
+// skipped so an all-empty opts set matches every archived post. The fields are
+// populated from RedMemo's e621-style query syntax (see docs/reddit-search.md).
 type ArchiveSearchOpts struct {
-	Query    string     // title ILIKE %query%
-	After    *time.Time // created_utc >= After
-	Before   *time.Time // created_utc <= Before
-	NSFW     string     // "" (any) | "nsfw" | "sfw"
-	Media    string     // "" (any) | "image" | "video"
-	Subs     []string   // case-insensitive subreddit filter; empty = any
-	SubsMode string     // "whitelist" (default) | "blacklist" — only used when Subs is set
-	Sort     string     // "new" (default, created_utc) | "top" (score) | "all" (first_seen)
-	Score    *int       // score threshold; nil = any
-	ScoreOp  string     // "gt" (default, score > Score) | "lt" (score < Score)
-	Limit    int
-	Offset   int
+	Query      string     // title ILIKE %query%
+	After      *time.Time // created_utc >= After
+	Before     *time.Time // created_utc <= Before
+	NSFW       string     // "" (any) | "nsfw" | "sfw"
+	Media      string     // "" (any) | "image" | "video" (is_gif=false) | "gif" (is_gif=true)
+	Author     string     // exact, case-insensitive author; empty = any
+	Flair      string     // exact, case-insensitive flair text; empty = any
+	WhiteSubs  []string   // case-insensitive whitelist; empty = any
+	BlackSubs  []string   // case-insensitive blacklist; empty = none excluded
+	Sort       string     // "new" (default, created_utc) | "top" (score) | "all" (first_seen)
+	Score      *int       // score threshold; nil = any
+	ScoreOp    string     // SQL comparison op: ">" "<" ">=" "<=" "="
+	Comments   *int       // comment-count threshold; nil = any
+	CommentsOp string     // SQL comparison op: ">" "<" ">=" "<=" "="
+	Limit      int
+	Offset     int
+}
+
+// safeSQLCmp whitelists a comparison operator so it can be interpolated into a
+// query safely; anything unexpected falls back to ">".
+func safeSQLCmp(op string) string {
+	switch op {
+	case ">", "<", ">=", "<=", "=":
+		return op
+	default:
+		return ">"
+	}
+}
+
+// archiveFilterClauses builds the shared " AND ..." WHERE fragment (and its bind
+// args) for every constraint expressible in ArchiveSearchOpts — title text, date
+// bounds, NSFW rating, media type, author, flair, score/comments thresholds and
+// the sub: include/exclude scope. startArg is the first positional placeholder index
+// to use; the returned argN is the next free index. Both ArchiveSearch (the
+// /archive local search) and ListHomepage (the homepage feed) compose this onto
+// their own baseline so the two honour identical filter semantics.
+func archiveFilterClauses(opts ArchiveSearchOpts, startArg int) (string, []any, int) {
+	var where strings.Builder
+	var args []any
+	argN := startArg
+
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		fmt.Fprintf(&where, " AND title ILIKE '%%' || $%d || '%%'", argN)
+		args = append(args, q)
+		argN++
+	}
+	if opts.After != nil {
+		fmt.Fprintf(&where, " AND created_utc >= $%d", argN)
+		args = append(args, *opts.After)
+		argN++
+	}
+	if opts.Before != nil {
+		fmt.Fprintf(&where, " AND created_utc <= $%d", argN)
+		args = append(args, *opts.Before)
+		argN++
+	}
+	switch opts.NSFW {
+	case "nsfw":
+		where.WriteString(" AND COALESCE((json_data->>'over_18')::boolean, false) = true")
+	case "sfw":
+		where.WriteString(nsfwExcludeSQL)
+	}
+	switch opts.Media {
+	case "image":
+		where.WriteString(" AND (json_data->>'PostType') IN ('image','gallery')")
+	case "video":
+		// Real videos: Reddit's is_gif=false, captured as PostType "video".
+		where.WriteString(" AND (json_data->>'PostType') = 'video'")
+	case "gif":
+		// GIF uploads: Reddit's is_gif=true, captured as PostType "gif".
+		where.WriteString(" AND (json_data->>'PostType') = 'gif'")
+	}
+	if opts.Author != "" {
+		fmt.Fprintf(&where, " AND LOWER(author) = LOWER($%d)", argN)
+		args = append(args, opts.Author)
+		argN++
+	}
+	if opts.Flair != "" {
+		// Flair text lives at json_data->'Flair'->>'Text'; match it exactly but
+		// case-insensitively, mirroring the upstream flair_name: operator.
+		fmt.Fprintf(&where, " AND LOWER(json_data->'Flair'->>'Text') = LOWER($%d)", argN)
+		args = append(args, opts.Flair)
+		argN++
+	}
+	if opts.Score != nil {
+		fmt.Fprintf(&where, " AND score %s $%d", safeSQLCmp(opts.ScoreOp), argN)
+		args = append(args, *opts.Score)
+		argN++
+	}
+	if opts.Comments != nil {
+		// Comments is stored as a [formatted, raw] string pair inside json_data;
+		// the raw value (index 1) is the plain integer. Guard the cast so a
+		// non-numeric value can't error the whole query.
+		fmt.Fprintf(&where,
+			" AND (json_data->'Comments'->>1) ~ '^[0-9]+$' AND (json_data->'Comments'->>1)::int %s $%d",
+			safeSQLCmp(opts.CommentsOp), argN)
+		args = append(args, *opts.Comments)
+		argN++
+	}
+	if len(opts.WhiteSubs) > 0 {
+		lower := make([]string, len(opts.WhiteSubs))
+		for i, sub := range opts.WhiteSubs {
+			lower[i] = strings.ToLower(sub)
+		}
+		fmt.Fprintf(&where, " AND LOWER(subreddit) = ANY($%d)", argN)
+		args = append(args, pq.Array(lower))
+		argN++
+	}
+	if len(opts.BlackSubs) > 0 {
+		lower := make([]string, len(opts.BlackSubs))
+		for i, sub := range opts.BlackSubs {
+			lower[i] = strings.ToLower(sub)
+		}
+		fmt.Fprintf(&where, " AND LOWER(subreddit) != ALL($%d)", argN)
+		args = append(args, pq.Array(lower))
+		argN++
+	}
+
+	return where.String(), args, argN
 }
 
 // ArchiveSearch runs a purely-local search over the posts archive. It never
 // touches Reddit; it only queries PostgreSQL. It returns the requested page of
 // posts (newest first) plus the total number of matches for pagination.
 func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64, error) {
-	where := "1=1"
-	var args []any
-	argN := 1
-
-	if q := strings.TrimSpace(opts.Query); q != "" {
-		where += fmt.Sprintf(" AND title ILIKE '%%' || $%d || '%%'", argN)
-		args = append(args, q)
-		argN++
-	}
-	if opts.After != nil {
-		where += fmt.Sprintf(" AND created_utc >= $%d", argN)
-		args = append(args, *opts.After)
-		argN++
-	}
-	if opts.Before != nil {
-		where += fmt.Sprintf(" AND created_utc <= $%d", argN)
-		args = append(args, *opts.Before)
-		argN++
-	}
-	switch opts.NSFW {
-	case "nsfw":
-		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = true"
-	case "sfw":
-		where += " AND COALESCE((json_data->>'over_18')::boolean, false) = false"
-	}
-	switch opts.Media {
-	case "image":
-		where += " AND (json_data->>'PostType') IN ('image','gallery')"
-	case "video":
-		where += " AND (json_data->>'PostType') IN ('video','gif')"
-	}
-	if opts.Score != nil {
-		op := ">"
-		if opts.ScoreOp == "lt" {
-			op = "<"
-		}
-		where += fmt.Sprintf(" AND score %s $%d", op, argN)
-		args = append(args, *opts.Score)
-		argN++
-	}
-	if len(opts.Subs) > 0 {
-		lower := make([]string, len(opts.Subs))
-		for i, sub := range opts.Subs {
-			lower[i] = strings.ToLower(sub)
-		}
-		if opts.SubsMode == "blacklist" {
-			where += fmt.Sprintf(" AND LOWER(subreddit) != ALL($%d)", argN)
-		} else {
-			where += fmt.Sprintf(" AND LOWER(subreddit) = ANY($%d)", argN)
-		}
-		args = append(args, pq.Array(lower))
-		argN++
-	}
+	extra, args, argN := archiveFilterClauses(opts, 1)
+	where := "1=1" + extra
 
 	var total int64
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM posts WHERE "+where, args...).Scan(&total); err != nil {
@@ -652,6 +752,27 @@ func (s *PostStore) SaveHTML(urlPath string, html []byte) error {
 		WHERE url_path = $1`, urlPath, htmlStr,
 	)
 	return err
+}
+
+// scanPostsWithKey scans rows that carry a trailing shuffle_key column and
+// returns the posts plus the largest shuffle_key seen. Because the random walk
+// orders ascending, that is simply the last row's key; 0 when the page is empty.
+func scanPostsWithKey(rows *sql.Rows) ([]*StoredPost, float64, error) {
+	var posts []*StoredPost
+	var lastKey float64
+	for rows.Next() {
+		p := &StoredPost{}
+		var key float64
+		if err := rows.Scan(
+			&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
+			&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone, &key,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan post with key: %w", err)
+		}
+		posts = append(posts, p)
+		lastKey = key
+	}
+	return posts, lastKey, rows.Err()
 }
 
 func scanPosts(rows *sql.Rows) ([]*StoredPost, error) {

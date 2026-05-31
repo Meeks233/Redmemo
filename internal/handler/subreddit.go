@@ -6,12 +6,12 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/searchquery"
 	"github.com/redmemo/redmemo/internal/store"
 )
 
@@ -88,19 +88,22 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var subs []string
-	mode := prefs.FrontPageSubsMode
-	if prefs.ShowAllSubs != "on" && prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
-		for _, s := range strings.Split(prefs.FrontPageSubs, "+") {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				subs = append(subs, s)
-			}
-		}
-	}
-
+	// The homepage filter IS the global unified search grammar: its stored value
+	// is parsed into the same archive query the /search and /archive boxes use, so
+	// the feed honours every constraint — sub: scope, author, media type,
+	// score/comments thresholds, date bounds and NSFW rating — not just subs. An
+	// empty filter (or "all") leaves opts zero, matching every archived post.
 	const limit = 5
-	stored, err := h.postStore.ListHomepage(sort, limit, offset, subs, mode, prefs.ShowNSFW != "on")
+	var opts store.ArchiveSearchOpts
+	if prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
+		opts = parsedToArchiveOpts(searchquery.Parse(prefs.FrontPageSubs))
+	}
+	if prefs.ShowNSFW != "on" {
+		opts.NSFW = "sfw"
+	}
+	opts.Limit = limit
+	opts.Offset = offset
+	stored, err := h.postStore.ListHomepage(sort, opts)
 	if err != nil {
 		log.Printf("handler: homepage db query (%s): %v", sort, err)
 	}

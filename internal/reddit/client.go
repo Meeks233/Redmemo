@@ -152,7 +152,7 @@ func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after s
 }
 
 // FetchSearch performs a search.
-func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after string, restrictSR bool, limit int) ([]Post, []Subreddit, string, error) {
+func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after string, limit int) ([]Post, []Subreddit, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
@@ -163,9 +163,6 @@ func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after str
 	var path string
 	if sub != "" {
 		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", sub, limit, eq)
-		if restrictSR {
-			path += "&restrict_sr=on"
-		}
 	} else {
 		path = fmt.Sprintf("/search.json?raw_json=1&include_over_18=on&limit=%d&q=%s", limit, eq)
 	}
@@ -246,6 +243,15 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 	transport.ApplyHeaderOrder(req)
 
 	resp, err := c.httpClient.Do(req)
+	// tls-client does not auto-retry idempotent GETs on stale keep-alive
+	// connections the way net/http does. NP listings fire every ~25 minutes;
+	// by then Reddit (or upstream NAT) has silently dropped the idle h2 conn,
+	// and the first reuse returns io.EOF / connection reset / broken pipe.
+	// One retry on these transport errors recovers the round without changing
+	// behavior for real failures (the second attempt opens a fresh conn).
+	if err != nil && isTransientTransportErr(err) {
+		resp, err = c.httpClient.Do(req)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("do request: %w", err)
 	}
@@ -310,6 +316,23 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 	}
 
 	return body, resp, nil
+}
+
+// isTransientTransportErr reports whether err looks like a dropped keep-alive
+// connection — safe to retry once for an idempotent GET. Matches against error
+// text because tls-client wraps the underlying net error opaquely.
+func isTransientTransportErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "EOF") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "unexpected EOF")
 }
 
 func checkAPIError(body []byte) error {

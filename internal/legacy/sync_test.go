@@ -50,7 +50,7 @@ func TestParseSettingsHTML_Checkboxes(t *testing.T) {
 <form>
   <input type="checkbox" name="show_nsfw" checked>
   <input type="checkbox" name="blur_nsfw">
-  <input name="use_hls" type="checkbox" checked>
+  <input name="autoplay_videos" type="checkbox" checked>
 </form>`
 
 	settings := parseSettingsHTML(html)
@@ -58,8 +58,8 @@ func TestParseSettingsHTML_Checkboxes(t *testing.T) {
 	if settings["show_nsfw"] != "on" {
 		t.Errorf("show_nsfw = %q, want %q", settings["show_nsfw"], "on")
 	}
-	if settings["use_hls"] != "on" {
-		t.Errorf("use_hls = %q, want %q", settings["use_hls"], "on")
+	if settings["autoplay_videos"] != "on" {
+		t.Errorf("autoplay_videos = %q, want %q", settings["autoplay_videos"], "on")
 	}
 	if settings["blur_nsfw"] != "" {
 		t.Errorf("blur_nsfw = %q, want empty (unchecked)", settings["blur_nsfw"])

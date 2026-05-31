@@ -137,14 +137,23 @@ func (s *Scheduler) fetchAndSaveIcon(ctx context.Context, sub string) {
 
 	label := "L4 r/" + sub + " icon fetch"
 	err := s.submit(ctx, label, false, func(ctx context.Context) {
-		if s.publicCli == nil {
-			fetchErr = fmt.Errorf("no public client available")
-			s.Events.Addf(LevelError, "L4", "r/%s: no public client for icon fetch", sub)
-			return
-		}
+		// Prefer the public endpoint to conserve session-token budget, but
+		// Reddit now returns 403 for logged-out /about.json requests, so on
+		// any public failure fall back to the authenticated OAuth client — the
+		// same host and session identity the rest of NP already rides on.
 		var about reddit.Subreddit
-		about, aboutErr := s.publicCli.FetchSubredditAbout(ctx, sub)
-		s.recordUpstream(ctx)
+		var aboutErr error
+		if s.publicCli != nil {
+			about, aboutErr = s.publicCli.FetchSubredditAbout(ctx, sub)
+			s.recordUpstream(ctx)
+		} else {
+			aboutErr = fmt.Errorf("no public client available")
+		}
+		if aboutErr != nil && s.cli != nil {
+			s.Events.Addf(LevelWarn, "L4", "r/%s: public icon fetch failed (%v), falling back to authenticated API", sub, aboutErr)
+			about, aboutErr = s.cli.FetchSubredditAbout(ctx, sub)
+			s.recordUpstream(ctx)
+		}
 		if aboutErr != nil {
 			fetchErr = aboutErr
 			s.Events.Addf(LevelError, "L4", "r/%s: icon fetch failed: %v", sub, aboutErr)

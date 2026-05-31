@@ -160,20 +160,17 @@ type User struct {
 type Preferences struct {
 	AvailableThemes                []string // derived from embedded CSS filenames
 	Theme                          string
+	AutoThemeDay                   string // theme woken under prefers-color-scheme: light (default "light"); only used when Theme=="auto"
+	AutoThemeNight                 string // theme woken under prefers-color-scheme: dark  (default "black"); only used when Theme=="auto"
 	Lang                           string // UI language code (e.g. "en", "zh")
 	FrontPage                      string
 	FrontPageSubs                  string
-	FrontPageSubsMode              string
-	ShowAllSubs                    string
 	Layout                         string
 	Wide                           string
 	BlurSpoiler                    string
 	ShowNSFW                       string
 	BlurNSFW                       string
-	HideHLSNotification            string
-	VideoQuality                   string
 	HideSidebarAndSummary          string
-	UseHLS                         string
 	AutoplayVideos                 string
 	FixedNavbar                    string // default "on"
 	DisableVisitRedditConfirmation string
@@ -191,6 +188,10 @@ type Preferences struct {
 	PrefetchThreshold              string
 	ScrollInterval                 string
 	LazyMedia                      string // default "on" — defer media requests until the post enters the viewport
+	VideoQuality                   string // preferred max v.redd.it height: "source" (default) | "1080" | "720" | "480" | "360" | "240"
+	MuteAllVideos                  string // default "off" — start every video muted
+	MuteNSFWVideos                 string // default "on"  — start NSFW videos muted (ignored when MuteAllVideos is on)
+	DisableInitiativeUpstreamAccess string // default "off" — when "on", user-driven session-token requests never hit Reddit, only the local archive (CDN media still flows, governed by the global limiter)
 }
 
 // Params holds common query parameters for listing endpoints.

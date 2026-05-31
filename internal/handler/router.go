@@ -110,8 +110,6 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /manifest.json", static)
 	mux.Handle("GET /opensearch.xml", static)
 	mux.Handle("GET /Inter.var.woff2", static)
-	mux.Handle("GET /hls.min.js", static)
-	mux.Handle("GET /playHLSVideo.js", static)
 	mux.Handle("GET /highlighted.js", static)
 	mux.Handle("GET /copy.js", static)
 	mux.Handle("GET /check_update.js", static)

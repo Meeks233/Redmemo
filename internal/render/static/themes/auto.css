@@ -1,0 +1,41 @@
+/* Auto theme setting: tracks the OS light/dark toggle, pairing the
+   black palette (dark mode) with the light palette (light mode). */
+.auto {
+	--accent: #bb2b3b;
+	--green: #00a229;
+	--text: white;
+	--foreground: #0f0f0f;
+	--background: black;
+	--outside: black;
+	--post: black;
+	--panel-border: 2px solid #0f0f0f;
+	--highlighted: #0f0f0f;
+	--visited: #aaa;
+	--shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+html:has(> .auto) {
+	/* Hint color theme to browser for scrollbar */
+	color-scheme: dark;
+}
+
+/* When the OS reports light mode, adopt the light palette. */
+@media (prefers-color-scheme: light) {
+	.auto {
+		--accent: #bb2b3b;
+		--green: #00a229;
+		--text: black;
+		--foreground: #f5f5f5;
+		--background: #ddd;
+		--outside: #ececec;
+		--post: #eee;
+		--panel-border: 1px solid #ccc;
+		--highlighted: white;
+		--visited: #555;
+		--shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	}
+
+	html:has(> .auto) {
+		color-scheme: light;
+	}
+}

@@ -10,6 +10,11 @@
   var candidates = new Set();
   var scrollScheduled = false;
 
+  // The video chosen by the last updatePlayback() pass (centermost, eligible),
+  // or null. Used to scope a manual pause to the current play session: when the
+  // active video changes, the previous one's session is over.
+  var activeVideo = null;
+
   // A video must have at least this fraction of its height on-screen to
   // be considered for autoplay.
   var VISIBLE_FRACTION = 0.5;
@@ -26,24 +31,83 @@
     return Math.max(0, visible) / rect.height;
   }
 
+  // Autoplay "intel": remember whether the *user* paused a video, so we never
+  // fight their intent. The browser fires the same "pause"/"play" events
+  // whether the script or the human triggered them, so we cannot tell them
+  // apart after the fact. Instead, every time the script calls play()/pause()
+  // it raises a one-shot flag that the matching event handler consumes; an
+  // event seen with no flag set must therefore be user-initiated.
+  //
+  // Media events are dispatched on a later task, so the flag is still set when
+  // the handler runs. We only raise it when the call will actually change
+  // state (play() on a paused video, pause() on a playing one) — otherwise no
+  // event fires and the flag would leak onto the next genuine user action.
+
+  // Mark this video as paused by the script; the "pause" handler ignores it.
+  function scriptPause(video) {
+    if (video.paused) return;
+    video._programmaticPause = true;
+    video.pause();
+  }
+
   // Start playback, coping with the browser autoplay policy.
   //
-  // The data-viewport-autoplay videos are NOT muted, so before the user
-  // has interacted with the page the browser rejects play() outright.
-  // That is why the first videos on a freshly loaded page never started,
-  // while videos reached after scrolling did: scrolling is itself a user
-  // gesture that grants the page sticky activation.
+  // Before the user has interacted with the page the browser rejects an
+  // unmuted play() outright. That is why the first videos on a freshly
+  // loaded page never started, while videos reached after scrolling did:
+  // scrolling is itself a user gesture that grants the page sticky
+  // activation.
   //
-  // Browsers always allow *muted* autoplay, so on rejection we retry with
-  // the video muted. The user keeps their native controls to unmute.
+  // Browsers always allow *muted* autoplay, so on rejection we may retry
+  // with the video muted — but ONLY for videos the mute settings actually
+  // want muted. The template's videoMuted() sets the `muted` content
+  // attribute (reflected by defaultMuted) per the user's "Mute all" /
+  // "Mute NSFW" choices. A video the user chose to hear must never be
+  // silently muted just to satisfy autoplay; we leave it paused and the
+  // next scroll (a user gesture) lets the unmuted play() succeed.
   function tryPlay(video) {
+    // Respect an explicit user pause: do not resume on our own.
+    if (video._userPaused) return;
+    video._programmaticPlay = true;
     var p = video.play();
     if (p && typeof p.catch === "function") {
       p.catch(function () {
+        // play() was rejected, so no "play" event will arrive to consume the
+        // flag — clear it here so a later user play() is not mistaken for ours.
+        video._programmaticPlay = false;
+        // Only fall back to muted autoplay for videos meant to be muted.
+        if (!video.defaultMuted) return;
         video.muted = true;
-        video.play().catch(function () {});
+        video._programmaticPlay = true;
+        video.play().catch(function () {
+          video._programmaticPlay = false;
+        });
       });
     }
+  }
+
+  // Attach the user-intent listeners once per video.
+  function trackIntent(video) {
+    if (video._intentTracked) return;
+    video._intentTracked = true;
+    video.addEventListener("pause", function () {
+      if (video._programmaticPause) {
+        video._programmaticPause = false;
+        return;
+      }
+      // The user hit pause: remember it so re-entering the viewport or
+      // returning to the tab does not yank playback back on.
+      video._userPaused = true;
+    });
+    video.addEventListener("play", function () {
+      if (video._programmaticPlay) {
+        video._programmaticPlay = false;
+        return;
+      }
+      // The user hit play: forget the earlier manual pause so normal
+      // viewport-driven autoplay resumes.
+      video._userPaused = false;
+    });
   }
 
   function distanceToViewportCenter(video) {
@@ -55,7 +119,7 @@
   function updatePlayback() {
     if (document.visibilityState !== "visible") {
       candidates.forEach(function (video) {
-        if (!video.paused) video.pause();
+        scriptPause(video);
       });
       return;
     }
@@ -71,11 +135,24 @@
       }
     });
 
+    // A manual pause only lasts for the current play session — i.e. while this
+    // video stays the active (centermost) one. The moment the user moves on to
+    // a different video, the old one's session is over, so forget its
+    // _userPaused flag: scrolling back to it later should autoplay again
+    // instead of leaving it stuck. While the tab is hidden we return early
+    // above without touching activeVideo, so returning to the tab still finds
+    // the same active video and keeps respecting a pause — matching the prior
+    // behavior and avoiding a conflict with it.
+    if (activeVideo && activeVideo !== active && activeVideo._userPaused) {
+      activeVideo._userPaused = false;
+    }
+    activeVideo = active;
+
     candidates.forEach(function (video) {
       if (video === active) {
         tryPlay(video);
-      } else if (!video.paused) {
-        video.pause();
+      } else {
+        scriptPause(video);
       }
     });
   }
@@ -87,7 +164,7 @@
           candidates.add(entry.target);
         } else {
           candidates.delete(entry.target);
-          if (!entry.target.paused) entry.target.pause();
+          scriptPause(entry.target);
         }
       });
       updatePlayback();
@@ -117,6 +194,7 @@
     document.querySelectorAll("video[data-viewport-autoplay]").forEach(function (v) {
       if (!v._viewportObserved) {
         v._viewportObserved = true;
+        trackIntent(v);
         observer.observe(v);
       }
     });

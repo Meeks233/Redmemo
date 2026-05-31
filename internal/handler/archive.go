@@ -13,6 +13,7 @@ import (
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/searchquery"
 	"github.com/redmemo/redmemo/internal/store"
 )
 
@@ -53,168 +54,74 @@ func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (r
 const archivePageSize = 25
 const archiveHubMinPosts = 10
 
-// parseArchiveSearch reads the /archive local-search form parameters from the
-// request and converts them into a store query. The returned bool reports
-// whether any filter is active (an all-empty form is not a search).
-func parseArchiveSearch(r *http.Request) (render.ArchiveSearchView, store.ArchiveSearchOpts, bool) {
-	q := r.URL.Query()
-	view := render.ArchiveSearchView{
-		Query: strings.TrimSpace(q.Get("q")),
-		Time:  q.Get("time"),
-		From:  q.Get("from"),
-		To:    q.Get("to"),
-		Type:  q.Get("type"),
-		Media: q.Get("media"),
-	}
-
-	switch view.Time {
-	case "", "hour", "day", "week", "month", "year", "custom":
-	default:
-		view.Time = ""
-	}
-	// The date input always submits whatever it last held; only honour it
-	// for the custom timeframe so stale values don't leak into URLs.
-	if view.Time != "custom" {
-		view.From = ""
-		view.To = ""
-	}
-	switch view.Type {
-	case "nsfw", "sfw":
-	default:
-		view.Type = ""
-	}
-	switch view.Media {
-	case "image", "video":
-	default:
-		view.Media = ""
-	}
-
-	view.SourceMode = q.Get("source_mode")
-	if view.SourceMode != "blacklist" {
-		view.SourceMode = "whitelist"
-	}
-
-	var subs []string
-	if raw := q.Get("source"); raw != "" {
-		seen := make(map[string]bool)
-		for _, s := range strings.Split(raw, "+") {
-			s = strings.TrimSpace(s)
-			if s == "" || !validSubName.MatchString(s) {
-				continue
-			}
-			key := strings.ToLower(s)
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			subs = append(subs, s)
-		}
-	}
-	view.Source = strings.Join(subs, "+")
-
-	opts := store.ArchiveSearchOpts{
-		Query:    view.Query,
-		NSFW:     view.Type,
-		Media:    view.Media,
-		Subs:     subs,
-		SubsMode: view.SourceMode,
-	}
-
-	view.ScoreOp = q.Get("score_op")
-	if view.ScoreOp != "lt" {
-		view.ScoreOp = "gt"
-	}
-	view.Score = strings.TrimSpace(q.Get("score"))
-	if n, err := strconv.Atoi(view.Score); err == nil {
-		opts.Score = &n
-		opts.ScoreOp = view.ScoreOp
-	} else {
-		view.Score = ""
-	}
-
-	now := time.Now().UTC()
-	switch view.Time {
-	case "hour":
-		t := now.Add(-time.Hour)
-		opts.After = &t
-	case "day":
-		t := now.AddDate(0, 0, -1)
-		opts.After = &t
-	case "week":
-		t := now.AddDate(0, 0, -7)
-		opts.After = &t
-	case "month":
-		t := now.AddDate(0, 0, -30)
-		opts.After = &t
-	case "year":
-		t := now.AddDate(-1, 0, 0)
-		opts.After = &t
-	case "custom":
-		if d, err := time.Parse("2006-01-02", view.From); err == nil {
-			t := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
-			opts.After = &t
-		}
-		if d, err := time.Parse("2006-01-02", view.To); err == nil {
-			t := time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.UTC)
-			opts.Before = &t
-		}
-	}
-
-	active := view.Query != "" || view.Type != "" || view.Media != "" ||
-		opts.After != nil || opts.Before != nil || len(subs) > 0 ||
-		opts.Score != nil
-	return view, opts, active
+// parseArchiveSearch reads the /archive local-search box from the request and
+// converts it into a PostgreSQL query via the shared e621-style query parser.
+// The returned bool reports whether a search is active (an empty box is not).
+func parseArchiveSearch(r *http.Request) (render.ArchiveSearchView, store.ArchiveSearchOpts, searchquery.Parsed, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("q"))
+	view := render.ArchiveSearchView{Query: raw}
+	parsed := searchquery.Parse(raw)
+	opts := parsedToArchiveOpts(parsed)
+	return view, opts, parsed, raw != ""
 }
 
 // archiveSearchQS builds the URL-encoded query string for the archive search
-// (all filters, without the page cursor) used by pagination links.
+// (the raw box text, without the page cursor) used by pagination links.
 func archiveSearchQS(v render.ArchiveSearchView) string {
 	qs := url.Values{}
 	if v.Query != "" {
 		qs.Set("q", v.Query)
 	}
-	if v.Time != "" {
-		qs.Set("time", v.Time)
-	}
-	if v.From != "" {
-		qs.Set("from", v.From)
-	}
-	if v.To != "" {
-		qs.Set("to", v.To)
-	}
-	if v.Type != "" {
-		qs.Set("type", v.Type)
-	}
-	if v.Media != "" {
-		qs.Set("media", v.Media)
-	}
-	if v.Source != "" {
-		qs.Set("source", v.Source)
-		qs.Set("source_mode", v.SourceMode)
-	}
-	if v.Score != "" {
-		qs.Set("score", v.Score)
-		qs.Set("score_op", v.ScoreOp)
-	}
 	return qs.Encode()
 }
 
-// archivePickerSubs returns every archived subreddit (name + post count),
-// sorted by count, to populate the /archive Source filter's pill picker.
-func (h *Handler) archivePickerSubs() []render.SubredditStatView {
-	if h.postStore == nil {
-		return nil
-	}
-	stats, err := h.postStore.SubredditStats(1, 1000)
+// archiveCacheScoreScanCap bounds how many SQL-matched rows the cache-score
+// archive search pulls into memory before Go-filtering. The score: constraint
+// can't be expressed in SQL (the eviction score lives behind canonical-key +
+// muxed resolution), so this path scans up to this many matches of the *other*
+// constraints and filters them by resident eviction score in Go. It is sized to
+// comfortably cover a self-hosted archive's filtered set; a result set larger
+// than the cap simply isn't fully counted (the total reflects what was scanned).
+const archiveCacheScoreScanCap = 2000
+
+// archiveCacheScoreSearch runs the archive local search for a query carrying a
+// score: (media cache eviction score) constraint. It pulls the SQL matches of
+// every other constraint, keeps only posts whose primary media is resident and
+// whose eviction score satisfies nc, then slices the survivors by offset/limit
+// in Go. It returns the requested window of posts and the total survivor count.
+func (h *Handler) archiveCacheScoreSearch(opts store.ArchiveSearchOpts, nc *searchquery.NumConstraint, offset int) (posts []reddit.Post, total int64) {
+	opts.Limit = archiveCacheScoreScanCap
+	opts.Offset = 0
+	stored, _, err := h.postStore.ArchiveSearch(opts)
 	if err != nil {
-		log.Printf("handler: archive picker subs: %v", err)
-		return nil
+		log.Printf("handler: archive cache-score search: %v", err)
 	}
-	out := make([]render.SubredditStatView, 0, len(stats))
-	for _, s := range stats {
-		out = append(out, render.SubredditStatView{Name: s.Name, PostCount: s.PostCount})
+
+	matched := make([]reddit.Post, 0, len(stored))
+	for _, sp := range stored {
+		var p reddit.Post
+		if err := json.Unmarshal(sp.JSONData, &p); err != nil {
+			continue
+		}
+		if !h.matchCacheScore(nc, &p) {
+			continue
+		}
+		p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+		matched = append(matched, p)
 	}
-	return out
+
+	total = int64(len(matched))
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(matched) {
+		offset = len(matched)
+	}
+	end := offset + archivePageSize
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total
 }
 
 func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
@@ -227,20 +134,17 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 		sort = "new"
 	}
 
-	searchView, searchOpts, searching := parseArchiveSearch(r)
-	pickerSubs := h.archivePickerSubs()
+	searchView, searchOpts, parsed, searching := parseArchiveSearch(r)
 
 	// Local archive search — purely PostgreSQL-backed, never touches Reddit.
 	if searching && h.postStore != nil {
-		page := 1
-		if v := r.URL.Query().Get("page"); v != "" {
+		offset := 0
+		if v := r.URL.Query().Get("offset"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				page = n
+				offset = n
 			}
 		}
 		searchOpts.Sort = sort
-		searchOpts.Limit = archivePageSize
-		searchOpts.Offset = (page - 1) * archivePageSize
 
 		// Honor the global show_nsfw preference. The archive search form has
 		// its own NSFW dropdown for explicit narrowing, but show_nsfw=off must
@@ -250,25 +154,39 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 			searchOpts.NSFW = "sfw"
 		}
 
-		stored, total, err := h.postStore.ArchiveSearch(searchOpts)
-		if err != nil {
-			log.Printf("handler: archive search: %v", err)
-		}
-		totalPages := int((total + archivePageSize - 1) / archivePageSize)
-		if totalPages < 1 {
-			totalPages = 1
-		}
-		if page > totalPages {
-			page = totalPages
+		var posts []reddit.Post
+		var total int64
+		if parsed.CacheScore != nil && h.mediaProxy != nil {
+			// The score: constraint (media cache eviction score) can't be pushed
+			// into SQL, so this path scans the other constraints' matches and
+			// filters/paginates by resident eviction score in Go.
+			posts, total = h.archiveCacheScoreSearch(searchOpts, parsed.CacheScore, offset)
+		} else {
+			searchOpts.Limit = archivePageSize
+			searchOpts.Offset = offset
+			stored, t, err := h.postStore.ArchiveSearch(searchOpts)
+			if err != nil {
+				log.Printf("handler: archive search: %v", err)
+			}
+			total = t
+			for _, sp := range stored {
+				var p reddit.Post
+				if err := json.Unmarshal(sp.JSONData, &p); err == nil {
+					p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+					posts = append(posts, p)
+				}
+			}
 		}
 
-		var posts []reddit.Post
-		for _, sp := range stored {
-			var p reddit.Post
-			if err := json.Unmarshal(sp.JSONData, &p); err == nil {
-				p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
-				posts = append(posts, p)
+		if r.URL.Query().Get("partial") == "1" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if len(posts) == 0 {
+				return
 			}
+			if err := h.renderer.RenderPostList(w, posts, prefs); err != nil {
+				log.Printf("handler: render archive search partial: %v", err)
+			}
+			return
 		}
 
 		data := render.ArchiveHubPageData{
@@ -281,13 +199,12 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 			Sort:         sort,
 			MinPosts:     archiveHubMinPosts,
 			SearchParams: searchView,
-			PickerSubs:   pickerSubs,
 			Search:       true,
 			SearchPosts:  posts,
 			SearchTotal:  total,
-			SearchPage:   page,
-			SearchPages:  totalPages,
+			SearchPageSize: archivePageSize,
 			SearchQS:     archiveSearchQS(searchView),
+			Interval:     prefs.ScrollInterval,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -359,7 +276,6 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 		Subs:         subs,
 		MinPosts:     archiveHubMinPosts,
 		SearchParams: searchView,
-		PickerSubs:   pickerSubs,
 	}
 	if sort == "all" {
 		data.AlphaGroups, data.AlphaIndex = groupSubsAlphabetical(subs)
@@ -495,24 +411,14 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 
 	prefs := h.readPreferences(r)
 
-	page := 1
-	if v := r.URL.Query().Get("page"); v != "" {
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			page = n
+			offset = n
 		}
 	}
 
 	excludeNSFW := prefs.ShowNSFW != "on"
-	total, _ := h.postStore.CountBySubreddit(sub, excludeNSFW)
-	totalPages := int((total + archivePageSize - 1) / archivePageSize)
-	if totalPages < 1 {
-		totalPages = 1
-	}
-	if page > totalPages {
-		page = totalPages
-	}
-
-	offset := (page - 1) * archivePageSize
 	stored, err := h.postStore.ListBySubreddit(sub, archivePageSize, offset, excludeNSFW)
 	if err != nil {
 		log.Printf("handler: archive list %s: %v", sub, err)
@@ -527,6 +433,19 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if r.URL.Query().Get("partial") == "1" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if len(posts) == 0 {
+			return
+		}
+		if err := h.renderer.RenderPostList(w, posts, prefs); err != nil {
+			log.Printf("handler: render archive partial %s: %v", sub, err)
+		}
+		return
+	}
+
+	total, _ := h.postStore.CountBySubreddit(sub, excludeNSFW)
+
 	data := render.ArchivePageData{
 		BasePage: render.BasePage{
 			URL:       r.URL.Path,
@@ -537,10 +456,8 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 		Sub:        sub,
 		Posts:      posts,
 		TotalPosts: total,
-		Page:       page,
-		TotalPages: totalPages,
-		HasPrev:            page > 1,
-		HasNext:            page < totalPages,
+		PageSize:   archivePageSize,
+		Interval:   prefs.ScrollInterval,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

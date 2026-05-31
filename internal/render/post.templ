@@ -41,7 +41,7 @@ templ postPage(d PostPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:     postTitle(d),
 		HeadExtra: postHead(d),
-		Search:    searchbox("/r/"+d.Post.Community, ""),
+		Search:    searchbox("/search", ""),
 		Content:   postContent(d),
 		Media:     true,
 	})
@@ -181,7 +181,7 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 		</div>
 		<h1 class="post_title">
 			if len(post.Flair.FlairParts) > 0 {
-				<a href={ templ.SafeURL("/r/" + post.Community + "/search?q=flair_name%3A%22" + post.Flair.Text + "%22&restrict_sr=on") } class="post_flair" style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }>@renderFlair(post.Flair.FlairParts)</a>
+				<a href={ templ.SafeURL("/search?q=flair%3A%22" + post.Flair.Text + "%22+white%3A" + post.Community) } class="post_flair" style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }>@renderFlair(post.Flair.FlairParts)</a>
 			}
 			{ post.Title }
 			if post.Flags.NSFW {
@@ -205,40 +205,20 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 				</a>
 			</div>
 		} else if post.PostType == "video" || post.PostType == "gif" {
-			if prefs.UseHLS == "on" && post.Media.AltURL != "" {
-				<script src="/hls.min.js"></script>
-				<div class="post_media_content">
-					<video
-						class="post_media_video short"
-						if prefs.AutoplayVideos == "on" {
-							data-viewport-autoplay
-						}
-						if post.Media.Width > 0 && post.Media.Height > 0 {
-							width={ i64(post.Media.Width) }
-							height={ i64(post.Media.Height) }
-						}
-						poster={ post.Media.Poster }
-						preload="metadata"
-						controls
-					>
-						<source src={ post.Media.AltURL } type="application/vnd.apple.mpegurl"/>
-						<source src={ post.Media.URL } type="video/mp4"/>
-					</video>
-				</div>
-				<script src="/playHLSVideo.js"></script>
-			} else {
-				<div class="post_media_content">
-					<video
-						class="post_media_video"
-						src={ post.Media.URL }
-						controls
-						if prefs.AutoplayVideos == "on" {
-							data-viewport-autoplay
-						}
-						loop
-					><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
-				</div>
-			}
+			<div class="post_media_content">
+				<video
+					class="post_media_video"
+					src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+					controls
+					if videoMuted(post, prefs) {
+						muted
+					}
+					if prefs.AutoplayVideos == "on" {
+						data-viewport-autoplay
+					}
+					loop
+				><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
+			</div>
 		} else if post.PostType == "gallery" {
 			<div class="gallery">
 				for _, g := range post.Gallery {

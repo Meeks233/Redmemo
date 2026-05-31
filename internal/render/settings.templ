@@ -1,10 +1,6 @@
 package render
 
-import (
-	"strings"
-
-	"github.com/redmemo/redmemo/internal/reddit"
-)
+import "github.com/redmemo/redmemo/internal/reddit"
 
 // settings.templ ports templates/settings.html — the preferences page. Most
 // controls are plain form fields bound to d.Prefs; the homepage/prefetch sub
@@ -18,7 +14,7 @@ templ settingsTitle(d SettingsPageData) {
 templ settingsPage(d SettingsPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:   settingsTitle(d),
-		Search:  searchbox("", ""),
+		Search:  searchbox("/search", ""),
 		Content: settingsContent(d),
 	})
 }
@@ -33,7 +29,7 @@ templ settingsContent(d SettingsPageData) {
 		}
 		<div id="settings">
 			<div class="settings-column">
-				<form action="/settings" method="POST">
+				<form id="settings-form" action="/settings" method="POST">
 					<div class="prefs">
 						<fieldset>
 							<legend>{ T(ctx, "settings.appearance") }</legend>
@@ -44,6 +40,32 @@ templ settingsContent(d SettingsPageData) {
 										<option value={ t } selected?={ t == d.Prefs.Theme }>{ reddit.Capitalize(t) }</option>
 									}
 								</select>
+							</div>
+							// The "auto" theme wakes a different palette for the OS light vs dark
+							// mode. These two selects let the user pick which palette each maps to
+							// (defaults: day=Light, night=Black). Shown only while "auto" is the
+							// active theme; theme.js toggles visibility live as the select changes.
+							<div id="auto-theme-rows" hidden?={ d.Prefs.Theme != "auto" }>
+								<div class="prefs-group">
+									<label for="auto_theme_day">{ T(ctx, "settings.auto_theme_day") }</label>
+									<select name="auto_theme_day" id="auto_theme_day">
+										for _, t := range d.Prefs.AvailableThemes {
+											if t != "auto" && t != "system" {
+												<option value={ t } selected?={ t == d.Prefs.AutoThemeDay }>{ reddit.Capitalize(t) }</option>
+											}
+										}
+									</select>
+								</div>
+								<div class="prefs-group">
+									<label for="auto_theme_night">{ T(ctx, "settings.auto_theme_night") }</label>
+									<select name="auto_theme_night" id="auto_theme_night">
+										for _, t := range d.Prefs.AvailableThemes {
+											if t != "auto" && t != "system" {
+												<option value={ t } selected?={ t == d.Prefs.AutoThemeNight }>{ reddit.Capitalize(t) }</option>
+											}
+										}
+									</select>
+								</div>
 							</div>
 							<div class="prefs-group">
 								<label for="lang">{ T(ctx, "settings.language") }</label>
@@ -69,14 +91,6 @@ templ settingsContent(d SettingsPageData) {
 						<fieldset>
 							<legend>{ T(ctx, "settings.interface") }</legend>
 							<div class="prefs-group">
-								<label for="remove_default_feeds">{ T(ctx, "settings.remove_home") }</label>
-								<input type="hidden" value="off" name="remove_default_feeds"/>
-								<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" checked?={ d.Prefs.RemoveDefaultFeeds == "on" } onchange="toggleRemoveHome(this)"/>
-							</div>
-							<input type="hidden" name="front_page_subs" id="front_page_subs_hidden" value={ frontPageSubsValue(d.Prefs.FrontPageSubs) }/>
-							<input type="hidden" name="front_page_subs_mode" id="front_page_subs_mode" value={ frontPageSubsModeValue(d.Prefs.FrontPageSubsMode) }/>
-							<input type="hidden" name="show_all_subs" id="show_all_subs_hidden" value={ showAllSubsValue(d.Prefs.ShowAllSubs) }/>
-							<div class="prefs-group">
 								<label for="post_sort" title={ T(ctx, "settings.post_sort_title") }>{ T(ctx, "settings.post_sort") }</label>
 								<select name="post_sort">
 									<option value="new" selected?={ d.Prefs.PostSort == "new" }>{ T(ctx, "sort.new") }</option>
@@ -97,14 +111,6 @@ templ settingsContent(d SettingsPageData) {
 						</fieldset>
 						<fieldset>
 							<legend>{ T(ctx, "settings.content") }</legend>
-							<div class="prefs-group">
-								<label for="video_quality">{ T(ctx, "settings.video_quality") }</label>
-								<select name="video_quality" id="video_quality">
-									for _, q := range videoQualities {
-										<option value={ q } selected?={ q == d.Prefs.VideoQuality }>{ T(ctx, "quality."+q) }</option>
-									}
-								</select>
-							</div>
 							<div class="prefs-group">
 								<label for="blur_spoiler">{ T(ctx, "settings.blur_spoiler") }</label>
 								<input type="hidden" value="off" name="blur_spoiler"/>
@@ -131,6 +137,27 @@ templ settingsContent(d SettingsPageData) {
 								<input type="checkbox" name="lazy_media" id="lazy_media" checked?={ d.Prefs.LazyMedia == "on" }/>
 							</div>
 							<div class="prefs-group">
+								<label for="video_quality" title={ T(ctx, "settings.video_quality_title") }>{ T(ctx, "settings.video_quality") }</label>
+								<select name="video_quality" id="video_quality">
+									<option value="source" selected?={ d.Prefs.VideoQuality == "source" }>{ T(ctx, "video_quality.source") }</option>
+									<option value="1080" selected?={ d.Prefs.VideoQuality == "1080" }>1080p</option>
+									<option value="720" selected?={ d.Prefs.VideoQuality == "720" }>720p</option>
+									<option value="480" selected?={ d.Prefs.VideoQuality == "480" }>480p</option>
+									<option value="360" selected?={ d.Prefs.VideoQuality == "360" }>360p</option>
+									<option value="240" selected?={ d.Prefs.VideoQuality == "240" }>240p</option>
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="mute_all_videos" title={ T(ctx, "settings.mute_all_videos_title") }>{ T(ctx, "settings.mute_all_videos") }</label>
+								<input type="hidden" value="off" name="mute_all_videos"/>
+								<input type="checkbox" name="mute_all_videos" id="mute_all_videos" checked?={ d.Prefs.MuteAllVideos == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="mute_nsfw_videos" title={ T(ctx, "settings.mute_nsfw_videos_title") }>{ T(ctx, "settings.mute_nsfw_videos") }</label>
+								<input type="hidden" value="off" name="mute_nsfw_videos"/>
+								<input type="checkbox" name="mute_nsfw_videos" id="mute_nsfw_videos" checked?={ d.Prefs.MuteNSFWVideos == "on" }/>
+							</div>
+							<div class="prefs-group">
 								<label for="fixed_navbar">{ T(ctx, "settings.fixed_navbar") }</label>
 								<input type="hidden" value="off" name="fixed_navbar"/>
 								<input type="checkbox" name="fixed_navbar" checked?={ d.Prefs.FixedNavbar == "on" }/>
@@ -143,16 +170,6 @@ templ settingsContent(d SettingsPageData) {
 								<label for="hide_sidebar_and_summary">{ T(ctx, "settings.hide_sidebar") }</label>
 								<input type="hidden" value="off" name="hide_sidebar_and_summary"/>
 								<input type="checkbox" name="hide_sidebar_and_summary" checked?={ d.Prefs.HideSidebarAndSummary == "on" }/>
-							</div>
-							<div class="prefs-group">
-								<label for="use_hls">{ T(ctx, "settings.use_hls") }</label>
-								<input type="hidden" value="off" name="use_hls"/>
-								<input type="checkbox" name="use_hls" id="use_hls" checked?={ d.Prefs.UseHLS == "on" } onchange="toggleHLS(this)"/>
-							</div>
-							<div class="prefs-group">
-								<label for="hide_hls_notification">{ T(ctx, "settings.hide_hls_notif") }</label>
-								<input type="hidden" value="off" name="hide_hls_notification"/>
-								<input type="checkbox" name="hide_hls_notification" id="hide_hls_notification" checked?={ d.Prefs.HideHLSNotification == "on" }/>
 							</div>
 							<div class="prefs-group">
 								<label for="hide_awards">{ T(ctx, "settings.hide_awards") }</label>
@@ -182,38 +199,16 @@ templ settingsContent(d SettingsPageData) {
 				</form>
 			</div>
 			<div class="settings-column">
-				<div class="prefs" id="sub_picker" style={ displayNoneIf(d.Prefs.RemoveDefaultFeeds == "on") }>
+				<div class="prefs" id="sub_picker">
 					<fieldset>
 						<legend>{ T(ctx, "settings.homepage_subs") }</legend>
-						<div class="prefs-group" id="show_all_row">
-							<label for="show_all_subs">{ T(ctx, "settings.show_all_subs") }</label>
-							<input type="checkbox" id="show_all_subs" checked?={ d.Prefs.ShowAllSubs != "off" } onchange="toggleSubPicker(this)"/>
+						<div class="prefs-group">
+							<label for="remove_default_feeds">{ T(ctx, "settings.disable_homepage") }</label>
+							<input type="hidden" value="off" name="remove_default_feeds" form="settings-form"/>
+							<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" form="settings-form" checked?={ d.Prefs.RemoveDefaultFeeds == "on" } onchange="toggleHomepage(this)"/>
 						</div>
-						<div id="sub_filter" style={ displayNoneIf(d.Prefs.ShowAllSubs != "off") }>
-							<div class="sub-picker-mode">
-								<div class="mode-segmented">
-									<a class={ "mode-seg", templ.KV("selected", d.Prefs.FrontPageSubsMode != "blacklist") } data-mode="whitelist" onclick="setMode('whitelist')">{ T(ctx, "settings.whitelist") }</a>
-									<a class={ "mode-seg", templ.KV("selected", d.Prefs.FrontPageSubsMode == "blacklist") } data-mode="blacklist" onclick="setMode('blacklist')">{ T(ctx, "settings.blacklist") }</a>
-								</div>
-								<span class="mode-hint" id="mode_hint">
-									if d.Prefs.FrontPageSubsMode == "blacklist" {
-										{ T(ctx, "settings.mode_blacklist_hint") }
-									} else {
-										{ T(ctx, "settings.mode_whitelist_hint") }
-									}
-								</span>
-							</div>
-							<div class="sub-picker-selected" id="sub_selected">
-								if d.Prefs.FrontPageSubs != "all" && d.Prefs.FrontPageSubs != "" {
-									for _, s := range strings.Split(d.Prefs.FrontPageSubs, "+") {
-										<span class="sub-tag" data-sub={ s }>r/{ s }<button type="button" class="sub-tag-remove">&times;</button></span>
-									}
-								}
-							</div>
-							<div class="sub-picker-search">
-								<input type="text" id="sub_search" placeholder={ T(ctx, "settings.search_subs_placeholder") } autocomplete="off"/>
-							</div>
-							<div class="sub-picker-list" id="sub_list"></div>
+						<div class="sub-picker-search" id="homepage_query_row" style={ displayNoneIf(d.Prefs.RemoveDefaultFeeds == "on") }>
+							<textarea name="front_page_subs" id="front_page_subs" form="settings-form" rows="1" placeholder={ T(ctx, "settings.filter_placeholder") } title={ T(ctx, "search.hint") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">{ d.FrontPageQuery }</textarea>
 						</div>
 					</fieldset>
 				</div>
@@ -229,15 +224,8 @@ templ settingsContent(d SettingsPageData) {
 								<label for="prefetch_threshold">{ T(ctx, "settings.np_threshold") }</label>
 								<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value={ d.Prefs.PrefetchThreshold } style="width:60px" onchange="savePrefetchThreshold(this.value)"/>
 							</div>
-							<div class="sub-picker-selected" id="prefetch_sub_selected">
-								if d.Prefs.PrefetchSubs != "" {
-									for _, s := range strings.Split(d.Prefs.PrefetchSubs, "+") {
-										<span class="sub-tag" data-sub={ s }>r/{ s }<button type="button" class="sub-tag-remove">&times;</button></span>
-									}
-								}
-							</div>
 							<div class="sub-picker-search">
-								<input type="text" id="prefetch_sub_search" placeholder={ T(ctx, "settings.add_sub_placeholder") } autocomplete="off"/>
+								<input type="text" id="prefetch_sub_search" name="prefetch_subs" form="settings-form" value={ d.PrefetchQuery } placeholder={ T(ctx, "settings.np_filter_placeholder") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
 							</div>
 							<div class="sub-picker-list" id="prefetch_sub_list"></div>
 						</div>
@@ -246,6 +234,11 @@ templ settingsContent(d SettingsPageData) {
 				<div class="prefs" id="instance_info">
 					<fieldset>
 						<legend>{ T(ctx, "settings.instance_info") }</legend>
+						<div class="prefs-group">
+							<label for="disable_initiative_upstream_access" title={ T(ctx, "settings.disable_upstream_title") }>{ T(ctx, "settings.disable_upstream") }</label>
+							<input type="hidden" value="off" name="disable_initiative_upstream_access" form="settings-form"/>
+							<input type="checkbox" name="disable_initiative_upstream_access" id="disable_initiative_upstream_access" form="settings-form" checked?={ d.Prefs.DisableInitiativeUpstreamAccess == "on" }/>
+						</div>
 						<div class="prefs-group">
 							<label for="enable_debug">{ T(ctx, "settings.enable_debug") }</label>
 							<input type="checkbox" id="enable_debug" checked?={ d.Prefs.EnableDebug == "on" } onchange="toggleDebug(this)"/>
@@ -303,11 +296,21 @@ templ settingsContent(d SettingsPageData) {
 		</div>
 	</div>
 	<script src="/subPicker.js"></script>
+	// Reveal the auto day/night palette pickers only while "auto" is selected.
+	<script>
+		(function () {
+			var theme = document.getElementById('theme');
+			var rows = document.getElementById('auto-theme-rows');
+			if (!theme || !rows) return;
+			theme.addEventListener('change', function () {
+				rows.hidden = theme.value !== 'auto';
+			});
+		})();
+	</script>
 	@templ.JSONScript("settings-archived-subs", d.ArchivedSubs)
 	@templ.JSONScript("settings-top-subs", settingsTopSubs(d.SubredditStats))
 	@templ.JSONScript("settings-live-subs", d.LiveSubs)
 	@templ.JSONScript("settings-selected-counts", d.SelectedCounts)
-	@templ.JSONScript("settings-mode-hints", settingsModeHints(ctx))
 	<script>
 		// Sub-picker seed data arrives via JSONScript islands (above) rather than
 		// inlined literals. _allSubs starts from the archived subs, gains any live
@@ -340,55 +343,27 @@ templ settingsContent(d SettingsPageData) {
 			window._allSubs.sort(function(a, b) { return b.posts - a.posts; });
 		})();
 
-		var _modeHints = JSON.parse(document.getElementById('settings-mode-hints').textContent) || {};
-
-		var homePicker = SubPicker({
-			selectedId: 'sub_selected',
-			searchId: 'sub_search',
-			listId: 'sub_list',
-			onChange: function(sel) {
-				document.getElementById('front_page_subs_hidden').value = sel.join('+');
-				if (sel.length === 0) {
-					// Nothing selected — an empty filter is meaningless, revert to "Show all".
-					document.getElementById('show_all_subs').checked = true;
-					document.getElementById('show_all_subs_hidden').value = 'on';
-					document.getElementById('sub_filter').style.display = 'none';
-				}
-				checkDirty();
-			}
-		});
-
-		var prefetchPicker = SubPicker({
-			selectedId: 'prefetch_sub_selected',
-			searchId: 'prefetch_sub_search',
+		// The homepage filter is now a native auto-growing <textarea> (#front_page_subs,
+		// field-sizing:content — no JS height tracking) that is part of the settings
+		// form (form="settings-form") and submitted on Save. It accepts the full
+		// navbar search grammar; the Go backend parses, validates and normalizes it
+		// — there is no picker or capsule logic here. The NP field (#prefetch_sub_search,
+		// name="prefetch_subs", form="settings-form") is likewise part of the form and
+		// persisted on Save; it just keeps a lightweight subreddit suggestion list,
+		// where a pick appends "+name" to the simple a+b+c value. NPPicker.onChange
+		// (fired on blur and on each pick) only flags the form dirty so the Save bar
+		// appears — the actual persist happens through the normal form submit.
+		var prefetchPicker = NPPicker({
+			inputId: 'prefetch_sub_search',
 			listId: 'prefetch_sub_list',
-			onChange: function(sel) {
-				var fd = new FormData();
-				fd.append('prefetch_subs', sel.join('+'));
-				fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
-			}
+			onChange: function() { checkDirty(); }
 		});
 
-		function toggleSubPicker(cb) {
-			// "Show all subs" only toggles whether the filter is applied/shown.
-			// The whitelist/blacklist selection is preserved regardless.
-			document.getElementById('show_all_subs_hidden').value = cb.checked ? 'on' : 'off';
-			document.getElementById('sub_filter').style.display = cb.checked ? 'none' : '';
-			if (!cb.checked && homePicker) homePicker.render();
-			checkDirty();
-		}
-
-		function toggleRemoveHome(cb) {
-			document.getElementById('sub_picker').style.display = cb.checked ? 'none' : '';
-		}
-
-		function setMode(mode) {
-			document.getElementById('front_page_subs_mode').value = mode;
-			document.querySelectorAll('.mode-seg').forEach(function(el) {
-				el.classList.toggle('selected', el.dataset.mode === mode);
-			});
-			document.getElementById('mode_hint').textContent = _modeHints[mode] || '';
-			checkDirty();
+		// "Disable homepage" collapses just the query box; the toggle itself stays
+		// visible so it can be turned back on. The actual disable (redirect to
+		// /archive) is applied by the backend when the form is saved.
+		function toggleHomepage(cb) {
+			document.getElementById('homepage_query_row').style.display = cb.checked ? 'none' : '';
 		}
 
 		var saveBar = document.getElementById('save-bar');
@@ -408,6 +383,14 @@ templ settingsContent(d SettingsPageData) {
 
 		form.addEventListener('change', checkDirty);
 		form.addEventListener('input', checkDirty);
+
+		// The homepage filter and its disable toggle live outside the <form> element
+		// (associated via form="settings-form"), so their events don't bubble to it
+		// — wire them up directly. FormData(form) still includes them on serialize.
+		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'disable_initiative_upstream_access'].forEach(function(id) {
+			var el = document.getElementById(id);
+			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
+		});
 
 		function togglePrefetch(cb) {
 			if (cb.checked) {
@@ -470,32 +453,6 @@ templ settingsContent(d SettingsPageData) {
 			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
 				.then(function() { location.reload(); });
 		}
-
-		function toggleHLS(cb) {
-			if (cb.checked) {
-				cb.checked = false;
-				document.getElementById('hls-modal').classList.add('visible');
-			} else {
-				submitHLSSetting('off');
-			}
-		}
-
-		function confirmHLS() {
-			document.getElementById('hls-modal').classList.remove('visible');
-			document.getElementById('use_hls').checked = true;
-			submitHLSSetting('on');
-		}
-
-		function cancelHLS() {
-			document.getElementById('hls-modal').classList.remove('visible');
-		}
-
-		function submitHLSSetting(val) {
-			var fd = new FormData();
-			fd.append('use_hls', val);
-			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)})
-				.then(function() { location.reload(); });
-		}
 	</script>
 	<div class="modal-overlay" id="prefetch-modal" onclick="if(event.target===this)cancelPrefetch()">
 		<div class="modal-box">
@@ -515,17 +472,6 @@ templ settingsContent(d SettingsPageData) {
 			<div class="modal-actions">
 				<button class="modal-cancel" onclick="cancelDebug()">{ T(ctx, "settings.cancel") }</button>
 				<button class="modal-confirm" onclick="confirmDebug()">{ T(ctx, "settings.accept_risk") }</button>
-			</div>
-		</div>
-	</div>
-	<div class="modal-overlay" id="hls-modal" onclick="if(event.target===this)cancelHLS()">
-		<div class="modal-box">
-			<h2>{ T(ctx, "settings.hls_modal_title") }</h2>
-			<p>{ T(ctx, "settings.hls_modal_body") }</p>
-			<p>{ T(ctx, "settings.confirm_continue") }</p>
-			<div class="modal-actions">
-				<button class="modal-cancel" onclick="cancelHLS()">{ T(ctx, "settings.cancel") }</button>
-				<button class="modal-confirm" onclick="confirmHLS()">{ T(ctx, "settings.accept_risk") }</button>
 			</div>
 		</div>
 	</div>

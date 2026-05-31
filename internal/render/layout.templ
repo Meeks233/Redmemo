@@ -27,10 +27,15 @@ templ layout(p BasePage, s pageSlots) {
 			<link rel="manifest" type="application/json" href="/manifest.json"/>
 			<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico"/>
 			<link rel="stylesheet" type="text/css" href={ "/style.css?v=" + p.Version }/>
-			if showThemeStylesheet(p.Prefs.Theme) {
+			if p.Prefs.Theme == "auto" {
+				// Auto wakes the user-chosen day/night palettes via prefers-color-scheme,
+				// so its CSS is generated per-request rather than served from a static file.
+				// Emitted as a raw node (not inline <style> children, which templ treats
+				// as inert text and would print verbatim) so the stylesheet is evaluated.
+				@templ.Raw(autoThemeStyle(p.Prefs.AutoThemeDay, p.Prefs.AutoThemeNight))
+			} else if showThemeStylesheet(p.Prefs.Theme) {
 				<link rel="stylesheet" type="text/css" href={ "/themes/" + p.Prefs.Theme + ".css?v=" + p.Version }/>
 			}
-			<div id="video_quality" data-value={ p.Prefs.VideoQuality }></div>
 			if s.HeadExtra != nil {
 				@s.HeadExtra
 			}
@@ -48,7 +53,7 @@ templ layout(p BasePage, s pageSlots) {
 				}
 				<div id="links">
 					<a id="status_quota" href="/fuckreddit">
-						<svg class="nav-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" class="nav-ring-track"></circle><circle id="nav-ring-arc" cx="10" cy="10" r="8" class="nav-ring-arc"></circle></svg>
+						<svg class="nav-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" class="nav-ring-track"></circle><circle id="nav-ring-arc" cx="10" cy="10" r="8" class="nav-ring-arc"></circle><text id="nav-ring-count" x="10" y="10" class="nav-ring-count">0</text></svg>
 						<span id="nav-quota-text"></span>
 					</a>
 					if p.Prefs.EnableDebug == "on" {
@@ -105,7 +110,7 @@ templ layout(p BasePage, s pageSlots) {
 				<script src="/videoPreload.js" defer></script>
 				<script src="/audioSync.js" defer></script>
 				<script src="/imageReload.js" defer></script>
-			}
+							}
 		</body>
 	</html>
 }

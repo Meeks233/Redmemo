@@ -2,6 +2,7 @@ package render
 
 import (
 	"context"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -122,6 +123,30 @@ func bodyClass(p reddit.Preferences) string {
 // i64 formats an int64 for emission in markup (width/height attrs etc.).
 func i64(n int64) string { return strconv.FormatInt(n, 10) }
 
+// searchEndpoint returns the route the local-search infinite-scroll loader hits
+// for its partial=1 fragments. Without a sub it's the global /search; with a
+// sub it's the per-sub /r/<sub>/search.
+func searchEndpoint(sub string) string {
+	if sub != "" {
+		return "/r/" + sub + "/search"
+	}
+	return "/search"
+}
+
+// searchLocalQS encodes the filter half of the URL (raw query box + sort) used
+// by the offline /search infinite-scroll loader. The loader appends
+// "&offset=N&partial=1" to whatever this returns.
+func searchLocalQS(query, sort string) string {
+	v := url.Values{}
+	if query != "" {
+		v.Set("q", query)
+	}
+	if sort != "" {
+		v.Set("sort", sort)
+	}
+	return v.Encode()
+}
+
 // u64p formats a *uint64 poll vote count; nil becomes "" so the markup matches
 // the old `{{ .VoteCount }}` on an open poll.
 func u64p(p *uint64) string {
@@ -178,15 +203,6 @@ func showRealSub(name string) bool {
 	return name != "" && name != "all" && name != "popular" && !strings.Contains(name, "+")
 }
 
-// searchAction builds the search form's action URL: scoped to the subreddit
-// when root is a real "/r/<name>" prefix, otherwise the global "/search".
-func searchAction(root string) string {
-	if root != "" && root != "/r/" {
-		return root + "/search"
-	}
-	return "/search"
-}
-
 // isBlurredInList reports whether a listing card should be blurred under the
 // user's NSFW/spoiler blur prefs.
 func isBlurredInList(p reddit.Post, prefs reddit.Preferences) bool {
@@ -202,6 +218,18 @@ func playAsGif(p reddit.Post) bool {
 		return true
 	}
 	return p.Media.Duration > 0 && p.Media.Duration <= 3.0
+}
+
+// videoMuted reports whether a post's <video controls> player should start
+// muted, honoring the user's mute prefs: "mute all videos" mutes everything,
+// otherwise "mute NSFW videos" mutes only posts flagged NSFW. GIF-style clips
+// are always muted regardless (handled at the template), so this only governs
+// the full controls player.
+func videoMuted(p reddit.Post, prefs reddit.Preferences) bool {
+	if prefs.MuteAllVideos == "on" {
+		return true
+	}
+	return p.Flags.NSFW && prefs.MuteNSFWVideos == "on"
 }
 
 // The flair/thumbnail style helpers return templ.SafeCSS so the (Reddit-sourced)
@@ -224,11 +252,12 @@ func thumbBoxStyle(w, h int64) templ.SafeCSS {
 // for the client poller that swaps the text when the active tier changes.
 func frReasonTexts(ctx context.Context) map[string]string {
 	return map[string]string{
-		"quota_exhausted": T(ctx, "fr.quota_exhausted"),
-		"hr_l1":           T(ctx, "fr.hr_l1"),
-		"hr_l2":           T(ctx, "fr.hr_l2"),
-		"hr_l3":           T(ctx, "fr.hr_l3"),
-		"hr_redis_down":   T(ctx, "fr.hr_redis_down"),
+		"upstream_disabled": T(ctx, "fr.upstream_disabled"),
+		"quota_exhausted":   T(ctx, "fr.quota_exhausted"),
+		"hr_l1":             T(ctx, "fr.hr_l1"),
+		"hr_l2":             T(ctx, "fr.hr_l2"),
+		"hr_l3":             T(ctx, "fr.hr_l3"),
+		"hr_redis_down":     T(ctx, "fr.hr_redis_down"),
 	}
 }
 
@@ -239,19 +268,6 @@ func frReasonText(ctx context.Context, reason string) string {
 }
 
 // --- archive hub helpers ---
-
-// archiveTimeOptions are the preset time-range options on the /archive search
-// form (the old `list "hour" ... "year"`); "" (any) and "custom" bracket them.
-var archiveTimeOptions = []string{"hour", "day", "week", "month", "year"}
-
-// sourceModeClass returns the whitelist/blacklist class for the archive source
-// box; anything other than "blacklist" is treated as whitelist (the default).
-func sourceModeClass(mode string) string {
-	if mode == "blacklist" {
-		return "blacklist"
-	}
-	return "whitelist"
-}
 
 // archiveSortBase builds the base href (ending in "sort=") for the /archive sort
 // tabs, carrying the active search query string when a search is in progress.
@@ -275,37 +291,11 @@ func archiveSubCardTitle(ctx context.Context, e ArchiveHubEntry) string {
 	return s
 }
 
-// archiveSubJS is the JSON shape the /archive source-picker script consumes.
-type archiveSubJS struct {
-	Name  string `json:"name"`
-	Posts int64  `json:"posts"`
-}
-
-// archiveSubsJS projects PickerSubs into the picker's JSON island (name + count).
-func archiveSubsJS(subs []SubredditStatView) []archiveSubJS {
-	out := make([]archiveSubJS, len(subs))
-	for i, s := range subs {
-		out[i] = archiveSubJS{Name: s.Name, Posts: s.PostCount}
-	}
-	return out
-}
-
-// archiveJSStrings are the localized strings the picker script needs at runtime
-// (whitelist/blacklist toggle label, empty-match notice).
-func archiveJSStrings(ctx context.Context) map[string]string {
-	return map[string]string{
-		"whitelist": T(ctx, "archive_search.whitelist"),
-		"blacklist": T(ctx, "archive_search.blacklist"),
-		"no_match":  T(ctx, "archive_search.source_no_match"),
-	}
-}
-
 // --- settings page helpers ---
 
-// layoutOptions / videoQualities are the option value sets the settings page
-// iterates over (the old `list ...` literals).
+// layoutOptions is the option value set the settings page iterates over (the
+// old `list ...` literal).
 var layoutOptions = []string{"card", "clean", "compact"}
-var videoQualities = []string{"best", "medium", "worst"}
 
 // displayNoneIf returns "display:none" when cond holds, else "" — mirrors the
 // old inline `style="{{ if ... }}display:none{{ end }}"`. SafeCSS bypasses
@@ -315,32 +305,6 @@ func displayNoneIf(cond bool) templ.SafeCSS {
 		return templ.SafeCSS("display:none")
 	}
 	return templ.SafeCSS("")
-}
-
-// frontPageSubsValue blanks the "all" sentinel for the hidden front_page_subs
-// input (the old `{{ if eq .Prefs.FrontPageSubs "all" }}{{ else }}...{{ end }}`).
-func frontPageSubsValue(v string) string {
-	if v == "all" {
-		return ""
-	}
-	return v
-}
-
-// frontPageSubsModeValue normalizes the homepage filter mode to "blacklist" or
-// "whitelist" (the old hidden-input default expression).
-func frontPageSubsModeValue(v string) string {
-	if v == "blacklist" {
-		return "blacklist"
-	}
-	return "whitelist"
-}
-
-// showAllSubsValue normalizes the show-all flag to "off" or "on".
-func showAllSubsValue(v string) string {
-	if v == "off" {
-		return "off"
-	}
-	return "on"
 }
 
 // subView is the {name, posts} shape the sub-picker JS consumes via JSONScript.
@@ -357,16 +321,6 @@ func settingsTopSubs(stats []SubredditStatView) []subView {
 		out = append(out, subView{Name: s.Name, Posts: s.PostCount})
 	}
 	return out
-}
-
-// settingsModeHints maps each whitelist/blacklist mode to its localized hint,
-// serialized for the client setMode() handler (replacing the old inline T()
-// interpolations in the page script).
-func settingsModeHints(ctx context.Context) map[string]string {
-	return map[string]string{
-		"whitelist": T(ctx, "settings.mode_whitelist_hint"),
-		"blacklist": T(ctx, "settings.mode_blacklist_hint"),
-	}
 }
 
 // orDash returns s, or an em dash when s is empty (the old `{{ or .X "—" }}`).

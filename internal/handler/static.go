@@ -283,10 +283,12 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	// Combined "current degrade" view consumed by /fuckreddit so the page
 	// shows one authoritative reason + countdown per poll. Priority mirrors
-	// shouldDegrade: HR cooldown > quota_exhausted > clear.
+	// shouldDegrade: upstream_disabled > HR cooldown > quota_exhausted > clear.
 	currentReason := ""
 	currentReset := 0
-	if hrReason != "" {
+	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+		currentReason = "upstream_disabled"
+	} else if hrReason != "" {
 		currentReason = hrReason
 		currentReset = hrReset
 	} else if !h.oauthHolder.HasAvailableTokens() {
@@ -294,10 +296,17 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		currentReset = reset
 	}
 
+	// capacity is the per-window quota ceiling (oauth WindowInfo); the nav ring
+	// fills as remaining/capacity, so the client needs it to draw the arc.
+	_, capacity, _ := h.oauthHolder.WindowInfo()
+	if capacity <= 0 {
+		capacity = 99
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
-	fmt.Fprintf(w, `{"remaining":%d,"reset":%d,"window":%d,"hr_reset":%d,"hr_reason":%q,"current_reason":%q,"current_reset":%d}`,
-		budget, reset, window, hrReset, hrReason, currentReason, currentReset)
+	fmt.Fprintf(w, `{"remaining":%d,"capacity":%d,"reset":%d,"window":%d,"hr_reset":%d,"hr_reason":%q,"current_reason":%q,"current_reset":%d}`,
+		budget, capacity, reset, window, hrReset, hrReason, currentReason, currentReset)
 }
 
 func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {

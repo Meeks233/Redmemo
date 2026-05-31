@@ -77,18 +77,13 @@ func recovery(next http.Handler) http.Handler {
 var prefDefaults = map[string]string{
 	"front_page":      "default",
 	"front_page_subs":      "all",
-	"front_page_subs_mode": "whitelist",
-	"show_all_subs":        "on",
 	"layout":        "card",
 	"wide":          "off",
 	"blur_spoiler":  "on",
 	"show_nsfw":     "on",
 	"blur_nsfw":     "on",
-	"video_quality": "best",
-	"use_hls":       "off",
 	"autoplay_videos":                 "on",
 	"fixed_navbar":                    "on",
-	"hide_hls_notification":           "off",
 	"hide_sidebar_and_summary":        "off",
 	"hide_awards":                     "off",
 	"hide_score":                      "off",
@@ -103,6 +98,12 @@ var prefDefaults = map[string]string{
 	"prefetch_threshold":      "50",
 	"scroll_interval":         "2",
 	"lazy_media":              "on",
+	"video_quality":           "source",
+	"mute_all_videos":         "off",
+	"mute_nsfw_videos":        "on",
+	"disable_initiative_upstream_access": "off",
+	"auto_theme_day":          "light",
+	"auto_theme_night":        "black",
 	"lang":                    render.DefaultLang,
 }
 
@@ -121,6 +122,8 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	} else {
 		p.Theme = pref("theme")
 	}
+	p.AutoThemeDay = pref("auto_theme_day")
+	p.AutoThemeNight = pref("auto_theme_night")
 
 	// Language: an explicit `lang` cookie wins; otherwise resolve from the
 	// Accept-Language header, falling back to the configured default. The
@@ -134,24 +137,12 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 
 	p.FrontPage = pref("front_page")
 	p.FrontPageSubs = pref("front_page_subs")
-	p.FrontPageSubsMode = pref("front_page_subs_mode")
-	if _, ok := h.siteDefaults["show_all_subs"]; ok {
-		p.ShowAllSubs = pref("show_all_subs")
-	} else if p.FrontPageSubs != "" && p.FrontPageSubs != "all" {
-		// Legacy: a sub list was saved before show_all_subs existed.
-		p.ShowAllSubs = "off"
-	} else {
-		p.ShowAllSubs = "on"
-	}
 	p.Layout = pref("layout")
 	p.Wide = pref("wide")
 	p.BlurSpoiler = pref("blur_spoiler")
 	p.ShowNSFW = pref("show_nsfw")
 	p.BlurNSFW = pref("blur_nsfw")
-	p.HideHLSNotification = pref("hide_hls_notification")
-	p.VideoQuality = pref("video_quality")
 	p.HideSidebarAndSummary = pref("hide_sidebar_and_summary")
-	p.UseHLS = pref("use_hls")
 	p.AutoplayVideos = pref("autoplay_videos")
 	p.CommentSort = pref("comment_sort")
 	p.PostSort = pref("post_sort")
@@ -167,6 +158,10 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.PrefetchThreshold = pref("prefetch_threshold")
 	p.ScrollInterval = pref("scroll_interval")
 	p.LazyMedia = pref("lazy_media")
+	p.VideoQuality = pref("video_quality")
+	p.MuteAllVideos = pref("mute_all_videos")
+	p.MuteNSFWVideos = pref("mute_nsfw_videos")
+	p.DisableInitiativeUpstreamAccess = pref("disable_initiative_upstream_access")
 
 	p.AvailableThemes = render.AvailableThemes()
 

@@ -256,7 +256,7 @@ media:
 func TestTranslateRedlibDefaultEnvVars(t *testing.T) {
 	t.Setenv("REDLIB_DEFAULT_THEME", "dark")
 	t.Setenv("REDLIB_DEFAULT_SHOW_NSFW", "on")
-	t.Setenv("REDLIB_DEFAULT_USE_HLS", "on")
+	t.Setenv("REDLIB_DEFAULT_AUTOPLAY_VIDEOS", "on")
 
 	path := minimalConfigYAML(t)
 	_, err := Load(path)
@@ -270,8 +270,8 @@ func TestTranslateRedlibDefaultEnvVars(t *testing.T) {
 	if os.Getenv("REDMEMO_DEFAULT_SHOW_NSFW") != "on" {
 		t.Errorf("REDLIB_DEFAULT_SHOW_NSFW not translated")
 	}
-	if os.Getenv("REDMEMO_DEFAULT_USE_HLS") != "on" {
-		t.Errorf("REDLIB_DEFAULT_USE_HLS not translated")
+	if os.Getenv("REDMEMO_DEFAULT_AUTOPLAY_VIDEOS") != "on" {
+		t.Errorf("REDLIB_DEFAULT_AUTOPLAY_VIDEOS not translated")
 	}
 }
 

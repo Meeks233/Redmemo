@@ -7,16 +7,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/searchquery"
 )
 
 const cookieMaxAge = 52 * 7 * 24 * 60 * 60 // 52 weeks in seconds
 
 var settingsKeys = []string{
-	"theme", "lang", "front_page_subs", "front_page_subs_mode", "show_all_subs", "layout", "wide",
+	"theme", "lang", "front_page_subs", "layout", "wide",
 	"blur_spoiler", "show_nsfw", "blur_nsfw",
-	"hide_hls_notification", "video_quality",
-	"hide_sidebar_and_summary", "use_hls",
+	"hide_sidebar_and_summary",
 	"autoplay_videos", "fixed_navbar",
 	"disable_visit_reddit_confirmation",
 	"comment_sort", "post_sort",
@@ -24,6 +25,9 @@ var settingsKeys = []string{
 	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
 	"prefetch_threshold", "scroll_interval", "lazy_media",
+	"video_quality", "mute_all_videos", "mute_nsfw_videos",
+	"auto_theme_day", "auto_theme_night",
+	"disable_initiative_upstream_access",
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -49,15 +53,12 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		mediaCount, mediaSize, _ = h.mediaStore.Stats()
 	}
 
+	// prefetch_subs holds a query in the unified search grammar; the configured
+	// subs are its sub: includes. Used only to surface per-sub stats below.
 	var prefetchSubs []string
 	if h.settingsStore != nil {
 		if v, ok, _ := h.settingsStore.Get("prefetch_subs"); ok && v != "" {
-			for _, s := range strings.Split(v, "+") {
-				s = strings.TrimSpace(s)
-				if s != "" {
-					prefetchSubs = append(prefetchSubs, s)
-				}
-			}
+			prefetchSubs = searchquery.Parse(v).WhiteSubs
 		}
 	}
 
@@ -90,11 +91,9 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	selectedCounts := make(map[string]int)
 	var selectedNames []string
 	if prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
-		for _, s := range strings.Split(prefs.FrontPageSubs, "+") {
-			if s = strings.TrimSpace(s); s != "" {
-				selectedNames = append(selectedNames, s)
-			}
-		}
+		fp := searchquery.Parse(prefs.FrontPageSubs)
+		selectedNames = append(selectedNames, fp.WhiteSubs...)
+		selectedNames = append(selectedNames, fp.BlackSubs...)
 	}
 	selectedNames = append(selectedNames, prefetchSubs...)
 	for _, n := range selectedNames {
@@ -107,6 +106,17 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// Echo back the backend's "accepted" forms so the inputs always show exactly
+	// what the server honors — the homepage feed keeps the full canonical query
+	// (sub: scope plus any author/media/score/comments/date/rating constraints),
+	// NP keeps the plain a+b+c crawl list. The page renders these verbatim; there
+	// is no client-side reconstruction.
+	var frontPageQuery string
+	if prefs.FrontPageSubs != "" && prefs.FrontPageSubs != "all" {
+		frontPageQuery = searchquery.Parse(prefs.FrontPageSubs).Canonical()
+	}
+	prefetchQuery := searchquery.JoinSubs(prefetchSubs)
 
 	data := render.SettingsPageData{
 		BasePage: render.BasePage{
@@ -121,6 +131,8 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		MediaSize:      formatBytes(mediaSize),
 		OAuthEnabled:   len(h.cfg.OAuth.Tokens) > 0,
 		PrefetchSubs:   prefetchSubs,
+		FrontPageQuery: frontPageQuery,
+		PrefetchQuery:  prefetchQuery,
 		SubredditStats: subStats,
 		ArchivedSubs:   archivedSubs,
 		LiveSubs:       liveSubs,
@@ -140,13 +152,27 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if mode, ok := updates["front_page_subs_mode"]; ok && mode != "whitelist" && mode != "blacklist" {
-		updates["front_page_subs_mode"] = "whitelist"
+	// Backend is the single source of truth for the homepage filter: parse the
+	// submitted query, drop locally-known-dead include subs (keep syntactically
+	// valid excludes), and re-serialize the WHOLE query to its canonical form so
+	// every honored constraint round-trips. An empty result means "show all".
+	if v, ok := updates["front_page_subs"]; ok {
+		p := searchquery.Parse(v)
+		p.WhiteSubs = h.filterUsableSubs(p.WhiteSubs)
+		p.BlackSubs = h.filterValidSubs(p.BlackSubs)
+		updates["front_page_subs"] = p.Canonical()
 	}
 
-	// An empty whitelist/blacklist is meaningless — fall back to "show all".
-	if v, ok := updates["front_page_subs"]; ok && strings.TrimSpace(v) == "" {
-		updates["show_all_subs"] = "on"
+	// NP crawl list uses the simple a+b+c format. Validate every name, drop the
+	// known-dead, and store as a sub: clause so the scheduler's unified-grammar
+	// parser still picks them up. An empty list disables crawling.
+	if v, ok := updates["prefetch_subs"]; ok {
+		names := h.filterUsableSubs(searchquery.ParseSubList(v))
+		if len(names) == 0 {
+			updates["prefetch_subs"] = ""
+		} else {
+			updates["prefetch_subs"] = "sub:" + searchquery.JoinSubs(names)
+		}
 	}
 
 	if v, ok := updates["prefetch_threshold"]; ok {
@@ -154,6 +180,23 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			delete(updates, "prefetch_threshold")
 		} else {
 			updates["prefetch_threshold"] = strconv.Itoa(n)
+		}
+	}
+
+	// Video quality must be "source" or a known rendition height; reject
+	// anything else so the stored value always maps to a real DASH ladder step.
+	if v, ok := updates["video_quality"]; ok {
+		if _, valid := reddit.VideoQualityHeights[v]; !valid && v != "source" {
+			delete(updates, "video_quality")
+		}
+	}
+
+	// The auto theme's day/night picks must name a real, selectable palette
+	// (never "auto"/"system", which carry no fixed palette of their own); reject
+	// anything else so the woken-theme CSS always resolves to an embedded sheet.
+	for _, key := range []string{"auto_theme_day", "auto_theme_night"} {
+		if v, ok := updates[key]; ok && !render.IsSelectableTheme(v) {
+			delete(updates, key)
 		}
 	}
 
@@ -201,6 +244,48 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// filterValidSubs keeps only names with a well-formed subreddit syntax.
+func (h *Handler) filterValidSubs(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if validSubName.MatchString(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// filterUsableSubs validates name syntax and then consults the local
+// subreddit_status table, dropping any sub already known to be dead/private/
+// quarantined. It deliberately does NOT probe upstream — that stays an explicit,
+// per-sub action via /api/probe-sub — so a routine save neither hammers Reddit
+// for every name nor blindly trusts unverified input. A DB error is non-fatal:
+// we keep the user's syntactically valid list rather than silently discarding it.
+func (h *Handler) filterUsableSubs(names []string) []string {
+	clean := h.filterValidSubs(names)
+	if len(clean) == 0 || h.subStatusStore == nil {
+		return clean
+	}
+	statusMap, err := h.subStatusStore.GetStatusMap(clean)
+	if err != nil {
+		return clean
+	}
+	low := make(map[string]string, len(statusMap))
+	for k, v := range statusMap {
+		low[strings.ToLower(k)] = v
+	}
+	var out []string
+	for _, n := range clean {
+		switch low[strings.ToLower(n)] {
+		case "dead", "private", "quarantined":
+			// locally known-bad: drop
+		default:
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func formatBytes(b int64) string {

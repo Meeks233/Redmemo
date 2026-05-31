@@ -1,9 +1,10 @@
 package render
 
-import "strconv"
-
 // archive.templ ports templates/archive.html — the per-subreddit local archive
-// listing. Cards render eagerly (lazy=false): archived media is local.
+// listing. Cards render eagerly (lazy=false): archived media is local. Paging
+// runs through the shared infiniteScroll.js loader against /archive/r/<sub>
+// (offset-based, partial=1 fragments), so the listing never paginates with
+// prev/next links — it just keeps scrolling.
 
 templ archiveTitle(d ArchivePageData) {
 	{ T(ctx, "archive.page_title", d.Sub) }
@@ -33,24 +34,15 @@ templ archiveBody(d ArchivePageData) {
 							<p>{ T(ctx, "archive.nsfw_hint_pre") }<a href="/settings">{ T(ctx, "archive.nsfw_settings") }</a>{ T(ctx, "archive.nsfw_hint_post") }</p>
 						</div>
 					} else {
-						for _, p := range d.Posts {
-							<hr class="sep"/>
+						for i, p := range d.Posts {
+							if i > 0 {
+								<hr class="sep"/>
+							}
 							@postInList(p, d.Prefs, false)
 						}
 					}
-					if d.Prefs.UseHLS == "on" {
-						<script src="/hls.min.js"></script>
-						<script src="/playHLSVideo.js"></script>
-					}
 				</div>
-				<footer>
-					if d.HasPrev {
-						<a href={ templ.SafeURL("/archive/r/" + d.Sub + "?page=" + strconv.Itoa(d.Page-1)) } accesskey="P">{ T(ctx, "nav.prev") }</a>
-					}
-					if d.HasNext {
-						<a href={ templ.SafeURL("/archive/r/" + d.Sub + "?page=" + strconv.Itoa(d.Page+1)) } accesskey="N">{ T(ctx, "nav.next") }</a>
-					}
-				</footer>
+				@localInfiniteLoader("/archive/r/" + d.Sub, "", d.PageSize, len(d.Posts), d.Interval)
 			}
 		</div>
 	</main>

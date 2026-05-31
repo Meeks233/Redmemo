@@ -33,14 +33,14 @@ func (s *MediaIndexStore) Resolve(rawURL string) (*MediaMeta, error) {
 	m := &MediaMeta{}
 	err := s.db.QueryRow(`
 		SELECT u.raw_url, c.content_hash, c.file_path, c.mime_type, c.file_size,
-		       c.first_seen, c.last_accessed, c.access_count, c.audio_state,
+		       c.first_seen, c.last_accessed, c.access_count, c.score, c.audio_state,
 		       c.audio_fail_count, c.last_audio_attempt_at
 		FROM media_url u
 		JOIN media_content c ON c.content_hash = u.content_hash
 		WHERE u.canonical_key = $1`, key,
 	).Scan(
 		&m.OriginalURL, &m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize,
-		&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.AudioState,
+		&m.FirstSeen, &m.LastAccessed, &m.AccessCount, &m.Score, &m.AudioState,
 		&m.AudioFailCount, &m.LastAudioAttemptAt,
 	)
 	if err == sql.ErrNoRows {
@@ -75,14 +75,23 @@ func (s *MediaIndexStore) Save(meta *MediaMeta) error {
 
 	// Upsert the content row. Existing row keeps its audio_state and access
 	// stats; only file_path / mime / size are refreshed (in case the file was
-	// previously evicted and we just re-downloaded it).
+	// previously evicted and we just re-downloaded it). A row that was carrying
+	// the -1 "absent" sentinel (evicted/deleted) is re-judged from its size now
+	// that the bytes are back on disk — this is the "auto-compute on every
+	// pulled cache file" rule; a still-resident row keeps its decayed score.
 	if _, err := tx.Exec(`
 		INSERT INTO media_content (content_hash, file_path, mime_type, file_size)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (content_hash) DO UPDATE SET
-			file_path = EXCLUDED.file_path,
-			mime_type = EXCLUDED.mime_type,
-			file_size = EXCLUDED.file_size`,
+			file_path   = EXCLUDED.file_path,
+			mime_type   = EXCLUDED.mime_type,
+			file_size   = EXCLUDED.file_size,
+			score       = CASE WHEN media_content.score < 0
+			                   THEN media_initial_score(EXCLUDED.file_size)
+			                   ELSE media_content.score END,
+			score_floor = CASE WHEN media_content.score < 0
+			                   THEN media_score_floor(media_initial_score(EXCLUDED.file_size))
+			                   ELSE media_content.score_floor END`,
 		meta.Hash, *meta.FilePath, meta.MIMEType, meta.FileSize,
 	); err != nil {
 		return fmt.Errorf("upsert content: %w", err)
@@ -147,7 +156,7 @@ func (s *MediaIndexStore) Save(meta *MediaMeta) error {
 	if existingHash != nil {
 		if _, err := tx.Exec(`
 			UPDATE media_content
-			SET file_path = NULL
+			SET file_path = NULL, score = -1.00, score_floor = -1.00
 			WHERE content_hash = $1
 			  AND NOT EXISTS (SELECT 1 FROM media_url WHERE content_hash = $1)`,
 			*existingHash,
@@ -159,24 +168,66 @@ func (s *MediaIndexStore) Save(meta *MediaMeta) error {
 	return tx.Commit()
 }
 
-// RecordAccess bumps last_accessed and access_count on the content row that
-// rawURL's canonical key resolves to. A canonical that does not map yet is a
-// silent no-op (the next Save will install the row).
+// Eviction-score decay applied per access (see migration v21). Passive reads
+// (stream/view) nudge the score down a little; an active access (explicit
+// user request/pin) pushes it down harder. The score never drops below its
+// sticky score_floor.
+const (
+	passiveAccessDecay = 1.00
+	activeAccessDecay  = 5.00
+)
+
+// accessUpdateSQL bumps the usage stats AND decays the eviction score toward
+// the floor in a single statement. $1 = canonical key, $2 = score decay.
+const accessUpdateSQL = `
+	UPDATE media_content
+	SET last_accessed    = NOW(),
+	    last_accessed_at = NOW(),
+	    access_count     = access_count + 1,
+	    score            = CASE WHEN score < 0 THEN score
+	                            ELSE GREATEST(score - $2, score_floor) END
+	WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`
+
+// RecordAccess records a passive access (read/stream): it bumps last_accessed
+// and access_count and decays the eviction score by the passive step, clamped
+// at score_floor, on the content row that rawURL's canonical key resolves to.
+// A canonical that does not map yet is a silent no-op (the next Save installs
+// the row).
 func (s *MediaIndexStore) RecordAccess(rawURL string) error {
-	key := reddit.CanonicalKey(rawURL)
-	_, err := s.db.Exec(`
-		UPDATE media_content
-		SET last_accessed = NOW(), access_count = access_count + 1
-		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`,
-		key,
-	)
+	_, err := s.db.Exec(accessUpdateSQL, reddit.CanonicalKey(rawURL), passiveAccessDecay)
 	if err != nil {
 		return fmt.Errorf("record media access: %w", err)
 	}
 	return nil
 }
 
-// BatchRecordAccess applies RecordAccess to many URLs inside one transaction.
+// RecordActiveAccess is RecordAccess for an explicit user request/pin: same
+// stats bump but the larger active score decay, so deliberately-requested
+// assets sink down the eviction order faster than incidental streams.
+func (s *MediaIndexStore) RecordActiveAccess(rawURL string) error {
+	_, err := s.db.Exec(accessUpdateSQL, reddit.CanonicalKey(rawURL), activeAccessDecay)
+	if err != nil {
+		return fmt.Errorf("record active media access: %w", err)
+	}
+	return nil
+}
+
+// UpdateAssetAccess invokes the update_asset_access(content_hash, access_type)
+// SQL primitive directly (accessType is "passive" or "active") and returns the
+// resulting score. Unlike RecordAccess it keys on the content hash, not a URL,
+// and does not touch last_accessed/access_count — it is the thin Go binding for
+// the documented DB function.
+func (s *MediaIndexStore) UpdateAssetAccess(contentHash, accessType string) (float64, error) {
+	var newScore float64
+	err := s.db.QueryRow(`SELECT update_asset_access($1, $2)`, contentHash, accessType).Scan(&newScore)
+	if err != nil {
+		return 0, fmt.Errorf("update asset access: %w", err)
+	}
+	return newScore, nil
+}
+
+// BatchRecordAccess applies a passive RecordAccess to many URLs inside one
+// transaction.
 func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	if len(urls) == 0 {
 		return nil
@@ -185,10 +236,7 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	if err != nil {
 		return fmt.Errorf("begin batch access: %w", err)
 	}
-	stmt, err := tx.Prepare(`
-		UPDATE media_content
-		SET last_accessed = NOW(), access_count = access_count + 1
-		WHERE content_hash = (SELECT content_hash FROM media_url WHERE canonical_key = $1)`)
+	stmt, err := tx.Prepare(accessUpdateSQL)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("prepare batch access: %w", err)
@@ -196,7 +244,7 @@ func (s *MediaIndexStore) BatchRecordAccess(urls []string) error {
 	defer stmt.Close()
 
 	for _, url := range urls {
-		if _, err := stmt.Exec(reddit.CanonicalKey(url)); err != nil {
+		if _, err := stmt.Exec(reddit.CanonicalKey(url), passiveAccessDecay); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("batch access %s: %w", url, err)
 		}
@@ -261,7 +309,7 @@ func (s *MediaIndexStore) Delete(rawURL string) (*string, error) {
 		return nil, fmt.Errorf("read orphan file_path: %w", err)
 	}
 	if _, err := tx.Exec(
-		`UPDATE media_content SET file_path = NULL WHERE content_hash = $1`,
+		`UPDATE media_content SET file_path = NULL, score = -1.00, score_floor = -1.00 WHERE content_hash = $1`,
 		contentHash,
 	); err != nil {
 		return nil, fmt.Errorf("clear orphan file_path: %w", err)
@@ -318,7 +366,7 @@ func (s *MediaIndexStore) DeleteSupersededPlainRows() ([]string, error) {
 		var fp *string
 		err := tx.QueryRow(`
 			UPDATE media_content
-			SET file_path = NULL
+			SET file_path = NULL, score = -1.00, score_floor = -1.00
 			WHERE content_hash = $1
 			  AND NOT EXISTS (SELECT 1 FROM media_url WHERE content_hash = $1)
 			RETURNING file_path`,
@@ -342,11 +390,13 @@ func (s *MediaIndexStore) DeleteSupersededPlainRows() ([]string, error) {
 }
 
 // MarkEvicted clears the file_path on a content row whose disk file the
-// evictor has just removed. The URL aliases stay so the next request can
-// re-trigger a fetch and re-attach.
+// evictor has just removed, and drops its score to the -1 "absent" sentinel
+// (floor too, so a stray access can never lift it back up). The URL aliases
+// stay so the next request can re-trigger a fetch and re-attach, at which point
+// Save re-judges the score from the fresh file size.
 func (s *MediaIndexStore) MarkEvicted(contentHash string) error {
 	_, err := s.db.Exec(
-		`UPDATE media_content SET file_path = NULL WHERE content_hash = $1`,
+		`UPDATE media_content SET file_path = NULL, score = -1.00, score_floor = -1.00 WHERE content_hash = $1`,
 		contentHash,
 	)
 	if err != nil {
@@ -440,16 +490,15 @@ func (s *MediaIndexStore) ListAudioFailed(limit int) ([]string, error) {
 	return urls, rows.Err()
 }
 
-// ListEvictionCandidates returns the worst (size × idle_hours) content rows,
-// largest pressure first. The evictor passes these to MarkEvicted after it
-// removes the file on disk.
+// ListEvictionCandidates returns resident content rows in eviction priority
+// order — highest eviction score first, then least-recently accessed, then a
+// random jitter (see the eviction_candidates view / migration v21). The evictor
+// passes these to MarkEvicted after it removes the file on disk.
 func (s *MediaIndexStore) ListEvictionCandidates(limit int) ([]*MediaMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT content_hash, file_path, mime_type, file_size,
 		       first_seen, last_accessed, access_count, audio_state
-		FROM media_content
-		WHERE file_path IS NOT NULL
-		ORDER BY (file_size / 1048576.0) * (EXTRACT(EPOCH FROM NOW() - last_accessed) / 3600.0) DESC
+		FROM eviction_candidates
 		LIMIT $1`, limit,
 	)
 	if err != nil {

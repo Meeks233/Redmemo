@@ -28,11 +28,8 @@
         '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" ' +
         'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
         'stroke-linecap="round" stroke-linejoin="round" ' +
-        'class="lucide lucide-loader-icon lucide-loader">' +
-        '<path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/>' +
-        '<path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/>' +
-        '<path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/>' +
-        '<path d="m4.9 4.9 2.9 2.9"/></svg>';
+        'class="lucide lucide-loader-circle-icon lucide-loader-circle">' +
+        '<path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
 
     function currentSrc(img) {
         return img.currentSrc || img.getAttribute("src") || "";
@@ -104,7 +101,7 @@
         if (svg && svg.animate) {
             st.anim = svg.animate(
                 [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
-                { duration: 1000, iterations: Infinity }
+                { duration: 800, iterations: Infinity, easing: "linear" }
             );
         }
     }
@@ -237,11 +234,30 @@
         scan();
         // Infinite scroll appends posts after load — watch them as they arrive.
         if (window.MutationObserver) {
+            // Coalesce mutation bursts into one rescan per frame. Without this
+            // every single childList mutation under <main> ran a full-document
+            // querySelectorAll synchronously: infinite-scroll appends posts one
+            // node at a time, and the page's own video/audio scripts (autoplay
+            // pause/play, audio-sync notices) and this script's own spinner
+            // add/remove all mutate <main> too. On a long, infinitely-scrolled
+            // page that is an O(nodes × mutations) scan storm that locks the main
+            // thread and freezes the whole page — videos included. The sibling
+            // media scripts (lazyMedia/videoPreload/videoAutoplay/audioSync) all
+            // debounce the same way.
+            var scheduled = false;
+            function scheduleScan() {
+                if (scheduled) return;
+                scheduled = true;
+                window.requestAnimationFrame(function () {
+                    scheduled = false;
+                    scan();
+                });
+            }
             // Scope to <main> so nav/footer chrome mutations don't trigger
             // rescans; all post images (including infinite-scroll appends) are
             // inside it.
             var observeRoot = document.querySelector("main") || document.body;
-            new MutationObserver(scan).observe(observeRoot, {
+            new MutationObserver(scheduleScan).observe(observeRoot, {
                 childList: true,
                 subtree: true,
             });

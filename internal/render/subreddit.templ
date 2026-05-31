@@ -18,7 +18,7 @@ templ subredditTitle(d SubredditPageData) {
 templ subredditPage(d SubredditPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:  subredditTitle(d),
-		Search: searchbox("/r/"+d.Sub.Name, ""),
+		Search: searchbox("/search", ""),
 		Body:   subredditBody(d),
 		Media:  true,
 	})
@@ -77,10 +77,6 @@ templ subredditBody(d SubredditPageData) {
 						for _, p := range d.Posts {
 							<hr class="sep"/>
 							@postInList(p, d.Prefs, d.Prefs.LazyMedia == "on" && !d.IsOffline)
-						}
-						if d.Prefs.UseHLS == "on" {
-							<script src="/hls.min.js"></script>
-							<script src="/playHLSVideo.js"></script>
 						}
 					</div>
 				}

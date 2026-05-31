@@ -266,6 +266,227 @@ var migrations = []string{
 	 CREATE INDEX IF NOT EXISTS posts_sfw_created_idx
 	    ON posts (created_utc DESC)
 	    WHERE COALESCE((json_data->>'over_18')::boolean, false) = false;`,
+
+	// v21: priority-based eviction scoring on media_content. Each cached file
+	// carries an eviction `score` in [0,100] (higher = evict sooner) plus a
+	// sticky `score_floor` the score may never decay below. The initial score is
+	// an ASYMMETRIC log-distance curve centred on 10MB: files near 10MB score
+	// ~0 (cheapest to keep), and both very small and very large files score
+	// toward 100 — large files punished harder (k=2.0) than small (k=0.8).
+	// Access decays the score toward the floor (passive -1.00, active -5.00),
+	// so frequently-touched assets sink down the eviction order over time.
+	// content_hash (TEXT) is this table's identity — the goal's `asset_id`
+	// maps onto it; there is no UUID in this schema.
+	`
+	-- Task 1: add columns (idempotent via duplicate_column guard).
+	DO $$ BEGIN
+	    ALTER TABLE media_content ADD COLUMN score NUMERIC(5,2) NOT NULL DEFAULT 0.00;
+	EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+	DO $$ BEGIN
+	    ALTER TABLE media_content ADD COLUMN score_floor NUMERIC(5,2) NOT NULL DEFAULT 0.00;
+	EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+	DO $$ BEGIN
+	    ALTER TABLE media_content ADD COLUMN last_accessed_at TIMESTAMPTZ;
+	EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+	-- Scoring helpers (shared by the backfill, the INSERT trigger and any caller).
+	-- media_initial_score: asymmetric log-distance decay from 10MB, clamped to
+	-- [0,100]. file_size is bytes; size_mb = bytes / 1MiB. A non-positive size is
+	-- degenerate/unknown and scores 100 (evict first).
+	CREATE OR REPLACE FUNCTION media_initial_score(p_size BIGINT)
+	RETURNS NUMERIC AS $fn$
+	DECLARE
+	    size_mb NUMERIC;
+	    d       NUMERIC;
+	    k       NUMERIC;
+	    s       NUMERIC;
+	BEGIN
+	    IF p_size IS NULL OR p_size <= 0 THEN
+	        RETURN 100.00;
+	    END IF;
+	    size_mb := p_size::NUMERIC / 1048576.0;
+	    d := ln(size_mb / 10.0);                 -- natural-log distance from 10MB
+	    IF size_mb < 10 THEN
+	        k := 0.8;
+	    ELSE
+	        k := 2.0;
+	    END IF;
+	    s := 100.0 * (1 - exp(-k * (d * d)));
+	    s := GREATEST(LEAST(s, 100.0), 0.0);     -- clamp [0,100]
+	    RETURN ROUND(s, 2);
+	END;
+	$fn$ LANGUAGE plpgsql IMMUTABLE;
+
+	-- media_score_floor: tier the initial score into a sticky floor.
+	--   0.00–24.99 -> 0 | 25.00–49.99 -> 25 | 50.00–74.99 -> 50 | 75.00–100 -> 75
+	CREATE OR REPLACE FUNCTION media_score_floor(p_score NUMERIC)
+	RETURNS NUMERIC AS $fn$
+	BEGIN
+	    RETURN LEAST(FLOOR(p_score / 25.0) * 25.0, 75.0);
+	END;
+	$fn$ LANGUAGE plpgsql IMMUTABLE;
+
+	-- Task 2: backfill rows that predate scoring (both columns still at default).
+	UPDATE media_content
+	SET score       = media_initial_score(file_size),
+	    score_floor = media_score_floor(media_initial_score(file_size))
+	WHERE score = 0 AND score_floor = 0;
+
+	-- Initial score on INSERT. A BEFORE INSERT trigger fills score/score_floor
+	-- from file_size whenever they arrive at their defaults, so the existing
+	-- Save() upsert keeps inserting only (content_hash, file_path, mime, size).
+	-- ON CONFLICT DO UPDATE fires no INSERT trigger, so a re-download never
+	-- resets an already-decayed score.
+	CREATE OR REPLACE FUNCTION media_content_set_initial_score()
+	RETURNS TRIGGER AS $fn$
+	BEGIN
+	    IF COALESCE(NEW.score, 0) = 0 THEN
+	        NEW.score := media_initial_score(NEW.file_size);
+	    END IF;
+	    IF COALESCE(NEW.score_floor, 0) = 0 THEN
+	        NEW.score_floor := media_score_floor(NEW.score);
+	    END IF;
+	    RETURN NEW;
+	END;
+	$fn$ LANGUAGE plpgsql;
+
+	DROP TRIGGER IF EXISTS trg_media_content_initial_score ON media_content;
+	CREATE TRIGGER trg_media_content_initial_score
+	    BEFORE INSERT ON media_content
+	    FOR EACH ROW EXECUTE FUNCTION media_content_set_initial_score();
+
+	-- Task 3: access-decay primitive. Decrements the score (passive -1.00,
+	-- active -5.00), clamps at the floor, stamps last_accessed_at, returns the
+	-- new score. asset_id is the content_hash (TEXT) — no UUID in this schema.
+	CREATE OR REPLACE FUNCTION update_asset_access(asset_id TEXT, access_type TEXT)
+	RETURNS NUMERIC AS $fn$
+	DECLARE
+	    delta     NUMERIC;
+	    new_score NUMERIC;
+	BEGIN
+	    IF access_type = 'active' THEN
+	        delta := 5.00;
+	    ELSIF access_type = 'passive' THEN
+	        delta := 1.00;
+	    ELSE
+	        RAISE EXCEPTION 'update_asset_access: invalid access_type %, expected passive or active', access_type;
+	    END IF;
+
+	    UPDATE media_content
+	    SET score            = GREATEST(score - delta, score_floor),
+	        last_accessed_at = NOW()
+	    WHERE content_hash = asset_id
+	    RETURNING score INTO new_score;
+
+	    RETURN new_score;
+	END;
+	$fn$ LANGUAGE plpgsql;
+
+	-- Task 4: eviction order — highest score first, then least-recently accessed
+	-- (NULLS FIRST so never-decayed rows lead the tie), then random jitter.
+	-- Restricted to resident files; an evicted (file_path IS NULL) row is not a
+	-- candidate.
+	CREATE OR REPLACE VIEW eviction_candidates AS
+	SELECT content_hash, file_path, mime_type, file_size,
+	       first_seen, last_accessed, last_accessed_at, access_count,
+	       audio_state, score, score_floor
+	FROM media_content
+	WHERE file_path IS NOT NULL
+	ORDER BY score DESC,
+	         last_accessed_at ASC NULLS FIRST,
+	         random();
+
+	CREATE INDEX IF NOT EXISTS idx_media_content_score
+	    ON media_content (score DESC, last_accessed_at ASC)
+	    WHERE file_path IS NOT NULL;`,
+
+	// v22: embed a physical-existence judgment in the eviction score. The score
+	// now doubles as a presence flag: a resident file (file_path IS NOT NULL)
+	// keeps its real eviction score in [0,100]; an absent one (evicted, deleted,
+	// or orphaned) carries the sentinel -1. The invariant is
+	//   file_path IS NULL  <=>  score = -1
+	// maintained by Save (re-judges on re-download), the INSERT trigger, and
+	// every file_path := NULL site (MarkEvicted / Delete / orphan sweeps). The
+	// /random media path filters on score <> -1 so it only ever picks posts whose
+	// bytes are genuinely on disk — without a per-candidate stat() — instead of
+	// redirecting to a cold URL the proxy would have to live-fetch from Reddit.
+	`
+	-- Batch re-judge existing rows. Absent rows take the -1 sentinel (floor too,
+	-- so a later passive decay can never lift them off it); resident rows that
+	-- somehow carry a negative score are recomputed from their size.
+	UPDATE media_content
+	SET score = -1.00, score_floor = -1.00
+	WHERE file_path IS NULL;
+
+	UPDATE media_content
+	SET score       = media_initial_score(file_size),
+	    score_floor = media_score_floor(media_initial_score(file_size))
+	WHERE file_path IS NOT NULL AND score < 0;
+
+	-- INSERT trigger: a row inserted without a file_path is absent (-1); one with
+	-- a file_path is scored from its size as before. The existing Save() upsert
+	-- always inserts a file_path, so new fetches keep scoring normally.
+	CREATE OR REPLACE FUNCTION media_content_set_initial_score()
+	RETURNS TRIGGER AS $fn$
+	BEGIN
+	    IF NEW.file_path IS NULL THEN
+	        NEW.score := -1.00;
+	        NEW.score_floor := -1.00;
+	    ELSE
+	        IF COALESCE(NEW.score, 0) <= 0 THEN
+	            NEW.score := media_initial_score(NEW.file_size);
+	        END IF;
+	        IF COALESCE(NEW.score_floor, 0) <= 0 THEN
+	            NEW.score_floor := media_score_floor(NEW.score);
+	        END IF;
+	    END IF;
+	    RETURN NEW;
+	END;
+	$fn$ LANGUAGE plpgsql;
+
+	-- update_asset_access: a -1 (absent) row is never decayed — the sentinel is
+	-- sticky until a re-download re-judges it. Resident rows decay as before.
+	CREATE OR REPLACE FUNCTION update_asset_access(asset_id TEXT, access_type TEXT)
+	RETURNS NUMERIC AS $fn$
+	DECLARE
+	    delta     NUMERIC;
+	    new_score NUMERIC;
+	BEGIN
+	    IF access_type = 'active' THEN
+	        delta := 5.00;
+	    ELSIF access_type = 'passive' THEN
+	        delta := 1.00;
+	    ELSE
+	        RAISE EXCEPTION 'update_asset_access: invalid access_type %, expected passive or active', access_type;
+	    END IF;
+
+	    UPDATE media_content
+	    SET score = CASE WHEN score < 0 THEN score
+	                     ELSE GREATEST(score - delta, score_floor) END,
+	        last_accessed_at = NOW()
+	    WHERE content_hash = asset_id
+	    RETURNING score INTO new_score;
+
+	    RETURN new_score;
+	END;
+	$fn$ LANGUAGE plpgsql;`,
+
+	// v23: stable shuffle_key permutation backing the no-replacement /random walk.
+	// Every post gets a random key in [0,1); /random traverses it with a monotonic
+	// per-filter cursor (WHERE shuffle_key > :cursor ORDER BY shuffle_key LIMIT :n),
+	// so one full round visits every matching row EXACTLY ONCE — sampling without
+	// replacement — via an O(log N) btree range scan instead of the O(N log N) full
+	// sort that ORDER BY RANDOM() costs. On wrap-around (a completed sweep) the walk
+	// redraws the whole permutation (UPDATE posts SET shuffle_key = random(), see
+	// PostStore.Reshuffle) so the next round is fresh, and rotates its entry point
+	// by the golden-ratio step (PostStore.RandomWalk) — a Weyl/Kronecker low-
+	// discrepancy sequence — so consecutive rounds are maximally decorrelated. That
+	// reshuffle is the only O(N) write and fires solely at sweep end, never per
+	// page. The volatile random() DEFAULT means existing rows are
+	// backfilled with distinct keys on the rewrite this ADD COLUMN triggers, and
+	// every later INSERT (Save's upsert) inherits a fresh key without touching it.
+	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS shuffle_key DOUBLE PRECISION NOT NULL DEFAULT random();
+	 CREATE INDEX IF NOT EXISTS idx_posts_shuffle_key ON posts (shuffle_key);`,
 }
 
 func RunMigrations(db *sql.DB) error {

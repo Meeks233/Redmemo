@@ -1,6 +1,14 @@
 package render
 
-import "github.com/redmemo/redmemo/internal/reddit"
+import (
+	"strconv"
+
+	"github.com/redmemo/redmemo/internal/reddit"
+)
+
+// itoa is the local int→string used by the templ shared loader. Tiny wrapper
+// so the templ template body stays expression-level.
+func itoa(n int) string { return strconv.Itoa(n) }
 
 // partials.templ holds the shared presentational components (banners, flair,
 // search box, poll, listing card) as typed templ components. Every page renders
@@ -14,6 +22,23 @@ templ offlineBanner(isOffline bool) {
 			<span>{ T(ctx, "banner.offline") }</span>
 		</div>
 	}
+}
+
+// localInfiniteLoader is the shared scroll-driven pager for purely local
+// archive/cache pages (no upstream). It pairs with /infiniteScroll.js: the
+// script reads `endpoint`/`qs`/`offset`/`offset-step` off the loader div and
+// fetches `{endpoint}?{qs}&offset={n}&partial=1` for each batch. Callers pass
+// the route (e.g. "/archive/r/cats"), the URL-encoded extra query string with
+// any active filters (no offset), the batch size, the current count, and the
+// user's ScrollInterval pref.
+templ localInfiniteLoader(endpoint, qs string, pageSize, current int, interval string) {
+	<div id="infinite-loader" data-endpoint={ endpoint } data-qs={ qs } data-offset={ itoa(current) } data-offset-step={ itoa(pageSize) } data-interval={ interval }>
+		<div id="load-spinner" style="display:none;text-align:center;padding:1em;">
+			<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1.5s linear infinite"><path d="M12 2v4"></path><path d="m16.2 7.8 2.9-2.9"></path><path d="M18 12h4"></path><path d="m16.2 16.2 2.9 2.9"></path><path d="M12 18v4"></path><path d="m4.9 19.1 2.9-2.9"></path><path d="M2 12h4"></path><path d="m4.9 4.9 2.9 2.9"></path></svg>
+		</div>
+		<div id="load-end" style="display:none;text-align:center;padding:1em;opacity:0.5;">{ T(ctx, "scroll.no_more") }</div>
+	</div>
+	<script src="/infiniteScroll.js"></script>
 }
 
 // degradedBanner links to /fuckreddit when the page is served degraded.
@@ -46,17 +71,16 @@ templ submitSVG() {
 	</svg>
 }
 
-// searchbox renders the nav search form. root is the optional subreddit scope
-// (e.g. "/r/golang"); query pre-fills the input.
-templ searchbox(root, query string) {
-	<form action={ templ.SafeURL(searchAction(root)) } id="searchbox">
-		<input id="search" type="text" name="q" placeholder={ T(ctx, "search.placeholder") } title={ T(ctx, "search.placeholder") } value={ query }/>
-		if root != "" && root != "/r/" {
-			<div id="inside">
-				<input type="checkbox" name="restrict_sr" id="restrict_sr" checked/>
-				<label for="restrict_sr" class="search_label" title={ T(ctx, "search.restrict_title") }>{ T(ctx, "search.in", root) }</label>
-			</div>
-		}
+// searchbox is the single shared search form used both in the navbar (action
+// "/search" — live Reddit) and on the /archive page (action "/archive" — local
+// PostgreSQL). query pre-fills the input. It accepts RedMemo's e621-style query
+// syntax (see docs/reddit-search.md); there is no implicit subreddit scoping —
+// scope is expressed explicitly via the greedy sub: syntax in the query.
+templ searchbox(action, query string) {
+	<form action={ templ.SafeURL(action) } id="searchbox">
+		<div id="search_field">
+			<input id="search" type="search" name="q" value={ query } placeholder={ T(ctx, "search.placeholder") } title={ T(ctx, "search.hint") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
+		</div>
 		<button class="submit">
 			@submitSVG()
 		</button>
@@ -110,7 +134,7 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 		<h2 class="post_title">
 			if len(post.Flair.FlairParts) > 0 {
 				<a
-					href={ templ.SafeURL("/r/" + post.Community + "/search?q=flair_name%3A%22" + post.Flair.Text + "%22&restrict_sr=on") }
+					href={ templ.SafeURL("/search?q=flair%3A%22" + post.Flair.Text + "%22+white%3A" + post.Community) }
 					class="post_flair"
 					style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }
 					dir="ltr"
@@ -157,9 +181,9 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 						<video
 							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
 							if lazy {
-								data-src={ post.Media.URL }
+								data-src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
 							} else {
-								src={ post.Media.URL }
+								src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
 							}
 							if post.Media.Width > 0 && post.Media.Height > 0 {
 								width={ i64(post.Media.Width) }
@@ -172,34 +196,15 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 							preload="auto"
 						></video>
 					</div>
-				} else if prefs.UseHLS == "on" && post.Media.AltURL != "" {
-					<div class="post_media_content">
-						<video
-							class="post_media_video short"
-							if prefs.AutoplayVideos == "on" {
-								data-viewport-autoplay
-							}
-							if post.Media.Width > 0 && post.Media.Height > 0 {
-								width={ i64(post.Media.Width) }
-								height={ i64(post.Media.Height) }
-							}
-							poster={ post.Media.Poster }
-							controls
-							preload="metadata"
-						>
-							<source src={ post.Media.AltURL } type="application/vnd.apple.mpegurl"/>
-							<source src={ post.Media.URL } type="video/mp4"/>
-						</video>
-					</div>
 				} else {
 					<div class="post_media_content">
 						<video
 							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
 							if lazy {
-								data-src={ post.Media.URL }
+								data-src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
 								data-poster={ post.Media.Poster }
 							} else {
-								src={ post.Media.URL }
+								src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
 								poster={ post.Media.Poster }
 							}
 							if post.Media.Width > 0 && post.Media.Height > 0 {
@@ -208,6 +213,9 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 							}
 							preload="metadata"
 							controls
+							if videoMuted(post, prefs) {
+								muted
+							}
 							if prefs.AutoplayVideos == "on" {
 								data-viewport-autoplay
 							}

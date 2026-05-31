@@ -1,7 +1,9 @@
 package render
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"io"
 	"io/fs"
 	"net/http"
@@ -13,6 +15,37 @@ import (
 
 //go:embed static
 var staticFS embed.FS
+
+// assetETag is a content hash of every embedded static asset, computed once at
+// startup and sent as the ETag for all of them. The display Version is hardcoded
+// ("0.1.0") and never changes, so versioning asset URLs by it (or marking them
+// "immutable") froze stale CSS/JS in browsers forever across rebuilds. With this
+// ETag plus must-revalidate, browsers still cache but check in on every load:
+// they get a cheap 304 while nothing changed, and the fresh file the instant a
+// rebuild alters the embedded assets (the hash, and thus the ETag, changes).
+var assetETag = computeAssetETag()
+
+func computeAssetETag() string {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return `"0"`
+	}
+	h := sha256.New()
+	_ = fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		f, err := sub.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		io.WriteString(h, path) // include the name so renames also change the hash
+		_, _ = io.Copy(h, f)
+		return nil
+	})
+	return `"` + hex.EncodeToString(h.Sum(nil))[:16] + `"`
+}
 
 type Engine struct {
 	// translators is the locale-bound T function per language, used by the
@@ -86,6 +119,12 @@ type SearchPageData struct {
 	NoPosts            bool
 	AllPostsFiltered   bool
 	IsOffline          bool
+	// IsLocalOnly is true when the page was served entirely from the local
+	// archive (offline fallback or upstream_disabled). Switches the "Load More"
+	// footer to the offset-based infinite-scroll loader against /search itself.
+	IsLocalOnly bool
+	PageSize    int    // posts per partial=1 archive batch
+	Interval    string // ScrollInterval pref, threaded through for the loader
 }
 
 type UserPageData struct {
@@ -110,6 +149,13 @@ type SettingsPageData struct {
 	MediaSize      string
 	OAuthEnabled   bool
 	PrefetchSubs   []string
+	// FrontPageQuery and PrefetchQuery are the backend-normalized filter strings
+	// echoed into the settings inputs: FrontPageQuery is the homepage feed's
+	// accepted sub: clause (e.g. "sub:cats+dogs-meta"), PrefetchQuery is the NP
+	// crawl list in the simple "a+b+c" format. Both are produced server-side so
+	// the page no longer needs JS to reconstruct or validate them.
+	FrontPageQuery string
+	PrefetchQuery  string
 	SubredditStats []SubredditStatView
 	ArchivedSubs   []string
 	LiveSubs       []string
@@ -129,18 +175,11 @@ type ArchiveAlphaGroup struct {
 	Subs   []ArchiveHubEntry
 }
 
-// ArchiveSearchView holds the local-search form state for the /archive page.
+// ArchiveSearchView holds the /archive search box state. The box now uses the
+// shared e621-style query syntax (see docs/reddit-search.md), so the raw text is
+// the only state — all constraints are encoded inside it.
 type ArchiveSearchView struct {
-	Query      string // free-text title query
-	Time       string // "" (any) | "hour" | "day" | "week" | "month" | "year" | "custom"
-	From       string // YYYY-MM-DD, used only when Time == "custom"
-	To         string // YYYY-MM-DD, used only when Time == "custom"
-	Type       string // "" (any) | "nsfw" | "sfw"
-	Media      string // "" (any) | "image" | "video"
-	Source     string // "+"-joined subreddit names; empty = any
-	SourceMode string // "whitelist" (default) | "blacklist"
-	Score      string // raw score threshold the user typed; empty = any
-	ScoreOp    string // "gt" (default) | "lt"
+	Query string // raw query box text (free text + e621-style constraints)
 }
 
 type ArchiveHubPageData struct {
@@ -153,15 +192,14 @@ type ArchiveHubPageData struct {
 
 	// Local archive search.
 	SearchParams ArchiveSearchView
-	PickerSubs   []SubredditStatView // archived subs (name + count), sorted by count, for the Source picker
 
 	// Populated only when a search is active.
-	Search      bool
-	SearchPosts []reddit.Post
-	SearchTotal int64
-	SearchPage  int
-	SearchPages int
-	SearchQS    string // URL-encoded query string (all filters, no page) for pagination links
+	Search         bool
+	SearchPosts    []reddit.Post
+	SearchTotal    int64
+	SearchPageSize int    // posts per partial=1 batch — drives infinite-loader's offset step
+	SearchQS       string // URL-encoded raw query (no offset) for infinite-loader data-qs
+	Interval       string // ScrollInterval pref, threaded through for the loader
 }
 
 type ArchivePageData struct {
@@ -169,11 +207,9 @@ type ArchivePageData struct {
 	Sub                string
 	Posts              []reddit.Post
 	TotalPosts         int64
-	Page               int
-	TotalPages         int
+	PageSize           int    // posts per partial=1 batch — drives infinite-loader's offset step
+	Interval           string // ScrollInterval pref, threaded through for the loader
 	AllPostsHiddenNSFW bool
-	HasPrev            bool
-	HasNext            bool
 }
 
 type TokenView struct {
@@ -459,13 +495,83 @@ func AvailableThemes() []string {
 	return themes
 }
 
+// IsSelectableTheme reports whether name is a concrete palette a user can pick
+// as an auto day/night target: a real embedded theme that is neither "auto"
+// (no fixed palette — it delegates) nor "system" (defers entirely to the OS).
+func IsSelectableTheme(name string) bool {
+	if name == "auto" || name == "system" {
+		return false
+	}
+	for _, t := range AvailableThemes() {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+// autoThemeVars returns the CSS custom-property declarations from a theme's
+// primary `.<name> { ... }` rule in its embedded stylesheet. Theme files lead
+// with that block, so the inner of the first `{ ... }` is the palette.
+func autoThemeVars(theme string) string {
+	b, err := staticFS.ReadFile("static/themes/" + theme + ".css")
+	if err != nil {
+		return ""
+	}
+	s := string(b)
+	open := strings.IndexByte(s, '{')
+	if open < 0 {
+		return ""
+	}
+	close := strings.IndexByte(s[open:], '}')
+	if close < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[open+1 : open+close])
+}
+
+// autoThemeCSS builds the stylesheet that powers the "auto" theme: it wakes the
+// night palette by default and flips to the day palette when the OS reports
+// light mode — mirroring the static auto.css structure but with user-chosen
+// palettes. day/night must be validated (IsSelectableTheme) by the caller;
+// empty values fall back to the light/black defaults.
+func autoThemeCSS(day, night string) string {
+	if !IsSelectableTheme(day) {
+		day = "light"
+	}
+	if !IsSelectableTheme(night) {
+		night = "black"
+	}
+	var b strings.Builder
+	b.WriteString(".auto {\n")
+	b.WriteString(autoThemeVars(night))
+	b.WriteString("\n}\nhtml:has(> .auto) { color-scheme: dark; }\n")
+	b.WriteString("@media (prefers-color-scheme: light) {\n.auto {\n")
+	b.WriteString(autoThemeVars(day))
+	b.WriteString("\n}\nhtml:has(> .auto) { color-scheme: light; }\n}\n")
+	return b.String()
+}
+
+// autoThemeStyle wraps autoThemeCSS in a <style> element. The layout emits this
+// as a raw templ node rather than writing the call inside a literal <style>
+// tag: templ treats a <style> element's body as inert text, so an expression
+// placed there would be printed verbatim instead of evaluated.
+func autoThemeStyle(day, night string) string {
+	return `<style type="text/css">` + autoThemeCSS(day, night) + `</style>`
+}
+
 func (e *Engine) StaticHandler() http.Handler {
 	sub, _ := fs.Sub(staticFS, "static")
 	fs := http.FileServerFS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Every static asset is referenced with a ?v=<Version> cache-buster, so a
-		// new build changes the URL — the response itself can be cached for a year.
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		// Assets live at stable URLs (/style.css, /quotaRing.js, ...). They
+		// must NOT be "immutable": that, plus a never-changing display Version,
+		// pinned stale CSS/JS in browsers across every rebuild. Tag them with a
+		// build-content ETag and force revalidation instead — http.ServeContent
+		// then answers conditional requests with 304 while nothing changed and the
+		// fresh asset the moment a new build alters the embedded files.
+		w.Header().Set("ETag", assetETag)
+		w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
 		fs.ServeHTTP(w, r)
 	})
 }

@@ -519,6 +519,16 @@ func (p *TokenHolder) TokenInstalled() bool {
 	}
 }
 
+// TokenUsable reports whether a session token is usable right now: installed,
+// not expired, not mid-refresh, and with rate budget left. It is a thin wrapper
+// over Token() (which returns nil in all the unusable cases) so background
+// callers can poll local token recovery without issuing an upstream request.
+// Like Token(), it may kick a refresh as a side-effect when the active token is
+// missing or expired — which is exactly what a recovery poll wants.
+func (p *TokenHolder) TokenUsable() bool {
+	return p.Token() != nil
+}
+
 // RemainingBudget implements ratelimit.BudgetSource.
 func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()

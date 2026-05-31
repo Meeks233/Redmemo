@@ -412,10 +412,10 @@ func TestActiveSubs(t *testing.T) {
 	}{
 		{"nil settings", nil, 0},
 		{"empty value", &mockSettings{data: map[string]string{"prefetch_subs": ""}}, 0},
-		{"single sub", &mockSettings{data: map[string]string{"prefetch_subs": "golang"}}, 1},
-		{"multiple subs", &mockSettings{data: map[string]string{"prefetch_subs": "golang+rust+python"}}, 3},
-		{"with spaces", &mockSettings{data: map[string]string{"prefetch_subs": " golang + rust + "}}, 2},
-		{"empty segments", &mockSettings{data: map[string]string{"prefetch_subs": "++golang++"}}, 1},
+		{"single sub", &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang"}}, 1},
+		{"multiple subs", &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang+rust+python"}}, 3},
+		{"excludes ignored", &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang+rust-python"}}, 2},
+		{"empty segments", &mockSettings{data: map[string]string{"prefetch_subs": "sub:+golang+"}}, 1},
 	}
 
 	for _, tt := range tests {
@@ -686,7 +686,7 @@ func TestWaitUntilEnabled_EnabledImmediately(t *testing.T) {
 	s := &Scheduler{
 		settings: &mockSettings{data: map[string]string{
 			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "golang",
+			"prefetch_subs":          "sub:golang",
 		}},
 		Events: NewEventLog(50),
 	}
@@ -723,7 +723,7 @@ func TestRunBigCycle_CancelledContext(t *testing.T) {
 	s := &Scheduler{
 		settings: &mockSettings{data: map[string]string{
 			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "golang",
+			"prefetch_subs":          "sub:golang",
 		}},
 		pool:   &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
 		Events: NewEventLog(50),
@@ -740,7 +740,7 @@ func TestRunBigCycle_DisabledMidCycle(t *testing.T) {
 	ts := &toggleSettings{
 		data: map[string]string{
 			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "golang",
+			"prefetch_subs":          "sub:golang",
 		},
 	}
 	firstCall := true

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -92,7 +93,49 @@ func FormatURL(rawURL string) string {
 var (
 	vRedditDASH = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/((?:DASH|CMAF)_\d{2,4}(?:\.mp4|$|\?source=fallback).*)`)
 	vRedditHLS  = regexp.MustCompile(`https?://v\.redd\.it/([^/]+)/(HLSPlaylist\.m3u8.*)$`)
+
+	// dashHeightRe captures the height in a v.redd.it rendition filename, e.g.
+	// the "720" in "/vid/abc/DASH_720.mp4?source=fallback".
+	dashHeightRe = regexp.MustCompile(`((?:DASH|CMAF)_)(\d{2,4})(\.mp4)`)
 )
+
+// VideoQualityHeights maps the user-facing Video quality option values to the
+// v.redd.it rendition height they request. These are the standard heights
+// Reddit transcodes to; the option list in settings is built from these keys.
+var VideoQualityHeights = map[string]int{
+	"1080": 1080,
+	"720":  720,
+	"480":  480,
+	"360":  360,
+	"240":  240,
+}
+
+// VideoQualityURL clamps a v.redd.it DASH fallback URL to a preferred maximum
+// rendition height.
+//
+// Reddit exposes NO quality query parameter: each rendition is a distinct
+// DASH_<height>.mp4 file, and the API's fallback_url is the TOP rendition the
+// source was transcoded to. So selecting a quality means rewriting the height
+// in the path — and we only ever rewrite DOWNWARD, because requesting a height
+// above the source's top rendition would 404. quality is one of the
+// VideoQualityHeights keys; "", "source", or any non-DASH/HLS URL is returned
+// unchanged (the original/best quality).
+func VideoQualityURL(localURL, quality string) string {
+	want, ok := VideoQualityHeights[quality]
+	if !ok || localURL == "" {
+		return localURL
+	}
+	loc := dashHeightRe.FindStringSubmatchIndex(localURL)
+	if loc == nil {
+		return localURL
+	}
+	// loc[4]:loc[5] is the digits capture group.
+	orig, err := strconv.Atoi(localURL[loc[4]:loc[5]])
+	if err != nil || orig <= 0 || want >= orig {
+		return localURL
+	}
+	return localURL[:loc[4]] + strconv.Itoa(want) + localURL[loc[5]:]
+}
 
 // muxedKeyPrefix is duplicated from media/mux.go to avoid an import cycle.
 // CanonicalKey strips and re-applies it so the wrapped v.redd.it URL is

@@ -9,7 +9,7 @@ templ userTitle(d UserPageData) {
 templ userPage(d UserPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:  userTitle(d),
-		Search: searchbox("", ""),
+		Search: searchbox("/search", ""),
 		Body:   userBody(d),
 		Media:  true,
 	})
@@ -79,10 +79,6 @@ templ userBody(d UserPageData) {
 									</details>
 								</div>
 							}
-						}
-						if d.Prefs.UseHLS == "on" {
-							<script src="/hls.min.js"></script>
-							<script src="/playHLSVideo.js"></script>
 						}
 					</div>
 				}

@@ -15,7 +15,18 @@ import (
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/reddit"
+	"github.com/redmemo/redmemo/internal/searchquery"
 	"github.com/redmemo/redmemo/internal/store"
+)
+
+// l1TokenRetries is how many exponential-backoff attempts L1 makes to let an
+// installed-but-transiently-unusable session token recover before abandoning a
+// listing round. l1TokenRetryBase is the first wait; each attempt doubles it
+// (base, 2*base, 4*base). The retry only re-checks the local token state and
+// never spends an upstream request probing.
+const (
+	l1TokenRetries   = 3
+	l1TokenRetryBase = 2 * time.Second
 )
 
 // TokenWaiter is implemented by the OAuth holder. NP uses it to block on a
@@ -31,6 +42,11 @@ type TokenWaiter interface {
 	// WaitForToken's one-shot signal has already fired, so it returns instantly
 	// and blocking is pointless.
 	TokenInstalled() bool
+	// TokenUsable reports whether a session token is usable *right now* — i.e.
+	// not expired, not refreshing, and with rate budget remaining. It is a
+	// purely local check (no upstream request), used by the L1 backoff retry to
+	// poll whether an installed-but-transiently-unusable token has recovered.
+	TokenUsable() bool
 }
 
 type MediaDownloader interface {
@@ -378,15 +394,9 @@ func (s *Scheduler) activeSubs() []string {
 	if v == "" {
 		return nil
 	}
-	names := strings.Split(v, "+")
-	var subs []string
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if n != "" {
-			subs = append(subs, n)
-		}
-	}
-	return subs
+	// prefetch_subs now holds a query in the global unified search grammar; the
+	// subs to crawl are the sub: clause's includes (e.g. sub:golang+rust).
+	return searchquery.Parse(v).WhiteSubs
 }
 
 func (s *Scheduler) userRequestedRecently() bool {
@@ -525,16 +535,45 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 				// token is a stealth tell we won't accept.
 				if errors.Is(fetchErr, reddit.ErrNoTokenAvailable) && s.tokenWaiter != nil {
 					if s.tokenWaiter.TokenInstalled() {
-						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token temporarily unusable (rate-limited or refreshing), skipping this round", sub, round+1)
-						if s.subStatus != nil {
-							s.subStatus.RecordFailure(sub, "token temporarily unusable")
+						// Token is installed but momentarily unusable (rate-limited
+						// or refreshing). Rather than abandon the round outright,
+						// give the local token a few exponential-backoff chances to
+						// recover, re-checking only whether a usable session token
+						// has reappeared — no upstream request is spent probing. If
+						// it comes back, resume this round with a real fetch; if all
+						// retries lapse, give up the round as before.
+						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token temporarily unusable (rate-limited or refreshing), retrying up to %dx with backoff", sub, round+1, l1TokenRetries)
+						recovered := false
+						for attempt := 0; attempt < l1TokenRetries; attempt++ {
+							backoff := l1TokenRetryBase << attempt
+							select {
+							case <-ctx.Done():
+								fetchErr = ctx.Err()
+								return
+							case <-time.After(backoff):
+							}
+							if s.tokenWaiter.TokenUsable() {
+								s.Events.Addf(LevelInfo, "L1", "r/%s round %d: session token recovered on retry %d/%d, resuming round", sub, round+1, attempt+1, l1TokenRetries)
+								recovered = true
+								break
+							}
+							s.Events.Addf(LevelSkip, "L1", "r/%s round %d: token still unusable after retry %d/%d", sub, round+1, attempt+1, l1TokenRetries)
 						}
-						return
-					}
-					s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
-					if s.tokenWaiter.WaitForToken(ctx) {
+						if !recovered {
+							s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token still unusable after %d retries, skipping this round", sub, round+1, l1TokenRetries)
+							if s.subStatus != nil {
+								s.subStatus.RecordFailure(sub, "token temporarily unusable")
+							}
+							return
+						}
 						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
 						s.recordUpstream(ctx)
+					} else {
+						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
+						if s.tokenWaiter.WaitForToken(ctx) {
+							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", cursor, pageSize)
+							s.recordUpstream(ctx)
+						}
 					}
 				}
 				if fetchErr != nil {

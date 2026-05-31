@@ -34,6 +34,11 @@ type MediaMeta struct {
 	FirstSeen    time.Time
 	LastAccessed time.Time
 	AccessCount  int64
+	// Score is the dynamic existence/eviction score (migration v22): a resident
+	// file carries a value in [0,100] (higher = evict sooner), an absent one the
+	// -1 "not physically cached" sentinel. Presence checks read Score >= 0
+	// instead of stat()-ing the disk.
+	Score float64
 	// AudioState is only meaningful for muxed video rows (key prefix "muxed:").
 	// nil = never checked, "has_audio" = mux succeeded, "silent" = no audio
 	// track exists on Reddit (skip mux), "failed" = audio mux failing and in

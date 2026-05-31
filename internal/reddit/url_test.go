@@ -243,3 +243,39 @@ func TestRewriteEmotes_Empty(t *testing.T) {
 		t.Errorf("RewriteEmotes with nil metadata should return body unchanged, got: %q", result)
 	}
 }
+
+func TestVideoQualityURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		quality string
+		want    string
+	}{
+		// "source" / empty / unknown quality → unchanged
+		{"source keeps original", "/vid/abc/DASH_720.mp4", "source", "/vid/abc/DASH_720.mp4"},
+		{"empty quality keeps original", "/vid/abc/DASH_720.mp4", "", "/vid/abc/DASH_720.mp4"},
+		{"unknown quality keeps original", "/vid/abc/DASH_720.mp4", "999", "/vid/abc/DASH_720.mp4"},
+
+		// Downward clamp rewrites the height in place
+		{"720 to 480", "/vid/abc/DASH_720.mp4", "480", "/vid/abc/DASH_480.mp4"},
+		{"1080 to 240", "/vid/abc/DASH_1080.mp4", "240", "/vid/abc/DASH_240.mp4"},
+		{"preserves fallback query", "/vid/abc/DASH_720.mp4?source=fallback", "360", "/vid/abc/DASH_360.mp4?source=fallback"},
+		{"CMAF rendition", "/vid/abc/CMAF_1080.mp4", "720", "/vid/abc/CMAF_720.mp4"},
+
+		// Never upscale beyond the source (fallback) rendition
+		{"want above source unchanged", "/vid/abc/DASH_480.mp4", "1080", "/vid/abc/DASH_480.mp4"},
+		{"want equals source unchanged", "/vid/abc/DASH_720.mp4", "720", "/vid/abc/DASH_720.mp4"},
+
+		// Non-DASH URLs untouched
+		{"hls untouched", "/hls/abc/HLSPlaylist.m3u8", "480", "/hls/abc/HLSPlaylist.m3u8"},
+		{"image untouched", "/img/abc.jpg", "480", "/img/abc.jpg"},
+		{"empty url", "", "480", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := VideoQualityURL(tt.url, tt.quality); got != tt.want {
+				t.Errorf("VideoQualityURL(%q, %q) = %q, want %q", tt.url, tt.quality, got, tt.want)
+			}
+		})
+	}
+}

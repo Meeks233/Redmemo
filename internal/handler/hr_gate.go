@@ -10,15 +10,22 @@ import (
 // upstream Reddit call and instead serve archived content with a banner.
 //
 // Reasons (in priority order):
+//   - "upstream_disabled" — operator pinned the instance to cache-only mode
+//     via settings (avoids IP blacklisting on public deployments).
 //   - "hr_redis_down" — HR rate-limit store (Redis) unreachable; gate fails
 //     closed and re-probes Redis with exponential backoff.
 //   - "hr_l1" / "hr_l2" / "hr_l3" — HR cooldown active.
 //   - "quota_exhausted" — no OAuth token has remaining quota.
 //   - ""                — clear to proceed upstream.
 //
-// HR cooldown wins over quota_exhausted because it's the more specific
-// failure mode and informs the user that even idle tokens won't be used.
+// upstream_disabled is checked first because it is a deliberate operator
+// choice that overrides everything else. HR cooldown then wins over
+// quota_exhausted because it's the more specific failure mode and informs
+// the user that even idle tokens won't be used.
 func (h *Handler) shouldDegrade(ctx context.Context) (degrade bool, reason string) {
+	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+		return true, "upstream_disabled"
+	}
 	if h.hr != nil {
 		if admitted, blockedReason := h.hr.Admit(ctx); !admitted {
 			return true, blockedReason

@@ -39,92 +39,96 @@ templ searchPostList(posts []reddit.Post, prefs reddit.Preferences, lazy bool) {
 	}
 }
 
+// searchMissState renders a graceful empty-state shown when a search page
+// produced no posts after local (media/score/date) filtering. `visible` sets
+// the initial server-rendered state; the "Load More" script toggles `hidden`
+// as later batches arrive. `more` picks the hint copy: an encouraging "keep
+// loading" when an upstream cursor remains, or the terminal "no posts" when the
+// search is exhausted.
+templ searchMissState(visible, more bool) {
+	<div id="search_miss_state" class="empty_state" if !visible { hidden }>
+		<svg class="empty_state_icon" xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path><path d="m13.5 8.5-5 5"></path><path d="m8.5 8.5 5 5"></path></svg>
+		<p class="empty_state_title">{ T(ctx, "listing.miss_title") }</p>
+		<p id="search_miss_hint" class="empty_state_hint">
+			if more {
+				{ T(ctx, "listing.miss_hint") }
+			} else {
+				{ T(ctx, "listing.no_posts") }
+			}
+		</p>
+	</div>
+}
+
 templ searchPage(d SearchPageData) {
-	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Content: searchContent(d), Media: true})
+	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Search: searchbox("/search", d.Params.Query), Content: searchContent(d), Media: true})
 }
 
 templ searchContent(d SearchPageData) {
 	@offlineBanner(d.IsOffline)
 	@degradedBanner(d.DegradedReason)
 	<div id="column_one">
+		// The query input now lives in the shared navbar searchbox (pre-filled
+		// with the raw query) so a second search always works. This form only
+		// refines sort/timeframe, carrying the active query in a hidden field.
 		<form id="search_sort">
-			<div class="search_widget_divider_box">
-				<input id="search" type="text" name="q" placeholder={ T(ctx, "search.placeholder") } value={ d.Params.Query } title={ T(ctx, "search.placeholder") }/>
-				<div class="search_widget_divider_box">
-					if d.Sub != "" {
-						<div id="inside">
-							<input type="checkbox" name="restrict_sr" id="restrict_sr" if d.Params.RestrictSR { checked }/>
-							<label for="restrict_sr" class="search_label">{ T(ctx, "search.in", "r/"+d.Sub) }</label>
-						</div>
+			<input type="hidden" name="q" value={ d.Params.Query }/>
+			<select id="sort_options" name="sort" title={ T(ctx, "search.sort_title") }>
+				for _, s := range searchSorts {
+					<option value={ s } if s == d.Params.Sort { selected }>{ T(ctx, "sort."+s) }</option>
+				}
+			</select>
+			if d.Params.Sort != "new" {
+				<select id="timeframe" name="t" title="Timeframe">
+					for _, tf := range timeframes {
+						<option value={ tf } if tf == d.Params.Timeframe { selected }>{ T(ctx, "time."+tf) }</option>
 					}
-					if d.Params.Type == "sr_user" {
-						<input type="hidden" name="type" value="sr_user"/>
-					}
-					<select id="sort_options" name="sort" title={ T(ctx, "search.sort_title") }>
-						for _, s := range searchSorts {
-							<option value={ s } if s == d.Params.Sort { selected }>{ T(ctx, "sort."+s) }</option>
-						}
-					</select>
-					if d.Params.Sort != "new" {
-						<select id="timeframe" name="t" title="Timeframe">
-							for _, tf := range timeframes {
-								<option value={ tf } if tf == d.Params.Timeframe { selected }>{ T(ctx, "time."+tf) }</option>
-							}
-						</select>
-					}
-				</div>
-			</div>
+				</select>
+			}
 			<button id="sort_submit" class="submit">@submitSVG()</button>
 		</form>
-		if !d.IsFiltered {
-			if len(d.Subreddits) > 0 || d.Params.Type == "sr_user" {
-				<div id="search_subreddits">
-					if d.Params.Type == "sr_user" {
-						<a href={ templ.SafeURL("?q=" + d.Params.Query + "&sort=" + d.Params.Sort + "&t=" + d.Params.Timeframe) } class="search_subreddit" id="more_subreddits">&larr; { T(ctx, "search.back_results") }</a>
-					}
-					for _, sr := range d.Subreddits {
-						<a href={ templ.SafeURL("/r/" + sr.Name) } class="search_subreddit">
-							<div class="search_subreddit_left">
-								if sr.Icon != "" {
-									<img loading="lazy" src={ sr.Icon } alt={ T(ctx, "search.sr_icon_alt", sr.Name) }/>
-								}
-							</div>
-							<div class="search_subreddit_right">
-								<p class="search_subreddit_header">
-									<span class="search_subreddit_name">r/{ sr.Name }</span>
-									<span class="dot">&bull;</span>
-									<span class="search_subreddit_members" title={ T(ctx, "search.members", sr.Members[1]) }>{ T(ctx, "search.members", sr.Members[0]) }</span>
-								</p>
-								<p class="search_subreddit_description">{ sr.Description }</p>
-							</div>
-						</a>
-					}
-					if d.Params.Type != "sr_user" {
-						<a href={ templ.SafeURL("?q=" + d.Params.Query + "&sort=" + d.Params.Sort + "&t=" + d.Params.Timeframe + "&type=sr_user") } class="search_subreddit" id="more_subreddits">{ T(ctx, "search.more_subreddits") } &rarr;</a>
-					}
-				</div>
-			}
+		if !d.IsFiltered && len(d.Subreddits) > 0 {
+			<div id="search_subreddits">
+				for _, sr := range d.Subreddits {
+					<a href={ templ.SafeURL("/r/" + sr.Name) } class="search_subreddit">
+						<div class="search_subreddit_left">
+							if sr.Icon != "" {
+								<img loading="lazy" src={ sr.Icon } alt={ T(ctx, "search.sr_icon_alt", sr.Name) }/>
+							}
+						</div>
+						<div class="search_subreddit_right">
+							<p class="search_subreddit_header">
+								<span class="search_subreddit_name">r/{ sr.Name }</span>
+								<span class="dot">&bull;</span>
+								<span class="search_subreddit_members" title={ T(ctx, "search.members", sr.Members[1]) }>{ T(ctx, "search.members", sr.Members[0]) }</span>
+							</p>
+							<p class="search_subreddit_description">{ sr.Description }</p>
+						</div>
+					</a>
+				}
+			</div>
 		}
 		if d.AllPostsHiddenNSFW {
 			<span class="listing_warn">{ T(ctx, "listing.all_nsfw") }</span>
-		}
-		if d.NoPosts {
-			<center>{ T(ctx, "listing.no_posts") }</center>
 		}
 		if d.AllPostsFiltered {
 			<span class="listing_warn">{ T(ctx, "listing.all_filtered") }</span>
 		} else if d.IsFiltered {
 			<span class="listing_warn">{ T(ctx, "listing.filtered_from", "r/"+d.Sub) }</span>
 		} else if d.Params.Type != "sr_user" {
-			<div id="search_results">
-				@searchPostList(d.Posts, d.Prefs, d.Prefs.LazyMedia == "on" && !d.IsOffline)
+			<div id="posts">
+				@searchPostList(d.Posts, d.Prefs, d.Prefs.LazyMedia == "on" && !d.IsOffline && !d.IsLocalOnly)
 			</div>
+			// Graceful empty-state for a page that yielded nothing after local
+			// (media/score/date) filtering. It stays in the DOM (hidden) so the
+			// "Load More" script can re-reveal it whenever a later batch also
+			// comes back empty — instead of killing pagination on the first miss.
+			@searchMissState(d.NoPosts, d.Params.After != "")
+		} else if d.NoPosts {
+			<center>{ T(ctx, "listing.no_posts") }</center>
 		}
-		if d.Prefs.UseHLS == "on" {
-			<script src="/hls.min.js"></script>
-			<script src="/playHLSVideo.js"></script>
-		}
-		if d.Params.Type != "sr_user" && !d.NoPosts && d.Params.After != "" {
+		if d.IsLocalOnly && len(d.Posts) > 0 {
+				@localInfiniteLoader(searchEndpoint(d.Sub), searchLocalQS(d.Params.Query, d.Params.Sort), d.PageSize, len(d.Posts), d.Interval)
+			} else if d.Params.Type != "sr_user" && d.Params.After != "" {
 			<footer id="search_more_footer">
 				<button
 					type="button"
@@ -139,6 +143,7 @@ templ searchContent(d SearchPageData) {
 					data-loading={ T(ctx, "loadmore.loading") }
 					data-quota={ T(ctx, "loadmore.quota") }
 					data-no-more={ T(ctx, "loadmore.no_more") }
+					data-empty={ T(ctx, "loadmore.empty") }
 					data-failed={ T(ctx, "loadmore.failed") }
 					accesskey="N"
 				>
@@ -153,18 +158,23 @@ templ searchContent(d SearchPageData) {
 				(function() {
 					var btn = document.getElementById('search_load_more');
 					var msg = document.getElementById('search_more_msg');
-					var results = document.getElementById('search_results');
+					var results = document.getElementById('posts');
+					var miss = document.getElementById('search_miss_state');
+					var hint = document.getElementById('search_miss_hint');
 					if (!btn || !results) return;
 					var label = btn.querySelector('.load-more-label');
 					var loading = false;
 					function finish(text) { msg.textContent = text; msg.style.display = ''; btn.style.display = 'none'; }
 					function reset() { btn.classList.remove('loading'); btn.disabled = false; label.textContent = btn.dataset.label; loading = false; }
+					function showMiss() { if (miss) miss.hidden = false; }
+					function hideMiss() { if (miss) miss.hidden = true; }
 					btn.addEventListener('click', function() {
 						if (loading) return;
 						loading = true;
 						btn.disabled = true;
 						btn.classList.add('loading');
 						label.textContent = btn.dataset.loading;
+						msg.style.display = 'none';
 						var d = btn.dataset;
 						var base = d.sub ? '/r/' + encodeURIComponent(d.sub) + '/search' : '/search';
 						var url = base + '?partial=1'
@@ -178,13 +188,30 @@ templ searchContent(d SearchPageData) {
 							return r.text().then(function(html) { return { degraded: degraded, next: next, html: html }; });
 						}).then(function(res) {
 							if (res.degraded) { finish(btn.dataset.quota); return; }
-							if (!res.html.trim()) { finish(btn.dataset.noMore); return; }
-							var tmp = document.createElement('div');
-							tmp.innerHTML = res.html;
-							while (tmp.firstChild) results.appendChild(tmp.firstChild);
-							if (!res.next) { finish(btn.dataset.noMore); return; }
-							btn.dataset.after = res.next;
-							reset();
+							var hasHtml = !!res.html.trim();
+							if (hasHtml) {
+								var tmp = document.createElement('div');
+								tmp.innerHTML = res.html;
+								while (tmp.firstChild) results.appendChild(tmp.firstChild);
+								hideMiss();
+							}
+							// Reddit still has more pages: keep paging even when this
+							// page matched nothing after local filtering. A page that
+							// filtered down to zero is a graceful miss, not the end.
+							if (res.next) {
+								btn.dataset.after = res.next;
+								if (!hasHtml) showMiss();
+								reset();
+								return;
+							}
+							// No further cursor: upstream is genuinely exhausted.
+							if (hasHtml) {
+								finish(btn.dataset.noMore);
+							} else {
+								showMiss();
+								if (hint) hint.textContent = btn.dataset.empty;
+								btn.style.display = 'none';
+							}
 						}).catch(function() { msg.textContent = btn.dataset.failed; msg.style.display = ''; reset(); });
 					});
 				})();
