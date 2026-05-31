@@ -1282,16 +1282,16 @@ a.search_subreddit:hover {
    the blur on the parent layer, which catches images, gifs, and videos
    uniformly. overflow:hidden clips the blur halo to the post card. */
 .post_blurred .post_media_content {
-    filter: blur(0.6rem);
+    filter: blur(2rem);
     overflow: hidden;
 }
 
 .post_blurred .post_body {
-    filter: blur(0.2rem);
+    filter: blur(0.6rem);
 }
 
 .post_blurred .post_thumbnail * {
-    filter: blur(0.25rem);
+    filter: blur(0.9rem);
 }
 
 /* Hover-to-reveal, gated to real pointer devices so a touch tap's sticky
