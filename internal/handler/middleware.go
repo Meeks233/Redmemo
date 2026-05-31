@@ -102,6 +102,7 @@ var prefDefaults = map[string]string{
 	"mute_all_videos":         "off",
 	"mute_nsfw_videos":        "on",
 	"disable_initiative_upstream_access": "off",
+	"settings_token_ttl":      "10",
 	"auto_theme_day":          "light",
 	"auto_theme_night":        "black",
 	"lang":                    render.DefaultLang,
@@ -162,6 +163,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.MuteAllVideos = pref("mute_all_videos")
 	p.MuteNSFWVideos = pref("mute_nsfw_videos")
 	p.DisableInitiativeUpstreamAccess = pref("disable_initiative_upstream_access")
+	p.SettingsTokenTTL = pref("settings_token_ttl")
 
 	p.AvailableThemes = render.AvailableThemes()
 

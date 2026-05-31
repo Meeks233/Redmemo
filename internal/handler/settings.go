@@ -28,6 +28,15 @@ var settingsKeys = []string{
 	"video_quality", "mute_all_videos", "mute_nsfw_videos",
 	"auto_theme_day", "auto_theme_night",
 	"disable_initiative_upstream_access",
+	"settings_token_ttl",
+}
+
+// allowedSettingsTokenTTL is the whitelist of valid /settings auth-cookie
+// lifetimes in minutes. Anything outside this set is dropped on save and the
+// stored default ("10") stands. Capped at 60 by design — longer-lived ephemeral
+// tokens defeat the lockout/TOTP gate's threat model.
+var allowedSettingsTokenTTL = map[string]bool{
+	"5": true, "10": true, "15": true, "30": true, "60": true,
 }
 
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +207,10 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		if v, ok := updates[key]; ok && !render.IsSelectableTheme(v) {
 			delete(updates, key)
 		}
+	}
+
+	if v, ok := updates["settings_token_ttl"]; ok && !allowedSettingsTokenTTL[v] {
+		delete(updates, "settings_token_ttl")
 	}
 
 	if v, ok := updates["scroll_interval"]; ok {

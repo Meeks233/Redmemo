@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,14 +25,17 @@ import (
 //      straight to step 3.
 //   3. TOTP code entry. Three wrong codes in the same round lock the IP out
 //      until the next 30s TOTP window, and the response redirects to
-//      /fuckreddit. A correct code mints a 5-minute ephemeral access token
-//      (HttpOnly cookie) that authorises every /settings request — the token
-//      is verified on each call and expires server-side; no sliding window.
+//      /fuckreddit. A correct code mints an ephemeral access token (HttpOnly
+//      cookie) that authorises every /settings request — the token is verified
+//      on each call and expires server-side; no sliding window. The lifetime
+//      is user-configurable via settings_token_ttl (defaults to 10 minutes,
+//      capped at 60).
 
 const (
 	authTokenCookie  = "redmemo_settings_token"
 	safeEnvCookie    = "redmemo_env_ack"
-	tokenTTL         = 5 * time.Minute
+	defaultTokenTTL  = 10 * time.Minute
+	maxTokenTTL      = 60 * time.Minute
 	maxAttempts      = 3
 	lockoutWindow    = totp.Period * time.Second
 )
@@ -81,11 +85,21 @@ func (a *AuthManager) HasValidToken(r *http.Request) bool {
 	return true
 }
 
-func (a *AuthManager) issueToken(w http.ResponseWriter) {
+// issueToken mints a fresh ephemeral session cookie. ttl is clamped to
+// (0, maxTokenTTL] — a zero/negative argument falls back to defaultTokenTTL so
+// a misconfigured setting can never produce an immediately-expired cookie or
+// outrun the gate's threat model.
+func (a *AuthManager) issueToken(w http.ResponseWriter, ttl time.Duration) {
+	if ttl <= 0 {
+		ttl = defaultTokenTTL
+	}
+	if ttl > maxTokenTTL {
+		ttl = maxTokenTTL
+	}
 	buf := make([]byte, 24)
 	rand.Read(buf)
 	tok := hex.EncodeToString(buf)
-	exp := time.Now().Add(tokenTTL)
+	exp := time.Now().Add(ttl)
 	a.mu.Lock()
 	a.tokens[tok] = exp
 	// opportunistic GC of expired tokens
@@ -100,10 +114,30 @@ func (a *AuthManager) issueToken(w http.ResponseWriter) {
 		Value:    tok,
 		Path:     "/",
 		Expires:  exp,
-		MaxAge:   int(tokenTTL.Seconds()),
+		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// resolveTokenTTL maps the siteDefaults setting to a concrete duration, clamped
+// to the allowed band. The save handler already whitelists the input, but the
+// clamp here keeps a hand-edited DB or stale value from issuing an out-of-band
+// cookie lifetime.
+func (h *Handler) resolveTokenTTL() time.Duration {
+	v := h.siteDefaults["settings_token_ttl"]
+	if v == "" {
+		return defaultTokenTTL
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultTokenTTL
+	}
+	d := time.Duration(n) * time.Minute
+	if d > maxTokenTTL {
+		d = maxTokenTTL
+	}
+	return d
 }
 
 func (a *AuthManager) clearToken(w http.ResponseWriter) {
@@ -308,7 +342,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		h.auth.resetAttempts(ip)
-		h.auth.issueToken(w)
+		h.auth.issueToken(w, h.resolveTokenTTL())
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 
 	case "totp":
@@ -332,7 +366,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		h.auth.resetAttempts(ip)
-		h.auth.issueToken(w)
+		h.auth.issueToken(w, h.resolveTokenTTL())
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 
 	default:

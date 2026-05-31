@@ -240,6 +240,16 @@ templ settingsContent(d SettingsPageData) {
 							<input type="checkbox" name="disable_initiative_upstream_access" id="disable_initiative_upstream_access" form="settings-form" checked?={ d.Prefs.DisableInitiativeUpstreamAccess == "on" }/>
 						</div>
 						<div class="prefs-group">
+							<label for="settings_token_ttl" title={ T(ctx, "settings.token_ttl_title") }>{ T(ctx, "settings.token_ttl") }</label>
+							<select name="settings_token_ttl" id="settings_token_ttl" form="settings-form">
+								<option value="5" selected?={ d.Prefs.SettingsTokenTTL == "5" }>{ T(ctx, "settings.token_ttl_5") }</option>
+								<option value="10" selected?={ d.Prefs.SettingsTokenTTL == "" || d.Prefs.SettingsTokenTTL == "10" }>{ T(ctx, "settings.token_ttl_10") }</option>
+								<option value="15" selected?={ d.Prefs.SettingsTokenTTL == "15" }>{ T(ctx, "settings.token_ttl_15") }</option>
+								<option value="30" selected?={ d.Prefs.SettingsTokenTTL == "30" }>{ T(ctx, "settings.token_ttl_30") }</option>
+								<option value="60" selected?={ d.Prefs.SettingsTokenTTL == "60" }>{ T(ctx, "settings.token_ttl_60") }</option>
+							</select>
+						</div>
+						<div class="prefs-group">
 							<label for="enable_debug">{ T(ctx, "settings.enable_debug") }</label>
 							<input type="checkbox" id="enable_debug" checked?={ d.Prefs.EnableDebug == "on" } onchange="toggleDebug(this)"/>
 						</div>
@@ -387,7 +397,7 @@ templ settingsContent(d SettingsPageData) {
 		// The homepage filter and its disable toggle live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'disable_initiative_upstream_access'].forEach(function(id) {
+		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'disable_initiative_upstream_access', 'settings_token_ttl'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});
