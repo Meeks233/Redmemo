@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,6 +68,16 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
 		return
 	}
+	// SSRF guard: the upstream URL is request-supplied — anchoring to Reddit's
+	// own CDN host suffixes keeps an attacker from coercing us into fetching
+	// arbitrary internal services (Redis on localhost, cloud metadata, LAN
+	// HTTP, etc.) and streaming their responses back. The path-based proxies
+	// (/img, /vid, ...) already reconstruct their host from a fixed prefix; the
+	// generic /proxy/media surface is the only one that needs this gate.
+	if !isAllowedUpstreamHost(originalURL) {
+		http.Error(w, "host not allowed", http.StatusBadRequest)
+		return
+	}
 
 	// ensureCached serves a disk hit instantly and otherwise fetches the media
 	// through the deduplicated, concurrency-capped path — so a feed full of
@@ -100,6 +111,36 @@ func (p *Proxy) serveUnavailable(w http.ResponseWriter, r *http.Request, origina
 		return
 	}
 	p.reverseProxy(w, r, originalURL, false)
+}
+
+// allowedUpstreamHostSuffixes pins the generic /proxy/media surface to
+// Reddit-owned CDN hostnames. Suffix match (left-anchored at a dot, or exact)
+// so a hostile string like "evil.com/.redd.it.evil.com" doesn't slip past.
+var allowedUpstreamHostSuffixes = []string{
+	"redd.it",
+	"redditmedia.com",
+	"redditstatic.com",
+	"reddit.com",
+}
+
+func isAllowedUpstreamHost(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return false
+	}
+	for _, suf := range allowedUpstreamHostSuffixes {
+		if host == suf || strings.HasSuffix(host, "."+suf) {
+			return true
+		}
+	}
+	return false
 }
 
 // isNonMediaMIME reports whether a Content-Type is something that must never be
