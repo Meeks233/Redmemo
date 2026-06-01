@@ -45,6 +45,28 @@ func (h *Handler) recordUpstream(ctx context.Context) {
 	}
 }
 
+// serveDegradeMiss handles the "no upstream + no archive" terminal case for
+// content routes (post / subreddit / user / search).
+//
+// For upstream_disabled — the operator has *permanently* pinned the instance
+// to cache-only mode — a missing archive means this URL has no content here
+// and never will (until the operator flips the switch). We return HTTP 404
+// with a noindex body so crawlers de-index the URL cleanly instead of latching
+// onto a 307→/fuckreddit chain that looks like thin duplicate content.
+//
+// For every other reason (HR cooldown, quota exhausted, transient failures)
+// the situation is *temporary*, so we keep the 307→/fuckreddit redirect: the
+// countdown page polls /api/status and forwards the user back to `from` once
+// the degrade lifts.
+func (h *Handler) serveDegradeMiss(w http.ResponseWriter, r *http.Request, reason string) {
+	if reason == "upstream_disabled" {
+		prefs := h.readPreferences(r)
+		h.renderer.RenderError(w, prefs.Lang, "This content is not archived locally and the operator has disabled upstream access.", http.StatusNotFound)
+		return
+	}
+	h.redirectFuckReddit(w, r, r.URL.Path, reason)
+}
+
 // redirectFuckReddit issues a 302/307 to the /fuckreddit page, carrying the
 // origin request URI (?from=) and degrade reason (?reason=) so the page can
 // render context-aware content (a "Go back to ..." escape hatch and the

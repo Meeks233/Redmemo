@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/lib/pq"
 	"github.com/redmemo/redmemo/internal/reddit"
 )
 
@@ -387,6 +388,73 @@ func (s *MediaIndexStore) DeleteSupersededPlainRows() ([]string, error) {
 		return nil, err
 	}
 	return paths, nil
+}
+
+// SelectEvictionBatch returns the highest-eviction-score resident rows whose
+// cumulative file_size first crosses targetBytes — i.e. the smallest top-of-
+// list slice that frees at least targetBytes. The cumulative sum is computed
+// inside Postgres via a window function over the eviction order (score DESC,
+// last_accessed_at ASC NULLS FIRST) so the scan piggy-backs on
+// idx_media_content_score and avoids shipping rows we will not evict. Returns
+// at most maxRows entries as a safety cap (pass 0 for unlimited). When
+// targetBytes <= 0 the result is empty.
+func (s *MediaIndexStore) SelectEvictionBatch(targetBytes int64, maxRows int) ([]*MediaMeta, error) {
+	if targetBytes <= 0 {
+		return nil, nil
+	}
+	limitClause := ""
+	args := []interface{}{targetBytes}
+	if maxRows > 0 {
+		limitClause = " LIMIT $2"
+		args = append(args, maxRows)
+	}
+	q := `
+		WITH ranked AS (
+			SELECT content_hash, file_path, mime_type, file_size, score,
+			       SUM(file_size) OVER (
+			           ORDER BY score DESC, last_accessed_at ASC NULLS FIRST, content_hash
+			       ) - file_size AS prior_total
+			FROM media_content
+			WHERE file_path IS NOT NULL AND score >= 0
+		)
+		SELECT content_hash, file_path, mime_type, file_size, score
+		FROM ranked
+		WHERE prior_total < $1
+		ORDER BY prior_total` + limitClause
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("select eviction batch: %w", err)
+	}
+	defer rows.Close()
+	var out []*MediaMeta
+	for rows.Next() {
+		m := &MediaMeta{}
+		if err := rows.Scan(&m.Hash, &m.FilePath, &m.MIMEType, &m.FileSize, &m.Score); err != nil {
+			return nil, fmt.Errorf("scan eviction batch: %w", err)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// BatchMarkEvicted clears file_path and drops the score/floor to the -1
+// sentinel on every listed content row in a single statement. The URL aliases
+// are left in place so the next request can re-trigger a fetch and re-attach
+// (mirrors MarkEvicted's per-row semantics).
+func (s *MediaIndexStore) BatchMarkEvicted(hashes []string) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`UPDATE media_content
+		 SET file_path = NULL, score = -1.00, score_floor = -1.00
+		 WHERE content_hash = ANY($1)`,
+		pq.Array(hashes),
+	)
+	if err != nil {
+		return fmt.Errorf("batch mark evicted: %w", err)
+	}
+	return nil
 }
 
 // MarkEvicted clears the file_path on a content row whose disk file the

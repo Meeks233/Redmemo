@@ -203,7 +203,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	}
 
 	// 4. Nothing available
-	h.redirectFuckReddit(w, r, r.URL.Path, reason)
+	h.serveDegradeMiss(w, r, reason)
 }
 
 func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences, limit int) bool {

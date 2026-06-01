@@ -78,6 +78,21 @@ type BasePage struct {
 	// quota exhaustion. Empty string = not degraded. When non-empty the
 	// "degraded_banner" partial renders and links to /fuckreddit?reason=...
 	DegradedReason string
+	// Indexable opts this page into search engine indexing. Default false
+	// keeps the global "noindex, nofollow" robots directive — only the
+	// archive surfaces (which describe what THIS instance archives, not a
+	// duplicate of reddit.com) flip it on, and only when the instance owner
+	// has set SEO.AllowIndexing in config.
+	Indexable bool
+	// MetaDescription overrides the default i18n meta.description string.
+	// Surfaced verbatim in Google's snippet — used by archive pages to list
+	// the actual subreddits this instance mirrors.
+	MetaDescription string
+	// HeadExtraHTML is a pre-built raw HTML blob the layout injects into
+	// <head> verbatim — used for SEO additions (canonical link, OpenGraph,
+	// JSON-LD structured data) that handlers compose without each page templ
+	// needing its own HeadExtra slot. Trusted input; do not pass user data.
+	HeadExtraHTML string
 }
 
 type SubredditPageData struct {

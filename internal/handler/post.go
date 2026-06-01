@@ -64,7 +64,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	}
 
 	// 4. Nothing available
-	h.redirectFuckReddit(w, r, r.URL.Path, reason)
+	h.serveDegradeMiss(w, r, reason)
 }
 
 func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {

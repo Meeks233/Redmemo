@@ -249,10 +249,14 @@ const GoldenRatio = 0.6180339887498949
 // roundDone=true once the arc back to origin is spent — the caller then opens a
 // fresh round by rotating origin via GoldenRatio.
 //
-// When mediaOnly is true it additionally restricts to posts whose media has been
-// fetched (media_done = true); the /random media path uses it to walk a small
-// pool and redirect to the first entry whose bytes are genuinely on disk (see
-// handleRandom), honouring the endpoint's "never contacts Reddit" contract.
+// mediaOnly is accepted for callsite clarity but does NOT add a SQL filter:
+// media_done flips to true only after every media item (poster + preview +
+// gallery + main) succeeded, so a video whose muxed mp4 is genuinely on disk
+// but whose poster fetch 404'd reads media_done=false — and the /random media
+// path would then never see it. The per-candidate IsResident check in
+// serveRandomMedia (media_content.score >= 0) is the ground truth and already
+// gates the redirect, so the SQL pre-filter would only ever hide otherwise
+// servable posts.
 func (s *PostStore) RandomWalk(opts ArchiveSearchOpts, mediaOnly bool, origin, cursor float64, n int) (posts []*StoredPost, newCursor float64, roundDone bool, err error) {
 	if n < 1 {
 		n = 1
@@ -323,11 +327,10 @@ func (s *PostStore) Reshuffle() error {
 // shuffle_key > low and (when hasHigh) shuffle_key <= high, ordered ascending and
 // capped at n. It returns the page and the largest shuffle_key it handed out.
 func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, mediaOnly bool, low float64, hasHigh bool, high float64, n int) ([]*StoredPost, float64, error) {
+	_ = mediaOnly // SQL gate dropped (see RandomWalk doc); per-candidate
+	// IsResident in serveRandomMedia is the ground truth.
 	extra, args, argN := archiveFilterClauses(opts, 1)
 	where := "1=1" + extra
-	if mediaOnly {
-		where += " AND media_done = true"
-	}
 	where += fmt.Sprintf(" AND shuffle_key > $%d", argN)
 	args = append(args, low)
 	argN++
@@ -382,7 +385,7 @@ type ArchiveSearchOpts struct {
 	After      *time.Time // created_utc >= After
 	Before     *time.Time // created_utc <= Before
 	NSFW       string     // "" (any) | "nsfw" | "sfw"
-	Media      string     // "" (any) | "image" | "video" (is_gif=false) | "gif" (is_gif=true)
+	Media      []string   // nil = any; otherwise ordered subset of {"image","video","gif"} ORed together
 	Author     string     // exact, case-insensitive author; empty = any
 	Flair      string     // exact, case-insensitive flair text; empty = any
 	WhiteSubs  []string   // case-insensitive whitelist; empty = any
@@ -405,6 +408,36 @@ func safeSQLCmp(op string) string {
 	default:
 		return ">"
 	}
+}
+
+// mediaPostTypes expands a parsed media-type set into the PostType literals
+// stored in json_data: "image" → image+gallery, "video" → video (is_gif=false),
+// "gif" → gif (is_gif=true). Unknown tokens are skipped; duplicates de-duped.
+// Returns nil when the set carries no constraint.
+func mediaPostTypes(media []string) []string {
+	if len(media) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, 4)
+	var out []string
+	add := func(t string) {
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	for _, m := range media {
+		switch m {
+		case "image":
+			add("image")
+			add("gallery")
+		case "video":
+			add("video")
+		case "gif":
+			add("gif")
+		}
+	}
+	return out
 }
 
 // archiveFilterClauses builds the shared " AND ..." WHERE fragment (and its bind
@@ -440,15 +473,13 @@ func archiveFilterClauses(opts ArchiveSearchOpts, startArg int) (string, []any, 
 	case "sfw":
 		where.WriteString(nsfwExcludeSQL)
 	}
-	switch opts.Media {
-	case "image":
-		where.WriteString(" AND (json_data->>'PostType') IN ('image','gallery')")
-	case "video":
-		// Real videos: Reddit's is_gif=false, captured as PostType "video".
-		where.WriteString(" AND (json_data->>'PostType') = 'video'")
-	case "gif":
-		// GIF uploads: Reddit's is_gif=true, captured as PostType "gif".
-		where.WriteString(" AND (json_data->>'PostType') = 'gif'")
+	if pts := mediaPostTypes(opts.Media); len(pts) > 0 {
+		// Multiple media tokens (e.g. t:gif+vid) OR their PostType sets together.
+		quoted := make([]string, len(pts))
+		for i, t := range pts {
+			quoted[i] = "'" + t + "'"
+		}
+		fmt.Fprintf(&where, " AND (json_data->>'PostType') IN (%s)", strings.Join(quoted, ","))
 	}
 	if opts.Author != "" {
 		fmt.Fprintf(&where, " AND LOWER(author) = LOWER($%d)", argN)

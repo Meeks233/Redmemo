@@ -24,13 +24,22 @@ func (h *Handler) staticHandler() http.Handler {
 }
 
 func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
-	cdnURL := pathToCDNURL(r.URL.Path, r.URL.RawQuery)
+	// Pull dl_title (frontend download-name hint) out before reconstructing the
+	// CDN URL; it must not leak to Reddit's signed image hosts.
+	clientQuery := r.URL.Query()
+	dlTitle := clientQuery.Get("dl_title")
+	clientQuery.Del("dl_title")
+	cdnURL := pathToCDNURL(r.URL.Path, clientQuery.Encode())
 	if cdnURL == "" {
 		http.NotFound(w, r)
 		return
 	}
 
-	r.URL.RawQuery = "url=" + url.QueryEscape(cdnURL)
+	newQuery := "url=" + url.QueryEscape(cdnURL)
+	if dlTitle != "" {
+		newQuery += "&dl_title=" + url.QueryEscape(dlTitle)
+	}
+	r.URL.RawQuery = newQuery
 	h.mediaProxy.ServeMedia(w, r)
 }
 
@@ -72,8 +81,15 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.URL.RawQuery != "" {
-		upstream += "?" + r.URL.RawQuery
+	// Pull dl_title out of the client query before reconstructing the upstream
+	// URL — it is a frontend-only hint for Content-Disposition and must not be
+	// forwarded to the Reddit CDN (where signed-URL validation rejects extra
+	// params).
+	clientQuery := r.URL.Query()
+	dlTitle := clientQuery.Get("dl_title")
+	clientQuery.Del("dl_title")
+	if upstreamRaw := clientQuery.Encode(); upstreamRaw != "" {
+		upstream += "?" + upstreamRaw
 	}
 
 	if strings.HasSuffix(path, ".m3u8") || strings.Contains(path, "HLSPlaylist") {
@@ -90,7 +106,11 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.URL.RawQuery = "url=" + url.QueryEscape(upstream)
+	newQuery := "url=" + url.QueryEscape(upstream)
+	if dlTitle != "" {
+		newQuery += "&dl_title=" + url.QueryEscape(dlTitle)
+	}
+	r.URL.RawQuery = newQuery
 	h.mediaProxy.ServeMedia(w, r)
 }
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"html/template"
 	"log"
@@ -89,7 +90,7 @@ func (a *AuthManager) HasValidToken(r *http.Request) bool {
 // (0, maxTokenTTL] — a zero/negative argument falls back to defaultTokenTTL so
 // a misconfigured setting can never produce an immediately-expired cookie or
 // outrun the gate's threat model.
-func (a *AuthManager) issueToken(w http.ResponseWriter, ttl time.Duration) {
+func (a *AuthManager) issueToken(w http.ResponseWriter, r *http.Request, ttl time.Duration) {
 	if ttl <= 0 {
 		ttl = defaultTokenTTL
 	}
@@ -97,7 +98,10 @@ func (a *AuthManager) issueToken(w http.ResponseWriter, ttl time.Duration) {
 		ttl = maxTokenTTL
 	}
 	buf := make([]byte, 24)
-	rand.Read(buf)
+	if _, err := rand.Read(buf); err != nil {
+		http.Error(w, "token gen failed", http.StatusInternalServerError)
+		return
+	}
 	tok := hex.EncodeToString(buf)
 	exp := time.Now().Add(ttl)
 	a.mu.Lock()
@@ -116,8 +120,23 @@ func (a *AuthManager) issueToken(w http.ResponseWriter, ttl time.Duration) {
 		Expires:  exp,
 		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
+		Secure:   isTLSRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+// isTLSRequest returns true when the request reached the server over TLS,
+// either directly or via a trusted reverse proxy that set X-Forwarded-Proto.
+// Used to gate the Secure cookie flag — never lie to the browser by setting
+// Secure on a plain-HTTP connection (the cookie would be silently dropped).
+func isTLSRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
+		return true
+	}
+	return false
 }
 
 // resolveTokenTTL maps the siteDefaults setting to a concrete duration, clamped
@@ -185,13 +204,21 @@ func (a *AuthManager) locked(ip string) (bool, time.Duration) {
 	return false, 0
 }
 
-// markCodeUsed records a freshly-accepted TOTP code as consumed. Returns true
-// if the code was already seen within its validity window — the caller must
-// then refuse to mint a token and surface a compromise warning. Codes age out
-// after 3 × Period (covers ±1 skew tolerance in totp.Verify).
-func (a *AuthManager) markCodeUsed(code string) (replay bool) {
+// consumeCode atomically verifies code against secret and, on success, marks
+// it consumed for its remaining validity window. Returns (ok, replay):
+//   - ok=false                  -> code invalid
+//   - ok=true,  replay=true     -> code valid but already used; caller MUST
+//                                  refuse to mint a token (surface compromise)
+//   - ok=true,  replay=false    -> caller may mint a token
+//
+// Atomicity matters: a naive verify-then-mark sequence lets two concurrent
+// requests both pass Verify before either records the code, defeating the
+// single-use guarantee.
+func (a *AuthManager) consumeCode(secret, code string, now time.Time) (ok, replay bool) {
+	if !totp.Verify(secret, code, now) {
+		return false, false
+	}
 	const ttl = 3 * totp.Period * time.Second
-	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for k, exp := range a.usedCodes {
@@ -199,11 +226,11 @@ func (a *AuthManager) markCodeUsed(code string) (replay bool) {
 			delete(a.usedCodes, k)
 		}
 	}
-	if exp, ok := a.usedCodes[code]; ok && now.Before(exp) {
-		return true
+	if exp, used := a.usedCodes[code]; used && now.Before(exp) {
+		return true, true
 	}
 	a.usedCodes[code] = now.Add(ttl)
-	return false
+	return true, false
 }
 
 func (a *AuthManager) resetAttempts(ip string) {
@@ -325,7 +352,8 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		code := r.FormValue("code")
-		if !totp.Verify(secret, code, time.Now()) {
+		ok, replay := h.auth.consumeCode(secret, code, time.Now())
+		if !ok {
 			if locked := h.auth.registerFailure(ip); locked {
 				// Roll back the enrollment so the next round starts fresh —
 				// otherwise an attacker who tripped the lockout would gain a
@@ -337,12 +365,12 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			h.renderEnrollment(w, r, secret, "code did not match — try the next 30s window")
 			return
 		}
-		if h.auth.markCodeUsed(code) {
+		if replay {
 			http.Redirect(w, r, "/fuckreddit?reason=totp_replay", http.StatusSeeOther)
 			return
 		}
 		h.auth.resetAttempts(ip)
-		h.auth.issueToken(w, h.resolveTokenTTL())
+		h.auth.issueToken(w, r, h.resolveTokenTTL())
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 
 	case "totp":
@@ -353,7 +381,8 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		code := r.FormValue("code")
-		if !totp.Verify(secret, code, time.Now()) {
+		ok, replay := h.auth.consumeCode(secret, code, time.Now())
+		if !ok {
 			if locked := h.auth.registerFailure(ip); locked {
 				http.Redirect(w, r, "/fuckreddit?reason=auth_locked", http.StatusSeeOther)
 				return
@@ -361,12 +390,12 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			h.renderAuthPage(w, r, stageTOTPCode, "incorrect code")
 			return
 		}
-		if h.auth.markCodeUsed(code) {
+		if replay {
 			http.Redirect(w, r, "/fuckreddit?reason=totp_replay", http.StatusSeeOther)
 			return
 		}
 		h.auth.resetAttempts(ip)
-		h.auth.issueToken(w, h.resolveTokenTTL())
+		h.auth.issueToken(w, r, h.resolveTokenTTL())
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 
 	default:
@@ -374,34 +403,18 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 	}
 }
 
-// handleAuthQR streams the otpauth PNG for the enrolled secret. Inline data:
-// URI is fine but a separate endpoint keeps the HTML small and lets the
-// browser cache normally.
-func (h *Handler) handleAuthQR(w http.ResponseWriter, r *http.Request) {
-	if h.auth == nil {
-		http.NotFound(w, r)
-		return
-	}
-	secret, err := h.auth.store.Secret()
-	if err != nil || secret == "" {
-		http.NotFound(w, r)
-		return
-	}
-	// Only serve the QR while the user is in the enrollment window — once a
-	// valid ephemeral token has been issued, re-rendering the QR is unwanted.
-	// We allow it during the no-token window so the enrollment page can fetch.
-	if h.auth.HasValidToken(r) {
-		http.NotFound(w, r)
-		return
-	}
+// qrDataURI renders the otpauth QR as a base64 data: URI so the enrollment
+// page can embed it inline. The QR is only ever produced server-side during
+// the freshly-completed server-secret POST and rendered ONCE in the response —
+// no public endpoint exposes the secret. This eliminates the prior attack
+// where any unauthenticated visitor could GET /settings/qr and recover the
+// TOTP secret after first enrollment.
+func qrDataURI(secret string) (string, error) {
 	png, err := totp.QRCodePNG(secret, 256)
 	if err != nil {
-		http.Error(w, "qr gen failed", http.StatusInternalServerError)
-		return
+		return "", err
 	}
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(png)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png), nil
 }
 
 var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
@@ -443,7 +456,7 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 {{else if eq .Stage "enroll"}}
   <h1>Scan this QR — shown once</h1>
   <p class="muted">Add it to your authenticator (Google Authenticator, Aegis, 1Password…). Enter the current 6-digit code to finish enrollment. This QR will not be shown again.</p>
-  <img class="qr" src="/settings/qr" alt="TOTP QR">
+  <img class="qr" src="{{.QRDataURI}}" alt="TOTP QR">
   <p class="muted">Or import manually:</p>
   <code>{{.Secret}}</code>
   <form method="post" action="/settings" autocomplete="off" style="margin-top:1rem">
@@ -466,6 +479,7 @@ type authPageView struct {
 	Stage           string
 	Err             string
 	Secret          string
+	QRDataURI       string
 	Theme           string
 	BodyClass       string
 	ThemeStylesheet bool
@@ -508,7 +522,12 @@ func (h *Handler) renderAuthPage(w http.ResponseWriter, r *http.Request, stage a
 }
 
 func (h *Handler) renderEnrollment(w http.ResponseWriter, r *http.Request, secret, errMsg string) {
-	v := authPageView{Stage: "enroll", Secret: secret, Err: errMsg}
+	dataURI, err := qrDataURI(secret)
+	if err != nil {
+		http.Error(w, "qr gen failed", http.StatusInternalServerError)
+		return
+	}
+	v := authPageView{Stage: "enroll", Secret: secret, QRDataURI: dataURI, Err: errMsg}
 	h.themeView(r, &v)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

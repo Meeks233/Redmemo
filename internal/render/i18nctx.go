@@ -355,6 +355,28 @@ func tokenClass(hasBudget bool) string {
 	return "token-empty"
 }
 
+// metaDescription returns the page's <meta name="description"> content:
+// a per-page override (used by archive pages to list the actual subreddits this
+// instance mirrors) or the i18n default. Threaded through the layout so the
+// global meta tag stays a single tag — multiple description metas just confuse
+// crawlers.
+func metaDescription(ctx context.Context, p BasePage) string {
+	if p.MetaDescription != "" {
+		return p.MetaDescription
+	}
+	return T(ctx, "meta.description", p.BrandName)
+}
+
+// robotsMeta returns the page's <meta name="robots"> content. Default is the
+// safe noindex,nofollow — only pages that explicitly set Indexable (the archive
+// surfaces, gated behind SEO.AllowIndexing) opt in.
+func robotsMeta(p BasePage) string {
+	if p.Indexable {
+		return "index, follow"
+	}
+	return "noindex, nofollow"
+}
+
 // ShowThemeStylesheet is the exported counterpart to showThemeStylesheet, used
 // by the handler-side auth gate which renders outside the templ layout.
 func ShowThemeStylesheet(theme string) bool { return showThemeStylesheet(theme) }

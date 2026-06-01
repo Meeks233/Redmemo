@@ -27,6 +27,12 @@ templ settingsContent(d SettingsPageData) {
 				<span>{ T(ctx, "settings.debug_warn_pre") }<a href="/debug">{ T(ctx, "settings.debug_warn_link") }</a>{ T(ctx, "settings.debug_warn_post") }</span>
 			</div>
 		}
+		if d.Prefs.DisableInitiativeUpstreamAccess != "on" {
+			<div class="debug-banner">
+				<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+				<span>{ T(ctx, "settings.upstream_warn") }</span>
+			</div>
+		}
 		<div id="settings">
 			<div class="settings-column">
 				<form id="settings-form" action="/settings" method="POST">
@@ -237,7 +243,7 @@ templ settingsContent(d SettingsPageData) {
 						<div class="prefs-group">
 							<label for="disable_initiative_upstream_access" title={ T(ctx, "settings.disable_upstream_title") }>{ T(ctx, "settings.disable_upstream") }</label>
 							<input type="hidden" value="off" name="disable_initiative_upstream_access" form="settings-form"/>
-							<input type="checkbox" name="disable_initiative_upstream_access" id="disable_initiative_upstream_access" form="settings-form" checked?={ d.Prefs.DisableInitiativeUpstreamAccess == "on" }/>
+							<input type="checkbox" name="disable_initiative_upstream_access" id="disable_initiative_upstream_access" form="settings-form" checked?={ d.Prefs.DisableInitiativeUpstreamAccess == "on" } onchange="toggleUpstream(this)"/>
 						</div>
 						<div class="prefs-group">
 							<label for="settings_token_ttl" title={ T(ctx, "settings.token_ttl_title") }>{ T(ctx, "settings.token_ttl") }</label>
@@ -438,6 +444,29 @@ templ settingsContent(d SettingsPageData) {
 			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
 		}
 
+		function toggleUpstream(cb) {
+			// Checking the box turns ON the protection (no upstream traffic) — safe,
+			// apply immediately. Unchecking re-enables upstream access; on a public
+			// deployment that can burn through the session-token quota and get the
+			// instance's IP blacklisted, so confirm before allowing it.
+			if (!cb.checked) {
+				cb.checked = true;
+				document.getElementById('upstream-modal').classList.add('visible');
+			} else {
+				checkDirty();
+			}
+		}
+
+		function confirmUpstream() {
+			document.getElementById('upstream-modal').classList.remove('visible');
+			document.getElementById('disable_initiative_upstream_access').checked = false;
+			checkDirty();
+		}
+
+		function cancelUpstream() {
+			document.getElementById('upstream-modal').classList.remove('visible');
+		}
+
 		function toggleDebug(cb) {
 			if (cb.checked) {
 				cb.checked = false;
@@ -471,6 +500,17 @@ templ settingsContent(d SettingsPageData) {
 			<div class="modal-actions">
 				<button class="modal-cancel" onclick="cancelPrefetch()">{ T(ctx, "settings.cancel") }</button>
 				<button class="modal-confirm" onclick="confirmPrefetch()">{ T(ctx, "settings.accept_risk") }</button>
+			</div>
+		</div>
+	</div>
+	<div class="modal-overlay" id="upstream-modal" onclick="if(event.target===this)cancelUpstream()">
+		<div class="modal-box">
+			<h2>{ T(ctx, "settings.upstream_modal_title") }</h2>
+			<p>{ T(ctx, "settings.upstream_modal_body") }</p>
+			<p>{ T(ctx, "settings.confirm_continue") }</p>
+			<div class="modal-actions">
+				<button class="modal-cancel" onclick="cancelUpstream()">{ T(ctx, "settings.cancel") }</button>
+				<button class="modal-confirm" onclick="confirmUpstream()">{ T(ctx, "settings.accept_risk") }</button>
 			</div>
 		</div>
 	</div>

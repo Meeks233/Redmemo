@@ -44,12 +44,49 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 	// violating /random's "never contacts Reddit" contract and blocking for
 	// seconds (a stale media_done flag does not guarantee the bytes survived;
 	// see serveRandomMedia).
-	if parsed.MediaType != "" {
-		h.serveRandomMedia(w, r, parsed, opts)
-		return
+	if parsed.Instant {
+		// Instant mode walks the three media kinds in a fixed video → image →
+		// gif preference, restricted to the user's `t:` allow-set if one was
+		// given (e.g. `t:vid-gif+ins` only walks video). The first kind with a
+		// resident match wins. If every allowed kind misses, drop the media
+		// filter entirely and fall through to the text path so a matching
+		// non-media post can be returned as plain text.
+		instantPriority := []string{"video", "image", "gif"}
+		allowed := make(map[string]bool, 3)
+		if len(parsed.MediaTypes) == 0 {
+			for _, t := range instantPriority {
+				allowed[t] = true
+			}
+		} else {
+			for _, t := range parsed.MediaTypes {
+				allowed[t] = true
+			}
+		}
+		for _, t := range instantPriority {
+			if !allowed[t] {
+				continue
+			}
+			single := parsed
+			single.MediaTypes = []string{t}
+			if h.serveRandomMedia(w, r, single, parsedToArchiveOpts(single)) {
+				return
+			}
+		}
+		// No resident media of any allowed kind. Re-walk without the media
+		// constraint so a text post can satisfy the request.
+		parsed.MediaTypes = nil
+		opts = parsedToArchiveOpts(parsed)
+	} else if len(parsed.MediaTypes) > 0 {
+		if h.serveRandomMedia(w, r, parsed, opts) {
+			return
+		}
+		// No resident media matched (e.g. t:vid where no videos have been
+		// downloaded and muxed yet). Fall through to the JSON path so the
+		// user gets a matching post's metadata instead of a 503 — the SQL
+		// filter still constrains to the requested media types.
 	}
 
-	// A score: constraint filters by the media cache eviction score, which can't
+	// A cache_score: constraint filters by the media cache eviction score, which can't
 	// be expressed in the SQL walk — it is resolved per-post in Go. Pull pages of
 	// candidates and keep walking the sweep until one matches; without the
 	// constraint a single one-row page is enough (SQL already did all filtering).
@@ -92,6 +129,12 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if sp == nil {
+		if parsed.Instant {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("no archived post matches the given filters\n"))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"error":"no archived post matches the given filters"}`))
@@ -101,6 +144,22 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 	var post reddit.Post
 	_ = json.Unmarshal(sp.JSONData, &post)
 	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+
+	// Instant mode: the user asked for the raw resource, not a JSON envelope.
+	// serveRandomMedia already handled the cached-media case and returned true,
+	// so reaching here means the matched post has no resident bytes — write its
+	// text body (selftext) or fall back to its title.
+	if parsed.Instant {
+		body := strings.TrimSpace(string(post.Body))
+		if body == "" {
+			body = sp.Title
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Random-Post", sp.URLPath)
+		w.Write([]byte(body))
+		return
+	}
 
 	resp := map[string]any{
 		"url":         sp.URLPath,
@@ -151,7 +210,7 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 const randomMediaPoolSize = 64
 
 // randomFilterMaxPages caps how many random-walk pages a Go-post-filtered
-// /random request (a score: query) scans before giving up. A highly selective
+// /random request (a cache_score: query) scans before giving up. A highly selective
 // filter can leave only a handful of matches in a subset of thousands, so a
 // single page often contains none — the cause of intermittent 503s. The walk
 // therefore keeps pulling pages until it finds a match OR a full no-replacement
@@ -160,12 +219,14 @@ const randomMediaPoolSize = 64
 // the cap only bites on very large subsets, bounding worst-case work.
 const randomFilterMaxPages = 32
 
-// serveRandomMedia answers /random?media=images. It pulls a small random pool of
-// matching posts and redirects to the first one whose served image is actually
-// on local disk; if none in the pool is cached it returns 503 rather than
-// redirect to a cold URL the proxy would have to live-fetch from Reddit.
-func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, opts store.ArchiveSearchOpts) {
-	// A score: constraint is resolved per-post in Go and can be highly selective,
+// serveRandomMedia answers a /random request whose query pins a media type. It
+// pulls a small random pool of matching posts and redirects to the first one
+// whose served media is actually on local disk; returns true once it has
+// written the response. Returns false when no resident match is found — the
+// caller then falls back to the JSON path so the user still gets a random
+// matching post (rather than 503 because no bytes happen to be cached).
+func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, opts store.ArchiveSearchOpts) bool {
+	// A cache_score: constraint is resolved per-post in Go and can be highly selective,
 	// so one page often holds no match. Keep walking the sweep until a match is
 	// found, a full no-replacement pass completes, or the page cap is hit. Without
 	// it a single pool suffices (the cached-on-disk hit rate is high).
@@ -178,7 +239,7 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 		candidates, roundDone, err := h.randomWalk(r.Context(), parsed, opts, true, randomMediaPoolSize)
 		if err != nil {
 			writeRandomError(w, http.StatusInternalServerError, err.Error())
-			return
+			return true
 		}
 		if len(candidates) == 0 {
 			break // matching subset is empty
@@ -202,15 +263,15 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 			if !h.mediaProxy.IsResident(reddit.UnformatURL(imgURL)) {
 				continue
 			}
-			// A score: constraint additionally requires the resident media's eviction
+			// A cache_score: constraint additionally requires the resident media's eviction
 			// score to satisfy the threshold (offline-only filter; see matchCacheScore).
 			if parsed.CacheScore != nil && !h.matchCacheScore(parsed.CacheScore, &post) {
 				continue
 			}
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("X-Random-Post", sp.URLPath)
-			http.Redirect(w, r, imgURL, http.StatusFound)
-			return
+			http.Redirect(w, r, appendDLTitle(imgURL, sp.Title), http.StatusFound)
+			return true
 		}
 		// The cursor resumes mid-sweep, so the first roundDone ends only a partial
 		// pass (and reshuffles into a fresh round). Scan that fresh round too and
@@ -222,9 +283,7 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 			}
 		}
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	w.Write([]byte(`{"error":"no archived post with cached media matches the given filters"}`))
+	return false
 }
 
 // randomQueryExpr extracts the /random filter expression, treating `&` as
@@ -235,6 +294,12 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 // percent-decoding each — so the whole query string parses identically to
 // `?q=s:golang u>1000 t:img`. A literal `&` inside a value still works when
 // percent-encoded as `%26`, since decoding happens after the split.
+//
+// Decoding uses PathUnescape (not QueryUnescape) so `+` stays a literal `+`.
+// `+` is a meaningful joiner inside grammar values — `sub:golang+rust`,
+// `t:vid-gif+ins`, `t:img+vid` — and treating it as the form-encoded space
+// would silently shatter those values into separate tokens. Users wanting a
+// literal space should percent-encode it as `%20`.
 func randomQueryExpr(r *http.Request) string {
 	raw := r.URL.RawQuery
 	if raw == "" {
@@ -246,7 +311,7 @@ func randomQueryExpr(r *http.Request) string {
 			continue
 		}
 		seg = strings.TrimPrefix(seg, "q=")
-		if dec, err := url.QueryUnescape(seg); err == nil {
+		if dec, err := url.PathUnescape(seg); err == nil {
 			seg = dec
 		}
 		if seg = strings.TrimSpace(seg); seg != "" {
@@ -274,7 +339,7 @@ const randomWalkTTL = 24 * time.Hour
 //
 // It also returns roundDone: true when this page completed a full no-replacement
 // sweep of the matching subset. A caller applying a Go-side post-filter (e.g.
-// score:) loops over pages until it finds a match or sees roundDone — at which
+// cache_score:) loops over pages until it finds a match or sees roundDone — at which
 // point it has inspected the entire subset once and can conclude "no match"
 // rather than 503-ing off a single unlucky page.
 func (h *Handler) randomWalk(ctx context.Context, parsed searchquery.Parsed, opts store.ArchiveSearchOpts, mediaOnly bool, n int) ([]*store.StoredPost, bool, error) {
@@ -371,6 +436,22 @@ func (h *Handler) writeWalkState(ctx context.Context, key string, origin, cursor
 // frac returns the fractional part of x in [0,1), the wrap used by the golden-
 // ratio origin rotation.
 func frac(x float64) float64 { return x - math.Floor(x) }
+
+// appendDLTitle attaches a dl_title query parameter to a local proxy URL so the
+// image/video proxy emits a friendly Content-Disposition filename. The proxy
+// strips dl_title before forwarding to Reddit's signed CDN, so this is safe to
+// stack on any /vid/, /img/, /preview/, /thumb/, /emoji/ or /hls/ path.
+func appendDLTitle(proxyURL, title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return proxyURL
+	}
+	sep := "?"
+	if strings.Contains(proxyURL, "?") {
+		sep = "&"
+	}
+	return proxyURL + sep + "dl_title=" + url.QueryEscape(title)
+}
 
 func writeRandomError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

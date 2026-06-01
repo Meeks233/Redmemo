@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,18 @@ type Config struct {
 	Prefetch  PrefetchConfig  `yaml:"prefetch"`
 	HRLimit   HRLimitConfig   `yaml:"hrlimit"`
 	Render    RenderConfig    `yaml:"render"`
+	SEO       SEOConfig       `yaml:"seo"`
+}
+
+// SEOConfig controls how the instance presents itself to search engines.
+// Off by default — only the instance owner who actually wants the archive
+// pages crawled flips AllowIndexing on. When off, robots.txt is "Disallow: /",
+// sitemap.xml 404s, and every page keeps noindex,nofollow. The "what this
+// instance archives" story (archive hub + per-sub pages + sitemap of subs)
+// only goes live once the owner opts in.
+type SEOConfig struct {
+	AllowIndexing bool   `yaml:"allow_indexing"`
+	CanonicalHost string `yaml:"canonical_host"` // e.g. "https://memo.example.com" — used for absolute URLs in sitemap + <link rel=canonical>
 }
 
 type HRLimitConfig struct {
@@ -294,6 +307,7 @@ func applyEnvOverrides(cfg *Config) {
 		"REDMEMO_RENDER_BRAND_NAME": &cfg.Render.BrandName,
 		"REDMEMO_LEGACY_INSTANCE":   &cfg.Legacy.Instance,
 		"REDMEMO_SERVER_SECRET":     &cfg.Auth.ServerSecret,
+		"REDMEMO_SEO_CANONICAL_HOST": &cfg.SEO.CanonicalHost,
 	}
 
 	for env, ptr := range envMap {
@@ -302,8 +316,56 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 
-	if v := os.Getenv("REDMEMO_LEGACY_SYNC"); v != "" {
-		cfg.Legacy.SyncEnabled = parseBool(v)
+	boolEnv := map[string]*bool{
+		"REDMEMO_LEGACY_SYNC":               &cfg.Legacy.SyncEnabled,
+		"REDMEMO_PREFETCH_ENABLED":          &cfg.Prefetch.Enabled,
+		"REDMEMO_RENDER_SHOW_ARCHIVE_BADGE": &cfg.Render.ShowArchiveBadge,
+		"REDMEMO_SEO_ALLOW_INDEXING":        &cfg.SEO.AllowIndexing,
+	}
+	for env, ptr := range boolEnv {
+		if v := os.Getenv(env); v != "" {
+			*ptr = parseBool(v)
+		}
+	}
+
+	intEnv := map[string]*int{
+		"REDMEMO_MEDIA_MAX_SIZE_GB":       &cfg.Media.MaxSizeGB,
+		"REDMEMO_RATELIMIT_WINDOW_SIZE":   &cfg.RateLimit.WindowSize,
+		"REDMEMO_RATELIMIT_SAFETY_BUFFER": &cfg.RateLimit.SafetyBuffer,
+	}
+	for env, ptr := range intEnv {
+		if v := os.Getenv(env); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				*ptr = n
+			} else {
+				log.Printf("config: %s=%q is not a valid integer; ignoring", env, v)
+			}
+		}
+	}
+
+	durationEnv := map[string]*time.Duration{
+		"REDMEMO_SERVER_READ_TIMEOUT":           &cfg.Server.ReadTimeout,
+		"REDMEMO_SERVER_WRITE_TIMEOUT":          &cfg.Server.WriteTimeout,
+		"REDMEMO_MEDIA_EVICTION_CHECK_INTERVAL": &cfg.Media.EvictionCheckInterval,
+		"REDMEMO_RATELIMIT_WINDOW_DURATION":     &cfg.RateLimit.WindowDuration,
+		"REDMEMO_PREFETCH_CHECK_INTERVAL":       &cfg.Prefetch.CheckInterval,
+	}
+	for env, ptr := range durationEnv {
+		if v := os.Getenv(env); v != "" {
+			if d, err := time.ParseDuration(v); err == nil {
+				*ptr = d
+			} else {
+				log.Printf("config: %s=%q is not a valid duration; ignoring", env, v)
+			}
+		}
+	}
+
+	if v := os.Getenv("REDMEMO_MEDIA_EVICTION_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Media.EvictionThreshold = f
+		} else {
+			log.Printf("config: REDMEMO_MEDIA_EVICTION_THRESHOLD=%q is not a valid float; ignoring", v)
+		}
 	}
 }
 

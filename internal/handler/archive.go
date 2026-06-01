@@ -76,7 +76,7 @@ func archiveSearchQS(v render.ArchiveSearchView) string {
 }
 
 // archiveCacheScoreScanCap bounds how many SQL-matched rows the cache-score
-// archive search pulls into memory before Go-filtering. The score: constraint
+// archive search pulls into memory before Go-filtering. The cache_score: constraint
 // can't be expressed in SQL (the eviction score lives behind canonical-key +
 // muxed resolution), so this path scans up to this many matches of the *other*
 // constraints and filters them by resident eviction score in Go. It is sized to
@@ -85,7 +85,7 @@ func archiveSearchQS(v render.ArchiveSearchView) string {
 const archiveCacheScoreScanCap = 2000
 
 // archiveCacheScoreSearch runs the archive local search for a query carrying a
-// score: (media cache eviction score) constraint. It pulls the SQL matches of
+// cache_score: (media cache eviction score) constraint. It pulls the SQL matches of
 // every other constraint, keeps only posts whose primary media is resident and
 // whose eviction score satisfies nc, then slices the survivors by offset/limit
 // in Go. It returns the requested window of posts and the total survivor count.
@@ -157,7 +157,7 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 		var posts []reddit.Post
 		var total int64
 		if parsed.CacheScore != nil && h.mediaProxy != nil {
-			// The score: constraint (media cache eviction score) can't be pushed
+			// The cache_score: constraint (media cache eviction score) cannot be pushed
 			// into SQL, so this path scans the other constraints' matches and
 			// filters/paginates by resident eviction score in Go.
 			posts, total = h.archiveCacheScoreSearch(searchOpts, parsed.CacheScore, offset)
@@ -280,6 +280,8 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 	if sort == "all" {
 		data.AlphaGroups, data.AlphaIndex = groupSubsAlphabetical(subs)
 	}
+
+	h.decorateArchiveHubSEO(&data, names)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.renderer.RenderArchiveHub(w, data); err != nil {
@@ -459,6 +461,8 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 		PageSize:   archivePageSize,
 		Interval:   prefs.ScrollInterval,
 	}
+
+	h.decorateArchiveSubSEO(&data)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.renderer.RenderArchive(w, data); err != nil {

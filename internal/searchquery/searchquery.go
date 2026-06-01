@@ -79,7 +79,14 @@ type Parsed struct {
 	BlackSubs []string // blacklist subreddits (lowercased, deduped)
 	Author    string   // author filter
 	Flair     string   // flair text filter
-	MediaType string   // "image" | "video" | "gif" | ""
+	MediaTypes []string // ordered, deduped subset of {"image","video","gif"}; nil = any
+	// Instant is set by an `ins`/`instant` segment inside a `t:` value (e.g.
+	// `t:ins`, `t:ins+vid`). It is not a media type but a sibling flag asking
+	// /random to return the matched post's resource (cached media bytes via
+	// redirect, or the post's text body) instead of a JSON envelope. A signed
+	// exclude (`-ins`/`-instant`) is meaningless and silently dropped without
+	// rejecting the surrounding token.
+	Instant bool
 	Score     *NumConstraint
 	Comments  *NumConstraint
 	// CacheScore filters by the media cache *eviction* score (media_content.score,
@@ -105,11 +112,11 @@ type signedSub struct {
 }
 
 // numKeyRe splits a numeric constraint token: key, operator, integer value.
-// The colon form (upvote:100) is treated as equality. Three distinct targets:
-//   - `upvote`/`upvotes`/`ups`/`u` → Reddit post score (online + offline)
-//   - `score` → media cache eviction score (offline archive/random only)
+// The colon form (score:100) is treated as equality. Three distinct targets:
+//   - `score`/`upvote`/`upvotes`/`ups`/`u` → Reddit post score (online + offline)
+//   - `cache_score` → media cache eviction score (offline archive/random only)
 //   - `comments`/`comment`/`c` → comment count
-var numKeyRe = regexp.MustCompile(`^(?i)(score|upvotes|upvote|ups|u|comments|comment|c)(>=|<=|>|<|=|:)(-?\d+)$`)
+var numKeyRe = regexp.MustCompile(`^(?i)(cache_score|score|upvotes|upvote|ups|u|comments|comment|c)(>=|<=|>|<|=|:)(-?\d+)$`)
 
 // kvRe splits a generic key:value (or key=value) token. The value may be quoted.
 var kvRe = regexp.MustCompile(`^(?i)([a-z_]+)[:=](.+)$`)
@@ -135,9 +142,9 @@ func Parse(raw string) Parsed {
 			switch strings.ToLower(m[1]) {
 			case "comments", "comment", "c":
 				p.Comments = nc
-			case "score":
+			case "cache_score":
 				p.CacheScore = nc
-			default: // upvote(s) / ups / u
+			default: // score / upvote(s) / ups / u
 				p.Score = nc
 			}
 			continue
@@ -182,15 +189,32 @@ func (p *Parsed) applyKV(key, val string) bool {
 	case "flair", "flair_name", "f":
 		p.Flair = val
 	case "type", "media", "t":
-		switch strings.ToLower(val) {
-		case "image", "img", "gallery", "pic":
-			p.MediaType = "image"
-		case "video", "vid":
-			p.MediaType = "video"
-		case "gif":
-			p.MediaType = "gif"
-		default:
+		// Allow multiple types joined by '+' (e.g. `t:gif+vid`, `type:img+vid+gif`).
+		// Each segment is normalized to one of {image,video,gif}; unknown segments
+		// reject the whole token so it falls back to free text.
+		// Segments may be signed: `+x` (or implicit) includes, `-x` excludes.
+		// With no includes the base is the full set {image,video,gif}; any
+		// excludes then subtract from it (e.g. `t:-gif` = image+video). With
+		// includes present, excludes subtract from the include set. One bad
+		// segment rejects the whole token so it falls back to free text
+		// without partially committing the good ones. An empty final set also
+		// rejects (e.g. `t:-img-vid-gif`).
+		fresh, instant, ok := parseSignedMediaTypes(val)
+		if !ok {
 			return false
+		}
+		if instant {
+			p.Instant = true
+		}
+		seen := make(map[string]bool, len(p.MediaTypes)+len(fresh))
+		for _, s := range p.MediaTypes {
+			seen[s] = true
+		}
+		for _, s := range fresh {
+			if !seen[s] {
+				seen[s] = true
+				p.MediaTypes = append(p.MediaTypes, s)
+			}
 		}
 	case "after", "since":
 		if t := parseDate(val, false); t != nil {
@@ -240,6 +264,89 @@ func splitSignedSubs(val string) []signedSub {
 		}
 	}
 	return out
+}
+
+// mediaCanonical normalizes a single media-type alias to one of
+// {image,video,gif}, or returns "" for an unknown name.
+func mediaCanonical(seg string) string {
+	switch strings.ToLower(seg) {
+	case "image", "img", "gallery", "pic":
+		return "image"
+	case "video", "vid":
+		return "video"
+	case "gif":
+		return "gif"
+	}
+	return ""
+}
+
+// allMediaTypes is the closed universe of media-type tokens, in display order.
+// A bare `t:-gif` exclude with no includes starts from this set.
+var allMediaTypes = []string{"image", "video", "gif"}
+
+// parseSignedMediaTypes resolves a `t:`/`type:`/`media:` value with optional
+// `+`/`-` segment signs into an ordered, deduped subset of allMediaTypes. The
+// second return is false when any segment is an unknown alias or when the
+// resolved set is empty (so the caller can fall back to free text).
+func parseSignedMediaTypes(val string) ([]string, bool, bool) {
+	includes := make(map[string]bool, 3)
+	excludes := make(map[string]bool, 3)
+	includeOrder := make([]string, 0, 3)
+	instant := false
+	for i, n := 0, len(val); i < n; {
+		include := true
+		if val[i] == '+' || val[i] == '-' {
+			include = val[i] == '+'
+			i++
+		}
+		start := i
+		for i < n && val[i] != '+' && val[i] != '-' {
+			i++
+		}
+		seg := strings.TrimSpace(val[start:i])
+		if seg == "" {
+			continue
+		}
+		// `ins`/`instant` is an output-mode flag, not a media kind. Include sets
+		// the flag; a signed exclude has no meaning and is silently dropped (it
+		// must not reject the surrounding token or land in free text).
+		if low := strings.ToLower(seg); low == "ins" || low == "instant" {
+			if include {
+				instant = true
+			}
+			continue
+		}
+		norm := mediaCanonical(seg)
+		if norm == "" {
+			return nil, false, false
+		}
+		if include {
+			if !includes[norm] {
+				includes[norm] = true
+				includeOrder = append(includeOrder, norm)
+			}
+		} else {
+			excludes[norm] = true
+		}
+	}
+	base := includeOrder
+	if len(base) == 0 && len(excludes) > 0 {
+		// Bare exclude(s): start from the full universe.
+		base = allMediaTypes
+	}
+	out := make([]string, 0, len(base))
+	for _, t := range base {
+		if !excludes[t] {
+			out = append(out, t)
+		}
+	}
+	// A bare `t:ins` (instant flag, no media constraint) is valid — accept it
+	// with an empty media-type set. An empty result that is ALSO missing the
+	// instant flag (e.g. `t:-img-vid-gif`) is still a rejection.
+	if len(out) == 0 && !instant {
+		return nil, false, false
+	}
+	return out, instant, true
 }
 
 // resolveSubs collapses every accumulated signed sub into WhiteSubs/BlackSubs.
@@ -319,14 +426,19 @@ func (p Parsed) Canonical() string {
 	case "safe":
 		parts = append(parts, "r:safe")
 	}
-	if p.MediaType != "" {
-		parts = append(parts, "t:"+p.MediaType)
+	if len(p.MediaTypes) > 0 || p.Instant {
+		segs := make([]string, 0, len(p.MediaTypes)+1)
+		if p.Instant {
+			segs = append(segs, "ins")
+		}
+		segs = append(segs, p.MediaTypes...)
+		parts = append(parts, "t:"+strings.Join(segs, "+"))
 	}
 	if p.Score != nil {
-		parts = append(parts, "u"+p.Score.SQLOp()+strconv.Itoa(p.Score.Val))
+		parts = append(parts, "score"+p.Score.SQLOp()+strconv.Itoa(p.Score.Val))
 	}
 	if p.CacheScore != nil {
-		parts = append(parts, "score"+p.CacheScore.SQLOp()+strconv.Itoa(p.CacheScore.Val))
+		parts = append(parts, "cache_score"+p.CacheScore.SQLOp()+strconv.Itoa(p.CacheScore.Val))
 	}
 	if p.Comments != nil {
 		parts = append(parts, "c"+p.Comments.SQLOp()+strconv.Itoa(p.Comments.Val))
@@ -428,7 +540,7 @@ func (p Parsed) TextQuery() string {
 // HasLocalFilter reports whether any constraint must be enforced client-side on
 // live Reddit results (Reddit can't express these in `q`).
 //
-// MediaType and CacheScore are intentionally excluded. Reddit's search can't
+// MediaTypes and CacheScore are intentionally excluded. Reddit's search can't
 // return a specific media kind, so the live post-filter lets every type through
 // and silently drops the type:video/image constraint rather than emptying the
 // page. CacheScore filters by the *local* media cache eviction score, which has

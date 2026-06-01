@@ -74,37 +74,83 @@ templ postContent(d PostPageData) {
 			})();
 		</script>
 		@postDetail(d.Post, d.Prefs, d.HasOAuth)
-		<div id="commentQueryForms">
-			<form id="sort">
-				<p id="comment_count">{ d.Post.Comments[0] } { commentsWord(d.Post.Comments[1]) } <span id="sorted_by">{ T(ctx, "comments.sorted_by") }</span></p>
-				<select name="sort" title={ T(ctx, "comments.sort_title") } id="commentSortSelect">
-					for _, s := range commentSorts {
-						<option value={ s } if s == d.Sort { selected }>{ T(ctx, "sort."+s) }</option>
-					}
-				</select>
-				<button id="sort_submit" class="submit">@submitSVG()</button>
-			</form>
-			<form id="sort">
-				<input id="search" class="commentQuery" type="search" name="q" value={ d.CommentQuery } placeholder={ T(ctx, "comments.search_placeholder") }/>
-				<input type="hidden" name="type" value="comment"/>
-			</form>
-		</div>
-		<div>
-			if d.CommentQuery != "" {
-				{ T(ctx, "comments.containing", d.CommentQuery) }&nbsp;|&nbsp;<a id="allCommentsLink" href={ templ.SafeURL(d.URLWithoutQuery) }>{ T(ctx, "comments.all") }</a>
-			}
-		</div>
-		for _, c := range d.Comments {
-			<div class="thread">
-				if d.SingleThread {
-					<p class="thread_nav"><a href={ templ.SafeURL(d.Post.Permalink) }>{ T(ctx, "comments.view_all") }</a></p>
-					if c.ParentKind == "t1" {
-						<p class="thread_nav"><a href="?context=9999">{ T(ctx, "comments.show_parent") }</a></p>
-					}
-				}
-				@commentTree(c)
+		if d.DegradedReason == "upstream_disabled" {
+			@upstreamDisabledNotice(d.Post, d.Prefs)
+		} else {
+			<div id="commentQueryForms">
+				<form id="sort">
+					<p id="comment_count">{ d.Post.Comments[0] } { commentsWord(d.Post.Comments[1]) } <span id="sorted_by">{ T(ctx, "comments.sorted_by") }</span></p>
+					<select name="sort" title={ T(ctx, "comments.sort_title") } id="commentSortSelect">
+						for _, s := range commentSorts {
+							<option value={ s } if s == d.Sort { selected }>{ T(ctx, "sort."+s) }</option>
+						}
+					</select>
+					<button id="sort_submit" class="submit">@submitSVG()</button>
+				</form>
+				<form id="sort">
+					<input id="search" class="commentQuery" type="search" name="q" value={ d.CommentQuery } placeholder={ T(ctx, "comments.search_placeholder") }/>
+					<input type="hidden" name="type" value="comment"/>
+				</form>
 			</div>
+			<div>
+				if d.CommentQuery != "" {
+					{ T(ctx, "comments.containing", d.CommentQuery) }&nbsp;|&nbsp;<a id="allCommentsLink" href={ templ.SafeURL(d.URLWithoutQuery) }>{ T(ctx, "comments.all") }</a>
+				}
+			</div>
+			for _, c := range d.Comments {
+				<div class="thread">
+					if d.SingleThread {
+						<p class="thread_nav"><a href={ templ.SafeURL(d.Post.Permalink) }>{ T(ctx, "comments.view_all") }</a></p>
+						if c.ParentKind == "t1" {
+							<p class="thread_nav"><a href="?context=9999">{ T(ctx, "comments.show_parent") }</a></p>
+						}
+					}
+					@commentTree(c)
+				</div>
+			}
 		}
+	</div>
+}
+
+// upstreamDisabledNotice renders an inline fuckreddit-style block in place of
+// the comment thread when the operator pinned the instance to cache-only mode.
+// The OP is still rendered from the local archive above; this block sits below
+// it as a prompt + direct-to-reddit escape hatch. The post detail header already
+// renders the visitRedditConfirmation modal (when the user hasn't disabled it),
+// so the "Access directly" link here can reuse it via data-leave-modal.
+templ upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) {
+	<div id="error" class="upstream-disabled-inline">
+		<div class="prefs">
+			<fieldset>
+				<legend>{ T(ctx, "fr.exhausted") }</legend>
+				<div class="error-icon">
+					<svg class="heart-broken lucide-heart-crack" xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+						<g class="heart-half left">
+							<path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path>
+							<path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path>
+						</g>
+						<g class="heart-half right">
+							<path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path>
+							<path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path>
+						</g>
+					</svg>
+				</div>
+				<p>{ T(ctx, "fr.upstream_disabled") }</p>
+				<div class="fr-actions">
+					if prefs.DisableVisitRedditConfirmation == "on" {
+						<a class="fr-go-reddit" href={ templ.SafeURL("https://www.reddit.com" + post.Permalink) } target="_blank" rel="nofollow noopener noreferrer">
+							<span class="fr-go-reddit-emoji" aria-hidden="true">😈</span>
+							<span>{ T(ctx, "fr.access_directly") }</span>
+						</a>
+					} else {
+						<a class="fr-go-reddit" href={ templ.SafeURL("https://www.reddit.com" + post.Permalink) } target="_blank" rel="nofollow noopener noreferrer" data-leave-modal data-modal-confirm={ T(ctx, "fr.access_directly") }>
+							<span class="fr-go-reddit-emoji" aria-hidden="true">😈</span>
+							<span>{ T(ctx, "fr.access_directly") }</span>
+						</a>
+					}
+				</div>
+			</fieldset>
+		</div>
 	</div>
 }
 
@@ -208,7 +254,7 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 			<div class="post_media_content">
 				<video
 					class="post_media_video"
-					src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+					src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
 					controls
 					if videoMuted(post, prefs) {
 						muted
@@ -217,7 +263,7 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 						data-viewport-autoplay
 					}
 					loop
-				><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
+				><a href={ templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)) }>{ T(ctx, "media.video") }</a></video>
 			</div>
 		} else if post.PostType == "gallery" {
 			<div class="gallery">

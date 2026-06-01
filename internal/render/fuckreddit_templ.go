@@ -142,145 +142,149 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if !frReasonIsStatic(d.Reason) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.reset_at"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 38, Col: 29}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, " <span id=\"fr-countdown\" data-from=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.From)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 39, Col: 48}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if d.Freeze {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, " data-freeze=\"1\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.reset_at"))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 39, Col: 30}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, " <span id=\"fr-countdown\" data-from=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var9 string
+				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.From)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 40, Col: 49}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if d.Freeze {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " data-freeze=\"1\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, ">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if d.Freeze {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "99:99")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "--:--")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</span></p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
-			}
-			if d.Freeze {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "99:99")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "--:--")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span></p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
 			}
 			if d.From != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"fr-actions\"><a class=\"fr-go-reddit\" href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div class=\"fr-actions\"><a class=\"fr-go-reddit\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 templ.SafeURL
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + d.From))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 49, Col: 86}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 51, Col: 86}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" data-leave-modal data-modal-confirm=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" target=\"_blank\" rel=\"nofollow noopener noreferrer\" data-leave-modal data-modal-confirm=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "fr.access_directly"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 49, Col: 206}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 51, Col: 206}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\"><span class=\"fr-go-reddit-emoji\" aria-hidden=\"true\">😈</span> <span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\"><span class=\"fr-go-reddit-emoji\" aria-hidden=\"true\">😈</span> <span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.access_directly"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 51, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 53, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span></a></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span></a></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<legend>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<legend>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.allright"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 56, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 58, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</legend><div class=\"error-icon\"><svg class=\"heart-alive\" xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"80\" viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path class=\"heart-shape\" d=\"M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572\" stroke=\"#22c55e\" fill=\"rgba(34,197,94,0.15)\"></path> <path class=\"ecg-line\" d=\"M3 12h2l2 -3l3 6l2 -3h3\" stroke=\"#22c55e\" fill=\"none\"></path></svg></div><p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</legend><div class=\"error-icon\"><svg class=\"heart-alive\" xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"80\" viewBox=\"0 0 24 24\" fill=\"none\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path class=\"heart-shape\" d=\"M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572\" stroke=\"#22c55e\" fill=\"rgba(34,197,94,0.15)\"></path> <path class=\"ecg-line\" d=\"M3 12h2l2 -3l3 6l2 -3h3\" stroke=\"#22c55e\" fill=\"none\"></path></svg></div><p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.congrats"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 63, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/fuckreddit.templ`, Line: 65, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</fieldset></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</fieldset></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if d.Reason != "" && d.From != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. --> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. --> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -294,7 +298,7 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, " <script>\n\t\t\t// /fuckreddit countdown — server is the sole source of truth. Poll\n\t\t\t// /api/status every 1s, render current_reset, swap reason text when the\n\t\t\t// active tier changes, and redirect back once the degrade lifts.\n\t\t\t(function(){\n\t\t\t\tvar el = document.getElementById('fr-countdown');\n\t\t\t\tif (!el) return;\n\t\t\t\tif (el.getAttribute('data-freeze') === '1') return;\n\t\t\t\tvar reasonEl = document.getElementById('fr-reason-text');\n\t\t\t\tvar fromPath = el.getAttribute('data-from') || '';\n\t\t\t\tvar REASON_TEXTS = {};\n\t\t\t\ttry { REASON_TEXTS = JSON.parse(document.getElementById('fr-reason-texts').textContent); } catch (e) {}\n\t\t\t\tfunction fmt(s) {\n\t\t\t\t\tif (s < 0) s = 0;\n\t\t\t\t\tvar m = Math.floor(s / 60);\n\t\t\t\t\tvar r = s % 60;\n\t\t\t\t\treturn (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;\n\t\t\t\t}\n\t\t\t\tvar lastReason = null;\n\t\t\t\tvar redirecting = false;\n\t\t\t\tfunction poll() {\n\t\t\t\t\tfetch('/api/status').then(function(r){ return r.json(); }).then(function(d){\n\t\t\t\t\t\tvar reason = d.current_reason || '';\n\t\t\t\t\t\tif (!reason) {\n\t\t\t\t\t\t\tif (redirecting) return;\n\t\t\t\t\t\t\tredirecting = true;\n\t\t\t\t\t\t\twindow.location.replace(fromPath || '/');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (reason !== lastReason) {\n\t\t\t\t\t\t\tlastReason = reason;\n\t\t\t\t\t\t\tif (reasonEl && REASON_TEXTS[reason]) {\n\t\t\t\t\t\t\t\treasonEl.textContent = REASON_TEXTS[reason];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tel.textContent = fmt(d.current_reset || 0);\n\t\t\t\t\t}).catch(function(){});\n\t\t\t\t}\n\t\t\t\tpoll();\n\t\t\t\tsetInterval(poll, 1000);\n\t\t\t})();\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " <script>\n\t\t\t// /fuckreddit countdown — server is the sole source of truth. Poll\n\t\t\t// /api/status every 1s, render current_reset, swap reason text when the\n\t\t\t// active tier changes, and redirect back once the degrade lifts.\n\t\t\t(function(){\n\t\t\t\tvar el = document.getElementById('fr-countdown');\n\t\t\t\tif (!el) return;\n\t\t\t\tif (el.getAttribute('data-freeze') === '1') return;\n\t\t\t\tvar reasonEl = document.getElementById('fr-reason-text');\n\t\t\t\tvar fromPath = el.getAttribute('data-from') || '';\n\t\t\t\tvar REASON_TEXTS = {};\n\t\t\t\ttry { REASON_TEXTS = JSON.parse(document.getElementById('fr-reason-texts').textContent); } catch (e) {}\n\t\t\t\tfunction fmt(s) {\n\t\t\t\t\tif (s < 0) s = 0;\n\t\t\t\t\tvar m = Math.floor(s / 60);\n\t\t\t\t\tvar r = s % 60;\n\t\t\t\t\treturn (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;\n\t\t\t\t}\n\t\t\t\tvar lastReason = null;\n\t\t\t\tvar redirecting = false;\n\t\t\t\tfunction poll() {\n\t\t\t\t\tfetch('/api/status').then(function(r){ return r.json(); }).then(function(d){\n\t\t\t\t\t\tvar reason = d.current_reason || '';\n\t\t\t\t\t\tif (!reason) {\n\t\t\t\t\t\t\tif (redirecting) return;\n\t\t\t\t\t\t\tredirecting = true;\n\t\t\t\t\t\t\twindow.location.replace(fromPath || '/');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (reason !== lastReason) {\n\t\t\t\t\t\t\tlastReason = reason;\n\t\t\t\t\t\t\tif (reasonEl && REASON_TEXTS[reason]) {\n\t\t\t\t\t\t\t\treasonEl.textContent = REASON_TEXTS[reason];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tel.textContent = fmt(d.current_reset || 0);\n\t\t\t\t\t}).catch(function(){});\n\t\t\t\t}\n\t\t\t\tpoll();\n\t\t\t\tsetInterval(poll, 1000);\n\t\t\t})();\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

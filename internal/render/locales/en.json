@@ -253,6 +253,9 @@
   "settings.np_modal_body": "Enabling this may cause your request quota to deplete rapidly. Make sure you know what you are doing.",
   "settings.debug_modal_title": "Enable debug page?",
   "settings.debug_modal_body": "Enabling this on a public network may expose instance diagnostics and private information.",
+  "settings.upstream_warn": "Warning: initiative upstream access is enabled. On a public deployment this may rapidly exhaust your Reddit session-token quota and get your IP blacklisted upstream.",
+  "settings.upstream_modal_title": "Allow initiative upstream access?",
+  "settings.upstream_modal_body": "Turning this protection off lets user actions reach Reddit directly. On a public deployment, sudden bursts of upstream traffic can exhaust your session-token quota in minutes and cause Reddit to blacklist this instance's IP.",
 
   "error.rate_limited": "Rate Limited",
   "error.title": "Error: %s",

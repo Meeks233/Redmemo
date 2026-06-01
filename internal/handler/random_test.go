@@ -16,10 +16,11 @@ func TestRandomQueryExpr(t *testing.T) {
 		{"empty", "/random", ""},
 		{"plain spaces", "/random?q=s:golang%20u%3E200%20t:img", "s:golang u>200 t:img"},
 		{"ampersand separators", "/random?q=s:golang&u%3E1000&t:img", "s:golang u>1000 t:img"},
-		{"plus encoded spaces", "/random?q=s:golang+u%3E200", "s:golang u>200"},
+		{"literal plus joiner", "/random?q=t:vid-gif+ins", "t:vid-gif+ins"},
+		{"literal plus in sub joiner", "/random?q=sub:golang+linux", "sub:golang+linux"},
 		{"no q prefix", "/random?s:golang&u%3E1000", "s:golang u>1000"},
 		{"percent-encoded literal ampersand", "/random?q=flair:a%26b", "flair:a&b"},
-		{"quoted multiword", "/random?q=f:%22male+only%22&u>10", `f:"male only" u>10`},
+		{"quoted multiword via %20", "/random?q=f:%22male%20only%22&u>10", `f:"male only" u>10`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

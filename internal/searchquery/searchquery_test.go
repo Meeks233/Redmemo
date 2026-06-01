@@ -64,9 +64,9 @@ func TestCanonical(t *testing.T) {
 		{"sub:cats+dogs-meta", "sub:cats+dogs-meta"},
 		// Full query: every honored constraint round-trips in canonical order.
 		{"linux rating:nsfw upvote>100 sub:golang sub:-sfw author:bob comments<=5 t:image after:2024-01-02",
-			"sub:golang-sfw a:bob r:nsfw t:image u>100 c<=5 after:2024-01-02 linux"},
+			"sub:golang-sfw a:bob r:nsfw t:image score>100 c<=5 after:2024-01-02 linux"},
 		// Short aliases normalize to the canonical long/short forms.
-		{"u:50 c:3", "u=50 c=3"},
+		{"u:50 c:3", "score=50 c=3"},
 		{"before:2023-12-31", "before:2023-12-31"},
 	}
 	for _, c := range cases {
@@ -116,9 +116,9 @@ func TestJoinSubsRoundTrip(t *testing.T) {
 }
 
 func TestParseNumericOps(t *testing.T) {
-	// upvote/u/ups/upvotes target the Reddit post score (p.Score); score targets
-	// the media cache eviction score (p.CacheScore). cache reports which field
-	// each token must populate.
+	// score/upvote/u/ups/upvotes target the Reddit post score (p.Score);
+	// cache_score targets the media cache eviction score (p.CacheScore). cache
+	// reports which field each token must populate.
 	cases := []struct {
 		in    string
 		op    NumOp
@@ -130,9 +130,12 @@ func TestParseNumericOps(t *testing.T) {
 		{"upvote<10", OpLT, 10, false},
 		{"upvotes<=5", OpLE, 5, false},
 		{"ups=7", OpEQ, 7, false},
-		{"score>100", OpGT, 100, true},
-		{"score>=50", OpGE, 50, true},
-		{"score:42", OpEQ, 42, true},
+		{"score>100", OpGT, 100, false},
+		{"score>=50", OpGE, 50, false},
+		{"score:42", OpEQ, 42, false},
+		{"cache_score>100", OpGT, 100, true},
+		{"cache_score>=50", OpGE, 50, true},
+		{"cache_score:42", OpEQ, 42, true},
 	}
 	for _, c := range cases {
 		p := Parse(c.in)
@@ -158,7 +161,7 @@ func TestParseNumericOps(t *testing.T) {
 
 func TestParseCacheScoreDistinctFromUpvote(t *testing.T) {
 	// A query carrying both must populate the two fields independently.
-	p := Parse("upvote>100 score<20")
+	p := Parse("score>100 cache_score<20")
 	if p.Score == nil || p.Score.Op != OpGT || p.Score.Val != 100 {
 		t.Errorf("Score = %+v, want >100", p.Score)
 	}
@@ -262,14 +265,98 @@ func TestParseShortAliases(t *testing.T) {
 }
 
 func TestParseMediaVideoGif(t *testing.T) {
-	if p := Parse("type:video"); p.MediaType != "video" {
-		t.Errorf("type:video: MediaType = %q, want video", p.MediaType)
+	if p := Parse("type:video"); !reflect.DeepEqual(p.MediaTypes, []string{"video"}) {
+		t.Errorf("type:video: MediaTypes = %v, want [video]", p.MediaTypes)
 	}
-	if p := Parse("t:gif"); p.MediaType != "gif" {
-		t.Errorf("t:gif: MediaType = %q, want gif", p.MediaType)
+	if p := Parse("t:gif"); !reflect.DeepEqual(p.MediaTypes, []string{"gif"}) {
+		t.Errorf("t:gif: MediaTypes = %v, want [gif]", p.MediaTypes)
 	}
 	if p := Parse("c>10"); p.Comments == nil || p.Comments.Val != 10 {
 		t.Errorf("c>10: Comments = %+v, want >10", p.Comments)
+	}
+}
+
+func TestParseMediaMultiple(t *testing.T) {
+	if p := Parse("type:gif+vid"); !reflect.DeepEqual(p.MediaTypes, []string{"gif", "video"}) {
+		t.Errorf("type:gif+vid: MediaTypes = %v, want [gif video]", p.MediaTypes)
+	}
+	if p := Parse("t:img+vid"); !reflect.DeepEqual(p.MediaTypes, []string{"image", "video"}) {
+		t.Errorf("t:img+vid: MediaTypes = %v, want [image video]", p.MediaTypes)
+	}
+	if p := Parse("t:img+vid+gif"); !reflect.DeepEqual(p.MediaTypes, []string{"image", "video", "gif"}) {
+		t.Errorf("t:img+vid+gif: MediaTypes = %v, want [image video gif]", p.MediaTypes)
+	}
+	// Duplicates and aliases collapse to one entry, preserving first-seen order.
+	if p := Parse("t:img+image+pic"); !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("t:img+image+pic: MediaTypes = %v, want [image]", p.MediaTypes)
+	}
+	// One bad segment rejects the whole token, leaving it as free text.
+	if p := Parse("t:img+bogus"); len(p.MediaTypes) != 0 {
+		t.Errorf("t:img+bogus: MediaTypes = %v, want empty (token rejected)", p.MediaTypes)
+	}
+	// Canonical re-serializes the multi-type clause back to `t:a+b`.
+	if got := Parse("t:gif+vid").Canonical(); got != "t:gif+video" {
+		t.Errorf("Canonical(t:gif+vid) = %q, want 't:gif+video'", got)
+	}
+}
+
+func TestParseMediaExcludes(t *testing.T) {
+	// Bare exclude opens the full universe and removes the excluded type.
+	if p := Parse("t:-gif"); !reflect.DeepEqual(p.MediaTypes, []string{"image", "video"}) {
+		t.Errorf("t:-gif: MediaTypes = %v, want [image video]", p.MediaTypes)
+	}
+	// Multiple bare excludes stack.
+	if p := Parse("t:-gif-vid"); !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("t:-gif-vid: MediaTypes = %v, want [image]", p.MediaTypes)
+	}
+	// Include + exclude: excludes subtract from the include set. Image and gif
+	// are disjoint PostType buckets, so `t:img-gif` collapses to just [image].
+	if p := Parse("t:img-gif"); !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("t:img-gif: MediaTypes = %v, want [image]", p.MediaTypes)
+	}
+	// Include + exclude where the exclude actually bites.
+	if p := Parse("t:img+vid-vid"); !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("t:img+vid-vid: MediaTypes = %v, want [image]", p.MediaTypes)
+	}
+	// Excluding the entire universe rejects the token (falls back to free text).
+	if p := Parse("t:-img-vid-gif"); len(p.MediaTypes) != 0 {
+		t.Errorf("t:-img-vid-gif: MediaTypes = %v, want empty (token rejected)", p.MediaTypes)
+	}
+	// Canonical round-trip emits the resolved positive set.
+	if got := Parse("t:-gif").Canonical(); got != "t:image+video" {
+		t.Errorf("Canonical(t:-gif) = %q, want 't:image+video'", got)
+	}
+}
+
+func TestParseMediaInstant(t *testing.T) {
+	// Bare `t:ins` sets the flag with no media-type restriction.
+	if p := Parse("t:ins"); !p.Instant || len(p.MediaTypes) != 0 {
+		t.Errorf("t:ins: Instant=%v, MediaTypes=%v, want Instant=true, MediaTypes=[]", p.Instant, p.MediaTypes)
+	}
+	// Long form alias.
+	if p := Parse("t:instant"); !p.Instant {
+		t.Errorf("t:instant: Instant=%v, want true", p.Instant)
+	}
+	// Combined with media types.
+	if p := Parse("t:ins+vid"); !p.Instant || !reflect.DeepEqual(p.MediaTypes, []string{"video"}) {
+		t.Errorf("t:ins+vid: Instant=%v, MediaTypes=%v", p.Instant, p.MediaTypes)
+	}
+	// `-ins` (exclude form) is meaningless and silently dropped — must NOT
+	// reject the token. Here the rest (`+img`) still wins.
+	if p := Parse("t:-ins+img"); p.Instant || !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("t:-ins+img: Instant=%v, MediaTypes=%v, want Instant=false, MediaTypes=[image]", p.Instant, p.MediaTypes)
+	}
+	// Bare `-ins` is silently dropped: no positive segments, no flag → token
+	// rejected and falls back to free text.
+	if p := Parse("t:-ins"); p.Instant || len(p.MediaTypes) != 0 {
+		t.Errorf("t:-ins: Instant=%v, MediaTypes=%v, want both empty (token rejected)", p.Instant, p.MediaTypes)
+	}
+	// Canonical round-trip emits `ins` first, then the resolved media types.
+	if got := Parse("t:vid+ins").Canonical(); got != "t:ins+video" {
+		t.Errorf("Canonical(t:vid+ins) = %q, want 't:ins+video'", got)
+	}
+	if got := Parse("t:ins").Canonical(); got != "t:ins" {
+		t.Errorf("Canonical(t:ins) = %q, want 't:ins'", got)
 	}
 }
 
@@ -310,11 +397,11 @@ func TestParseDates(t *testing.T) {
 }
 
 func TestParseType(t *testing.T) {
-	if p := Parse("type:image"); p.MediaType != "image" {
-		t.Errorf("image: MediaType = %q", p.MediaType)
+	if p := Parse("type:image"); !reflect.DeepEqual(p.MediaTypes, []string{"image"}) {
+		t.Errorf("image: MediaTypes = %v", p.MediaTypes)
 	}
-	if p := Parse("media:gif"); p.MediaType != "gif" {
-		t.Errorf("gif: MediaType = %q", p.MediaType)
+	if p := Parse("media:gif"); !reflect.DeepEqual(p.MediaTypes, []string{"gif"}) {
+		t.Errorf("gif: MediaTypes = %v", p.MediaTypes)
 	}
 }
 

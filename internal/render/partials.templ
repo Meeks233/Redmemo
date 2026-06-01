@@ -181,9 +181,9 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 						<video
 							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
 							if lazy {
-								data-src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+								data-src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
 							} else {
-								src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+								src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
 							}
 							if post.Media.Width > 0 && post.Media.Height > 0 {
 								width={ i64(post.Media.Width) }
@@ -219,7 +219,7 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 							if prefs.AutoplayVideos == "on" {
 								data-viewport-autoplay
 							}
-						><a href={ templ.SafeURL(post.Media.URL) }>{ T(ctx, "media.video") }</a></video>
+						><a href={ templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)) }>{ T(ctx, "media.video") }</a></video>
 					</div>
 				}
 			}

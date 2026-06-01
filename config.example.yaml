@@ -83,3 +83,15 @@ hrlimit:
 render:
   brand_name: "RedMemo"
   show_archive_badge: true
+
+# SEO controls — off by default. Flip allow_indexing to true on a public
+# instance to expose the archive surfaces (the /archive hub + /archive/r/<sub>
+# pages) to search engines. When off, /robots.txt returns "Disallow: /",
+# /sitemap.xml 404s, and every page keeps a noindex,nofollow meta tag.
+#
+# canonical_host is the public-facing origin used for absolute URLs inside
+# sitemap.xml and <link rel="canonical">. Leave empty to fall back to
+# root-relative URLs; set it to your real https origin in production.
+seo:
+  allow_indexing: false
+  canonical_host: ""

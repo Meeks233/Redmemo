@@ -14,9 +14,9 @@ templ layout(p BasePage, s pageSlots) {
 				}
 			</title>
 			<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
-			<meta name="description" content={ T(ctx, "meta.description", p.BrandName) }/>
+			<meta name="description" content={ metaDescription(ctx, p) }/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<meta name="robots" content="noindex, nofollow"/>
+			<meta name="robots" content={ robotsMeta(p) }/>
 			<meta name="theme-color" content="#1F1F1F"/>
 			<meta name="apple-mobile-web-app-title" content={ p.BrandName }/>
 			<meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -38,6 +38,9 @@ templ layout(p BasePage, s pageSlots) {
 			}
 			if s.HeadExtra != nil {
 				@s.HeadExtra
+			}
+			if p.HeadExtraHTML != "" {
+				@templ.Raw(p.HeadExtraHTML)
 			}
 		</head>
 		<body class={ bodyClass(p.Prefs) }>

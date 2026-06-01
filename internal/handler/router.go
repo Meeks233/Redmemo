@@ -107,6 +107,11 @@ func New(
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 
+	// SEO surfaces. robots.txt is always served (returns "Disallow: /" when
+	// SEO.AllowIndexing is off); sitemap.xml 404s when off.
+	mux.HandleFunc("GET /robots.txt", h.handleRobotsTxt)
+	mux.HandleFunc("GET /sitemap.xml", h.handleSitemapXML)
+
 	// Static assets
 	static := h.staticHandler()
 	mux.Handle("GET /style.css", static)
@@ -166,7 +171,6 @@ func (h *Handler) Routes() http.Handler {
 	// settings save (when one is). The gate routes between the two.
 	mux.HandleFunc("GET /settings", h.requireSettingsAuth(h.handleSettings))
 	mux.HandleFunc("POST /settings", h.requireSettingsAuth(h.handleSettingsSave))
-	mux.HandleFunc("GET /settings/qr", h.handleAuthQR)
 
 	// Wiki
 	mux.HandleFunc("GET /r/{sub}/wiki/{page...}", h.handleWiki)

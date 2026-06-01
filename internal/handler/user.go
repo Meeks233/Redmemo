@@ -35,8 +35,8 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. No archive for users — redirect
-	h.redirectFuckReddit(w, r, r.URL.Path, reason)
+	// 3. No archive for users
+	h.serveDegradeMiss(w, r, reason)
 }
 
 // backgroundArchiveUser fetches a user's listing out-of-band and archives the

@@ -1152,7 +1152,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var67 string
-						templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality))
+						templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 						if templ_7745c5c3_Err != nil {
 							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 184, Col: 77}
 						}
@@ -1170,7 +1170,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var68 string
-						templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality))
+						templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 						if templ_7745c5c3_Err != nil {
 							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 186, Col: 72}
 						}
@@ -1252,7 +1252,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var73 string
-						templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality))
+						templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 						if templ_7745c5c3_Err != nil {
 							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 204, Col: 77}
 						}
@@ -1283,7 +1283,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var75 string
-						templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality))
+						templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 						if templ_7745c5c3_Err != nil {
 							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 207, Col: 72}
 						}
@@ -1362,7 +1362,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var79 templ.SafeURL
-					templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
+					templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/partials.templ`, Line: 222, Col: 46}
 					}

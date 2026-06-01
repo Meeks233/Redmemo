@@ -253,6 +253,9 @@
   "settings.np_modal_body": "启用此项可能导致你的请求配额迅速耗尽。请确保你清楚自己在做什么。",
   "settings.debug_modal_title": "启用调试页面?",
   "settings.debug_modal_body": "在公共网络上启用此项可能会暴露实例诊断信息和私密信息。",
+  "settings.upstream_warn": "警告:当前允许主动访问上游。在公网部署下,用户操作会直接打到 Reddit,可能在短时间内耗尽 session token 配额,并导致本实例的 IP 被 Reddit 上游封禁。",
+  "settings.upstream_modal_title": "允许主动访问上游?",
+  "settings.upstream_modal_body": "关闭此保护后,用户操作将直接访问 Reddit。部署在公网时,突发的上游请求可能在几分钟内耗尽你的 session token 配额,并导致本实例的 IP 被 Reddit 上游封禁。",
 
   "error.rate_limited": "速率受限",
   "error.title": "错误:%s",

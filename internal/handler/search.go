@@ -32,7 +32,7 @@ func parsedToArchiveOpts(p searchquery.Parsed) store.ArchiveSearchOpts {
 		Query:     p.TextQuery(),
 		After:     p.After,
 		Before:    p.Before,
-		Media:     p.MediaType,
+		Media:     p.MediaTypes,
 		Author:    p.Author,
 		Flair:     p.Flair,
 		WhiteSubs: p.WhiteSubs,
@@ -109,7 +109,7 @@ func primaryMediaURL(p *reddit.Post) string {
 }
 
 // matchCacheScore reports whether a post's primary cached media satisfies the
-// `score:` constraint (the media cache eviction score, not the Reddit post
+// `cache_score:` constraint (the media cache eviction score, not the Reddit post
 // score). A post whose media is not resident in the cache never matches — the
 // eviction score is defined only for files genuinely on disk. Callers guard on
 // nc != nil and h.mediaProxy != nil before calling.
@@ -276,6 +276,12 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 
 	// 4. Nothing available.
 	//
+	// upstream_disabled is a *permanent* operator choice — Reddit is off the
+	// table for the foreseeable future. Bouncing to /fuckreddit's "wait for the
+	// window to reset" page is the wrong UX; instead render the local-only
+	// search page with empty results so the user keeps the search box and can
+	// refine the query against the archive.
+	//
 	// An HR cooldown / quota-exhausted degrade goes to /fuckreddit, whose
 	// countdown page is built for exactly those reset-window states.
 	//
@@ -283,6 +289,32 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	// is NOT a reset-window state: redirecting there with an empty reason
 	// renders the misleading green "All right" page and swallows the real
 	// cause. Surface the actual error instead.
+	if reason == "upstream_disabled" {
+		data := render.SearchPageData{
+			BasePage: render.BasePage{
+				URL:            urlPath,
+				Prefs:          prefs,
+				BrandName:      h.cfg.Render.BrandName,
+				Version:        "0.1.0",
+				DegradedReason: reason,
+			},
+			Params: reddit.SearchParams{
+				Query: query,
+				Sort:  sort,
+			},
+			Sub:         sub,
+			NoPosts:     true,
+			IsLocalOnly: true,
+			PageSize:    25,
+			Interval:    prefs.ScrollInterval,
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Source", "archive")
+		if err := h.renderer.RenderSearch(w, data); err != nil {
+			log.Printf("handler: render empty archive search: %v", err)
+		}
+		return
+	}
 	if reason != "" {
 		// preserve query string so the upstream link keeps the search terms.
 		h.redirectFuckReddit(w, r, r.URL.RequestURI(), reason)

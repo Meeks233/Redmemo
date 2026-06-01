@@ -216,9 +216,9 @@ func (p *Proxy) IsResident(originalURL string) bool {
 // and whether that media is genuinely cached. It mirrors IsResident's key
 // resolution (muxed video remapping, poisoned-MIME rejection, score↔file_path
 // invariant) but hands back the numeric score so the search layer can apply a
-// `score:` threshold. resident is false — and the score meaningless — for any
-// URL with no cache row, an evicted row (score < 0), or a poisoned row; callers
-// treat a non-resident asset as not matching any score: constraint.
+// `cache_score:` threshold. resident is false — and the score meaningless — for
+// any URL with no cache row, an evicted row (score < 0), or a poisoned row;
+// callers treat a non-resident asset as not matching any cache_score: constraint.
 func (p *Proxy) MediaScore(originalURL string) (score float64, resident bool) {
 	key := originalURL
 	if isMuxableVRedditURL(originalURL) {
@@ -338,6 +338,23 @@ func serveLoader(w http.ResponseWriter, status int) {
 	io.WriteString(w, loaderSVG)
 }
 
+// applyDownloadName sets a friendly Content-Disposition filename for video and
+// GIF responses when the request carried a dl_title query parameter. The title
+// is sanitized (spaces → underscores, unsafe chars dropped, length-capped) and
+// joined with a URL-derived unique id and the MIME-mapped extension. Silently
+// skipped for still images and for requests without dl_title — the bare proxy
+// URL remains the filename in those cases.
+func applyDownloadName(w http.ResponseWriter, r *http.Request, originalURL, mime string) {
+	if !WantsDownloadName(mime) {
+		return
+	}
+	title := r.URL.Query().Get("dl_title")
+	if title == "" {
+		return
+	}
+	w.Header().Set("Content-Disposition", EncodeContentDisposition(BuildDownloadFilename(title, originalURL, mime)))
+}
+
 // serve writes a cached media file. noStore marks the response uncacheable —
 // used for the silent stand-in of a video whose audio is still being muxed, so
 // a page reload re-requests and picks up the finished audio copy.
@@ -348,6 +365,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, meta *store.MediaM
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	}
+	applyDownloadName(w, r, meta.OriginalURL, meta.MIMEType)
 
 	if p.useNginx {
 		w.Header().Set("X-Accel-Redirect", NginxPath(meta.Hash))
@@ -590,6 +608,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	applyDownloadName(w, r, targetURL, contentType)
 	w.Header().Set("Accept-Ranges", "bytes")
 	if noStore {
 		w.Header().Set("Cache-Control", "no-store")

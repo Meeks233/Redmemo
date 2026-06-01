@@ -101,7 +101,7 @@ var prefDefaults = map[string]string{
 	"video_quality":           "source",
 	"mute_all_videos":         "off",
 	"mute_nsfw_videos":        "on",
-	"disable_initiative_upstream_access": "off",
+	"disable_initiative_upstream_access": "on",
 	"settings_token_ttl":      "10",
 	"auto_theme_day":          "light",
 	"auto_theme_night":        "black",
