@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,14 +58,72 @@ func (t *partialThrottle) allow(ip string, minGap time.Duration) bool {
 	return true
 }
 
-// clientIP returns the request's source IP without the ephemeral port. Keying
+// remoteIP returns the request's source IP without the ephemeral port. Keying
 // the throttle on the bare IP keeps it stable across the client's separate TCP
-// connections (each of which carries a different RemoteAddr port).
-func clientIP(r *http.Request) string {
+// connections (each of which carries a different RemoteAddr port). Reverse-
+// proxy headers are NOT consulted here — the lockout-relevant IP goes through
+// (*Handler).clientIP, which only honors X-Forwarded-For when the immediate
+// source is one of cfg.Server.TrustedProxyCIDRs.
+func remoteIP(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+// clientIP returns the per-request identifier used by the /settings auth gate
+// lockout (and any other per-IP rate logic). When the direct peer's IP matches
+// a trusted proxy CIDR, the left-most entry of X-Forwarded-For wins; otherwise
+// the direct peer's IP is authoritative. The "left-most" choice mirrors what
+// nginx/caddy/cloudflare emit and is the only entry the trusted proxy itself
+// observed — every entry after it is attacker-controlled and ignored.
+func (h *Handler) clientIP(r *http.Request) string {
+	src := remoteIP(r)
+	if !h.isTrustedProxy(src) {
+		return src
+	}
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff == "" {
+		return src
+	}
+	if i := strings.IndexByte(xff, ','); i >= 0 {
+		xff = xff[:i]
+	}
+	xff = strings.TrimSpace(xff)
+	if xff == "" {
+		return src
+	}
+	return xff
+}
+
+func (h *Handler) isTrustedProxy(ip string) bool {
+	if h.cfg == nil || len(h.cfg.Server.TrustedProxyCIDRs) == 0 {
+		return false
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, c := range h.cfg.Server.TrustedProxyCIDRs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		if !strings.Contains(c, "/") {
+			if net.ParseIP(c).Equal(parsed) {
+				return true
+			}
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			continue
+		}
+		if n.Contains(parsed) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +181,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 		if n, err := strconv.Atoi(prefs.ScrollInterval); err == nil && n > 0 {
 			interval = n
 		}
-		if !partialReq.allow(clientIP(r), time.Duration(interval)*time.Second) {
+		if !partialReq.allow(h.clientIP(r), time.Duration(interval)*time.Second) {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}

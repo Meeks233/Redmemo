@@ -8,7 +8,9 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,12 +35,17 @@ import (
 //      capped at 60).
 
 const (
-	authTokenCookie  = "redmemo_settings_token"
-	safeEnvCookie    = "redmemo_env_ack"
-	defaultTokenTTL  = 10 * time.Minute
-	maxTokenTTL      = 60 * time.Minute
-	maxAttempts      = 3
-	lockoutWindow    = totp.Period * time.Second
+	authTokenCookie = "redmemo_settings_token"
+	safeEnvCookie   = "redmemo_env_ack"
+	defaultTokenTTL = 10 * time.Minute
+	maxTokenTTL     = 60 * time.Minute
+	maxAttempts     = 3
+	lockoutWindow   = totp.Period * time.Second
+	// safeEnvCookieTTL keeps the "this environment is safe" answer short-lived
+	// (was 1 year). A day-long ack respects the user's intent without freezing
+	// in a stale answer — if they later open /settings from a coffee shop,
+	// they re-consent.
+	safeEnvCookieTTL = 24 * time.Hour
 )
 
 type AuthManager struct {
@@ -248,10 +255,17 @@ func constantTimeEqual(a, b string) bool {
 //   - holds a valid ephemeral token -> next.ServeHTTP
 //   - otherwise -> render the auth page (GET) or process the form (POST),
 //     never falling through to the underlying settings handler.
+// Every POST also gets an Origin/Referer same-origin check (a belt to go with
+// SameSite=Lax's suspenders) so a cross-site form submission can't drive any
+// /settings action even if a browser ever relaxes its Lax cookie behaviour.
 func (h *Handler) requireSettingsAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.auth == nil { // safety: tests / misconfig — fail closed
 			http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if r.Method == http.MethodPost && !isSameOriginPost(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		if h.auth.HasValidToken(r) {
@@ -260,6 +274,29 @@ func (h *Handler) requireSettingsAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		h.serveAuthGate(w, r)
 	}
+}
+
+// isSameOriginPost reports whether a POST's Origin/Referer header points back
+// at the same host the request reached us on. Absent both, refuse — a modern
+// browser submitting a real form always emits at least one; only some old
+// non-browser tooling skips them, and /settings is not an automation target.
+func isSameOriginPost(r *http.Request) bool {
+	host := r.Host
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		return strings.EqualFold(u.Host, host)
+	}
+	if ref := r.Header.Get("Referer"); ref != "" {
+		u, err := url.Parse(ref)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		return strings.EqualFold(u.Host, host)
+	}
+	return false
 }
 
 // authStage selects which form to display at any given moment.
@@ -287,7 +324,7 @@ func (h *Handler) currentStage(r *http.Request) authStage {
 }
 
 func (h *Handler) serveAuthGate(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := h.clientIP(r)
 
 	// Lock-out wins over everything else: in the cooldown window the only
 	// response is a redirect to /fuckreddit (the goal's "wait for next round").
@@ -313,8 +350,9 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 				Name:     safeEnvCookie,
 				Value:    "ok",
 				Path:     "/",
-				MaxAge:   365 * 24 * 3600,
+				MaxAge:   int(safeEnvCookieTTL.Seconds()),
 				HttpOnly: true,
+				Secure:   isTLSRequest(r),
 				SameSite: http.SameSiteLaxMode,
 			})
 			http.Redirect(w, r, "/settings", http.StatusSeeOther)
@@ -331,6 +369,28 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			}
 			h.renderAuthPage(w, r, stageServerSecret, "incorrect server secret")
 			return
+		}
+		// Re-enrollment guard: when a TOTP secret already exists, rotating it
+		// requires proof of the CURRENT authenticator code in the same submit.
+		// Without this, a leaked server secret alone is enough to silently
+		// rotate the second factor and lock the legitimate owner out. The
+		// admin escape hatch stays `redmemo --reset-totp` (clears the secret
+		// from the DB, after which the next server_secret POST enrolls fresh).
+		if existing, _ := h.auth.store.Secret(); existing != "" {
+			code := strings.TrimSpace(r.FormValue("current_code"))
+			if code == "" {
+				h.renderAuthPage(w, r, stageServerSecret, "TOTP is already enrolled — also enter the current 6-digit code to rotate it, or run `redmemo --reset-totp` first")
+				return
+			}
+			ok, replay := h.auth.consumeCode(existing, code, time.Now())
+			if !ok || replay {
+				if locked := h.auth.registerFailure(ip); locked {
+					http.Redirect(w, r, "/fuckreddit?reason=auth_locked", http.StatusSeeOther)
+					return
+				}
+				h.renderAuthPage(w, r, stageServerSecret, "current TOTP code did not match")
+				return
+			}
 		}
 		// Correct. Mint and persist the TOTP secret (one-shot) and reveal QR.
 		secret, err := totp.NewSecret()
@@ -447,10 +507,11 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   </form>
 {{else if eq .Stage "server_secret"}}
   <h1>Server secret</h1>
-  <p class="muted">Enter the secret configured via <code>REDMEMO_SERVER_SECRET</code>.</p>
+  <p class="muted">Enter the secret configured via <code>REDMEMO_SERVER_SECRET</code>.{{if .HasTOTP}} TOTP is already enrolled — to rotate it, also enter the current 6-digit code.{{end}}</p>
   <form method="post" action="/settings" autocomplete="off">
     <input type="hidden" name="stage" value="server_secret">
     <input type="password" name="secret" autofocus required>
+    {{if .HasTOTP}}<input type="text" name="current_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="current 6-digit code">{{end}}
     <button>Continue</button>
   </form>
 {{else if eq .Stage "enroll"}}
@@ -482,6 +543,7 @@ type authPageView struct {
 	QRDataURI       string
 	Theme           string
 	BodyClass       string
+	HasTOTP         bool
 	ThemeStylesheet bool
 	AutoThemeCSS    template.HTML
 }
@@ -510,6 +572,9 @@ func (h *Handler) renderAuthPage(w http.ResponseWriter, r *http.Request, stage a
 		v.Stage = "safe_env"
 	case stageServerSecret:
 		v.Stage = "server_secret"
+		if s, _ := h.auth.store.Secret(); s != "" {
+			v.HasTOTP = true
+		}
 	case stageTOTPCode:
 		v.Stage = "totp"
 	}

@@ -23,6 +23,7 @@ config.yaml
 !config.example.yaml
 .env
 .env.*
+!.env.example
 
 # --- Logs & temp ---
 *.log

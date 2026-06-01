@@ -60,6 +60,13 @@ type ServerConfig struct {
 	Listen       string        `yaml:"listen"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
 	WriteTimeout time.Duration `yaml:"write_timeout"`
+	// TrustedProxyCIDRs lists CIDR blocks (or single IPs) whose X-Forwarded-For
+	// header we will honor when deriving the per-request client IP for
+	// auth-gate lockout. When empty (default), XFF is ignored entirely and the
+	// lockout uses RemoteAddr — safe but coarse behind a reverse proxy. Add the
+	// reverse proxy's IP/CIDR here ("127.0.0.1/32", "10.0.0.0/8") only when you
+	// trust it not to forward attacker-controlled XFF headers.
+	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs"`
 }
 
 type LegacyConfig struct {

@@ -2,6 +2,11 @@ server:
   listen: ":8080"
   read_timeout: 30s
   write_timeout: 60s
+  # Reverse-proxy CIDRs whose X-Forwarded-For header we trust when deriving
+  # the per-request client IP for /settings auth-gate lockout. Leave empty when
+  # exposed directly; add the proxy's IP/CIDR ("127.0.0.1/32", "10.0.0.0/8")
+  # behind nginx/caddy so lockout tracks real client IPs and not the proxy's.
+  trusted_proxy_cidrs: []
 
 legacy:
   sync_enabled: true                   # one-time settings sync from old redlib instance
