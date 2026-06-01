@@ -1,0 +1,149 @@
+# https://goreleaser.com — run `goreleaser check` to validate.
+version: 2
+
+project_name: redmemo
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: redmemo
+    main: ./cmd/redmemo
+    binary: redmemo
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.CommitDate}}
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+      - config.example.yaml
+      - docs/**/*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?(fix|bug)(\(.+\))??!?:.+$'
+      order: 1
+    - title: Security
+      regexp: '^.*?sec(urity)?(\(.+\))??!?:.+$'
+      order: 2
+    - title: Performance
+      regexp: '^.*?perf(\(.+\))??!?:.+$'
+      order: 3
+    - title: Refactor
+      regexp: '^.*?refactor(\(.+\))??!?:.+$'
+      order: 4
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+    use: buildx
+    dockerfile: Dockerfile.release
+    goarch: amd64
+    extra_files:
+      - config.example.yaml
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Self-hosted Reddit privacy proxy with persistent archive"
+      - "--label=org.opencontainers.image.source=https://github.com/CanglanXYA/Redmemo"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=AGPL-3.0"
+  - image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+    use: buildx
+    dockerfile: Dockerfile.release
+    goarch: arm64
+    extra_files:
+      - config.example.yaml
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Self-hosted Reddit privacy proxy with persistent archive"
+      - "--label=org.opencontainers.image.source=https://github.com/CanglanXYA/Redmemo"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=AGPL-3.0"
+
+docker_manifests:
+  - name_template: "ghcr.io/canglanxya/redmemo:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/canglanxya/redmemo:v{{ .Major }}"
+    image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/canglanxya/redmemo:v{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/canglanxya/redmemo:latest"
+    image_templates:
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+
+release:
+  github:
+    owner: CanglanXYA
+    name: Redmemo
+  prerelease: auto
+  draft: false
+  header: |
+    ## RedMemo {{ .Tag }}
+
+    Self-hosted Reddit privacy solution with persistent archive.
+
+    ### Install
+    - Docker: `docker pull ghcr.io/canglanxya/redmemo:{{ .Version }}`
+    - Binary: download below for your platform
+  footer: |
+    **Full Changelog**: https://github.com/CanglanXYA/Redmemo/compare/{{ .PreviousTag }}...{{ .Tag }}

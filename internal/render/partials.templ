@@ -241,6 +241,11 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 							<desc><img loading="lazy" alt={ T(ctx, "alt.thumbnail") } src={ post.Thumbnail.URL }/></desc>
 						</svg>
 					</div>
+				} else {
+					<svg viewBox="0 0 100 106" width="140" height="53" xmlns="http://www.w3.org/2000/svg">
+						<title>{ T(ctx, "alt.thumbnail") }</title>
+						<path d="M35,15h-15a10,10 0,0,0 0,20h25a10,10 0,0,0 10,-10m-12.5,0a10, 10 0,0,1 10, -10h25a10,10 0,0,1 0,20h-15" fill="none" stroke-width="5" stroke-linecap="round"></path>
+					</svg>
 				}
 				<span>
 					if post.PostType == "link" {

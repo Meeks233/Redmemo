@@ -1,0 +1,12 @@
+# Used by GoReleaser to package the prebuilt binary into a runtime image.
+# For local development/build-from-source see ./Dockerfile.
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S redmemo && adduser -S redmemo -G redmemo \
+    && mkdir -p /data/media && chown -R redmemo:redmemo /data/media
+COPY redmemo /usr/local/bin/redmemo
+COPY config.example.yaml /etc/redmemo/config.yaml
+USER redmemo
+EXPOSE 8080
+ENTRYPOINT ["redmemo"]
+CMD ["/etc/redmemo/config.yaml"]

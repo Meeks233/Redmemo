@@ -220,7 +220,7 @@
   "settings.hide_score": "隐藏得分",
   "settings.disable_visit_confirm": "访问 Reddit 上的内容前不再确认",
   "settings.fetch_sub_about": "访问时获取 sub 简介信息",
-  "settings.fetch_sub_about_title": "关闭(默认)时,访问 subreddit 页面不会主动向上游请求该 sub 的简介信息,只使用缓存数据。后台的图标/简介预取不受影响。",
+  "settings.fetch_sub_about_title": "开启时,访问 subreddit 页面会在缓存缺失/过期时主动向上游拉取该 sub 的简介(图标、描述)并持久化 60 天。关闭(默认)则只使用缓存或后台预取的数据。",
   "settings.save": "保存",
   "settings.filter_placeholder": "首页查询，例如 sub:cats+dogs-meta u>100 t:image",
   "settings.enable_np": "启用自然预取",

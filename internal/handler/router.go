@@ -145,6 +145,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /preview/", h.handleImageProxy)
 	mux.HandleFunc("GET /thumb/", h.handleImageProxy)
 	mux.HandleFunc("GET /emoji/", h.handleImageProxy)
+	mux.HandleFunc("GET /style/", h.handleImageProxy)
 
 	// Video proxy — v.redd.it
 	mux.HandleFunc("GET /vid/", h.handleVideoProxy)

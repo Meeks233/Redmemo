@@ -28,7 +28,16 @@ import (
 	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
+// Injected at release time via -ldflags "-X main.version=..." by GoReleaser.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	log.Printf("redmemo: version=%s commit=%s built=%s", version, commit, date)
+
 	configPath := "config.yaml"
 	resetTOTP := false
 	for _, arg := range os.Args[1:] {

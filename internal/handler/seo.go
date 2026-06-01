@@ -74,6 +74,7 @@ func (h *Handler) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("Disallow: /preview/\n")
 	b.WriteString("Disallow: /thumb/\n")
 	b.WriteString("Disallow: /emoji/\n")
+	b.WriteString("Disallow: /style/\n")
 	b.WriteString("Disallow: /vid/\n")
 	b.WriteString("Disallow: /hls/\n")
 	b.WriteString("\n")

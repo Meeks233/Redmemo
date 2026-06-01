@@ -25,11 +25,12 @@ func (h *Handler) staticHandler() http.Handler {
 
 func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	// Pull dl_title (frontend download-name hint) out before reconstructing the
-	// CDN URL; it must not leak to Reddit's signed image hosts.
-	clientQuery := r.URL.Query()
-	dlTitle := clientQuery.Get("dl_title")
-	clientQuery.Del("dl_title")
-	cdnURL := pathToCDNURL(r.URL.Path, clientQuery.Encode())
+	// CDN URL; it must not leak to Reddit's signed image hosts. Strip it from
+	// the raw query in place — re-encoding via url.Values would alphabetically
+	// sort the params, which invalidates Reddit's HMAC `s=` signature on
+	// preview.redd.it / external-preview.redd.it URLs and yields a 403.
+	dlTitle, upstreamQuery := splitDLTitle(r.URL.RawQuery)
+	cdnURL := pathToCDNURL(r.URL.Path, upstreamQuery)
 	if cdnURL == "" {
 		http.NotFound(w, r)
 		return
@@ -41,6 +42,39 @@ func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	r.URL.RawQuery = newQuery
 	h.mediaProxy.ServeMedia(w, r)
+}
+
+// splitDLTitle removes the dl_title parameter from a raw URL query string
+// while preserving the relative order of every other parameter. Reddit's
+// signed media URLs (preview.redd.it, external-preview.redd.it, v.redd.it)
+// validate an HMAC over the original parameter order, so this must not go
+// through url.Values which sorts alphabetically. The returned title is
+// URL-decoded; the returned query is the remainder, still URL-encoded and
+// in original order.
+func splitDLTitle(raw string) (title, rest string) {
+	if raw == "" {
+		return "", ""
+	}
+	var parts []string
+	for _, p := range strings.Split(raw, "&") {
+		if p == "" {
+			continue
+		}
+		k := p
+		if i := strings.IndexByte(p, '='); i >= 0 {
+			k = p[:i]
+		}
+		if k == "dl_title" {
+			if i := strings.IndexByte(p, '='); i >= 0 {
+				if v, err := url.QueryUnescape(p[i+1:]); err == nil {
+					title = v
+				}
+			}
+			continue
+		}
+		parts = append(parts, p)
+	}
+	return title, strings.Join(parts, "&")
 }
 
 func pathToCDNURL(path, rawQuery string) string {
@@ -58,6 +92,8 @@ func pathToCDNURL(path, rawQuery string) string {
 		base = "https://b.thumbs.redditmedia.com/" + strings.TrimPrefix(path, "/thumb/b/")
 	case strings.HasPrefix(path, "/emoji/"):
 		base = "https://emoji.redditmedia.com/" + strings.TrimPrefix(path, "/emoji/")
+	case strings.HasPrefix(path, "/style/"):
+		base = "https://styles.redditmedia.com/" + strings.TrimPrefix(path, "/style/")
 	default:
 		return ""
 	}
@@ -84,11 +120,11 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	// Pull dl_title out of the client query before reconstructing the upstream
 	// URL — it is a frontend-only hint for Content-Disposition and must not be
 	// forwarded to the Reddit CDN (where signed-URL validation rejects extra
-	// params).
-	clientQuery := r.URL.Query()
-	dlTitle := clientQuery.Get("dl_title")
-	clientQuery.Del("dl_title")
-	if upstreamRaw := clientQuery.Encode(); upstreamRaw != "" {
+	// params). Preserve the original query order: re-encoding via url.Values
+	// sorts the params alphabetically, which breaks HMAC signature validation
+	// on Reddit's signed media hosts.
+	dlTitle, upstreamRaw := splitDLTitle(r.URL.RawQuery)
+	if upstreamRaw != "" {
 		upstream += "?" + upstreamRaw
 	}
 

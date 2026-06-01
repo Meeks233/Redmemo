@@ -220,7 +220,7 @@
   "settings.hide_score": "Hide score",
   "settings.disable_visit_confirm": "Do not confirm before visiting content on Reddit",
   "settings.fetch_sub_about": "Fetch sub about info on visit",
-  "settings.fetch_sub_about_title": "When off (default), visiting a subreddit page does not actively request the sub's about info upstream; only cached data is used. The background icon/about prefetch is unaffected.",
+  "settings.fetch_sub_about_title": "When on, visiting a subreddit page actively fetches the sub's about info (icon, description) upstream on cache miss/expiry and persists it for 60 days. Off (default) relies only on cached/background-prefetched data.",
   "settings.save": "Save",
   "settings.filter_placeholder": "Homepage query, e.g. sub:cats+dogs-meta u>100 t:image",
   "settings.enable_np": "Enable natural prefetch",
