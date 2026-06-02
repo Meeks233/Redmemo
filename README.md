@@ -86,11 +86,33 @@ Redlib is written in **Rust** on top of Hyper, with Askama for templating. RedMe
 - The four-layer Natural Prefetch scheduler, the HR rate-limit gate, the `media_content`/`media_url` content-addressed store and the TOTP gate are all native Go code with no Rust counterpart in Redlib.
 - Build artefacts are a single static Go binary (plus the Postgres + Redis + nginx side-car services in compose). No BoringSSL bring-up, no `cargo` toolchain, no NASM / LLVM / CMake build dependencies on Windows.
 
+### 5. e621-compatible unified search
+
+Redlib forwards the search box straight to Reddit's Lucene parser, so power-user queries have to be typed in Reddit's own `subreddit:` / `author:` / `nsfw:yes` dialect, and the API gives no way to filter by score, comment count or an exact date range. RedMemo replaces the box with a single **e621-style** parser (`internal/searchquery`) that drives **both** the live `/search` and the offline `/archive` from the same typed query — constraints Reddit's API can't express degrade to a local post-filter over the JSON results, so the two surfaces stay consistent.
+
+In **live mode** (`/search`) the following e621-style tokens are accepted alongside free text. The full table — aliases, media types, date constraints — is in [Search & URL query reference](#search--url-query-reference).
+
+- **`sub:`** — greedy whitelist / blacklist of subreddits. `sub:golang+rust` keeps only those subs, `sub:-meta` excludes one, and both forms can be mixed (`sub:golang+rust sub:-sfw`). Replaces Redlib's "restrict to r/x" checkbox; subreddit scoping is now explicit and editable in the box.
+- **`rating:`** — `rating:nsfw` / `rating:safe`. Translates to Reddit's `nsfw:yes` / `nsfw:no`.
+- **`score:`** *(also `upvote:` / `u>N` / `ups>N`)* — Reddit post score threshold (`score>1000`, `score>=50`, `score:100`). Live results are post-filtered locally because Reddit's search API has no score operator.
+- **`author:`**, **`flair:`**, **`type:image|video|gif|gallery|text|link`**, **`comments<op>N`**, **`after:YYYY-MM-DD` / `before:YYYY-MM-DD`** — same syntax on both back-ends.
+
+Example: `sub:rust rating:nsfw score:>1000` becomes `subreddit:rust nsfw:yes` upstream, with the score threshold applied as a local post-filter on the returned posts.
+
+![e621-style search: sub:rust rating:nsfw score:>1000](docs/img/search-e621.png)
+
+<sub>Live <code>/search</code> driven by the unified parser. The same query also works verbatim against the offline <code>/archive</code>, where every constraint is pushed into SQL instead.</sub>
+
 ---
 
 ## Table of Contents
 
 1. [Migration from Redlib — Key Differences](#migration-from-redlib--key-differences)
+   - [Passive archive site](#1-passive-archive-site-upstream-restricted-by-design)
+   - [New authentication model (server secret + TOTP)](#2-new-authentication-model-server-secret--totp)
+   - [Persistent storage](#3-persistent-storage-postgres-post-archive--canonical-media-cache)
+   - [Refactor in Go (templ SSR)](#4-refactor-in-go-templ-ssr-no-js-framework)
+   - [e621-compatible unified search](#5-e621-compatible-unified-search)
 2. [Features](#features)
 3. [Architecture overview](#architecture-overview)
    - [Failover chain](#failover-chain)
@@ -438,16 +460,37 @@ Instance-only toggles (no per-user equivalent):
 
 ## Search & URL query reference
 
-The search parser accepts Redlib-style modifiers plus a few RedMemo additions. All modifiers may be combined in a single query string.
+The search parser is a single **e621-style** grammar (`internal/searchquery`) shared between the live `/search` and the offline `/archive`. Free-text words become the title/body match; everything else is a `key:value` (or `key<op>value`) constraint. Tokens can appear in any order; the same query targets both back-ends.
+
+| Token | Aliases | Meaning | Live `/search` | Archive `/archive` |
+|-------|---------|---------|----------------|--------------------|
+| `sub:<a>+<b>` | `s:` `sr:` `subreddit:` | Whitelist (only these subs) | `(subreddit:a OR subreddit:b)` | `LOWER(subreddit) = ANY(...)` |
+| `sub:-<a>-<b>` | — | Blacklist (exclude these subs) | `-subreddit:a -subreddit:b` | `LOWER(subreddit) != ALL(...)` |
+| `rating:nsfw` / `rating:safe` | `r:` | NSFW / SFW only | `nsfw:yes` / `nsfw:no` | `over_18 = true/false` |
+| `author:<user>` | `a:` `user:` | Post author | `author:<user>` | `LOWER(author) = ...` |
+| `flair:"<text>"` | `f:` | Flair text | `flair_name:"<text>"` | *(ignored — not indexed)* |
+| `score<op>N` | `upvote<op>N` `u<op>N` `ups<op>N` | Reddit post score threshold | *(local post-filter)* | `score <op> N` |
+| `comments<op>N` | `c<op>N` | Comment count threshold | *(local post-filter)* | `(Comments)::int <op> N` |
+| `type:image` | `t:` `media:` | Image / gallery posts | *(local post-filter)* | `PostType IN ('image','gallery')` |
+| `type:video` | — | Real video (`is_gif=false`) | *(local post-filter)* | `PostType='video'` |
+| `type:gif` | — | GIF upload (`is_gif=true`) | *(local post-filter)* | `PostType='gif'` |
+| `after:YYYY-MM-DD` | `since:` | Created on/after | *(local post-filter)* | `created_utc >= date` |
+| `before:YYYY-MM-DD` | `until:` | Created on/before | *(local post-filter)* | `created_utc <= date` |
+
+Numeric `<op>` is one of `>`, `<`, `>=`, `<=`, `=` (and `:` as `=`, e.g. `score:100`). Note that `score:` here is the **Reddit post score**, the same quantity as `upvote:` / `ups:` — there is also a distinct **media cache eviction score** filter that exists only on `/archive` and `/random`; see [`docs/reddit-search.md`](docs/reddit-search.md) for that nuance.
+
+### `/random` and the `t:` media filter
+
+`/random` selects a random archived post and 302-redirects to its media. It accepts a compact `t:` filter language for shell consumers in addition to the full e621 grammar above:
 
 | Modifier | Example | Meaning |
 |----------|---------|---------|
 | `t:<type>` | `t:img` | Include only posts whose media is of `<type>`. |
 | `t:-<type>` | `t:-gif` | Exclude posts of `<type>`. |
-| `t:<a>-<b>` | `t:vid-gif` | Include `<a>`, exclude `<b>`. Multiple includes/excludes may be combined: `t:img,vid,-gif`. |
-| `t:ins` / `t:instant` | `t:ins` (on `/random`) | Return the raw cached media (redirect) or post body as `text/plain` instead of a JSON envelope. Useful for shell consumers. |
+| `t:<a>-<b>` | `t:vid-gif` | Include `<a>`, exclude `<b>`. Combinable: `t:img,vid,-gif`. |
+| `t:ins` / `t:instant` | `t:ins` | Return the raw cached media (redirect) or post body as `text/plain` instead of a JSON envelope. |
 
-Supported `<type>` tokens: `img`, `vid`, `gif`, `gallery`, `text`, `link`, `self`. See `internal/search/` for the canonical list.
+Supported `<type>` tokens: `img`, `vid`, `gif`, `gallery`, `text`, `link`, `self`.
 
 ### `/random` endpoint
 

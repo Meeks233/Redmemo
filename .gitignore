@@ -1,5 +1,7 @@
 # --- Project-internal directories ---
-docs
+# Ignore the docs tree, but keep the image assets referenced from README.
+docs/*
+!docs/img/
 scripts
 _redlib_ref/
 
