@@ -1,5 +1,7 @@
 # RedMemo
 
+**Language / 语言:** **English** · [简体中文](README.zh-CN.md)
+
 > A self-hosted Reddit **archive station** with permanent local storage, built on the shoulders of [Redlib](https://github.com/redlib-org/redlib) and its ancestor [Libreddit](https://github.com/libreddit/libreddit).
 
 ![RedMemo browsing r/golang](docs/img/hero.png)
