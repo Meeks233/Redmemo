@@ -35,9 +35,18 @@ media:
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	_, err := Load("/nonexistent/path/config.yaml")
-	if err == nil {
-		t.Fatal("Load() should fail for missing file")
+	t.Setenv("REDMEMO_POSTGRES_DSN", "postgres://localhost/test")
+	t.Setenv("REDMEMO_REDIS_ADDR", "localhost:6379")
+
+	cfg, err := Load("/nonexistent/path/config.yaml")
+	if err != nil {
+		t.Fatalf("Load() should succeed on missing file (defaults + env), got: %v", err)
+	}
+	if cfg.Postgres.DSN != "postgres://localhost/test" {
+		t.Errorf("Postgres.DSN = %q, want env-provided value", cfg.Postgres.DSN)
+	}
+	if cfg.Server.Listen != ":8080" {
+		t.Errorf("Server.Listen = %q, want built-in default", cfg.Server.Listen)
 	}
 }
 

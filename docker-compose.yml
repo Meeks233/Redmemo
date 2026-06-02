@@ -1,15 +1,54 @@
+# RedMemo — local test profile.
+#
+# Optimised for rapid iteration on a dev machine: TOTP gate is OFF so curl
+# can hit /settings + /debug directly, /debug is exposed, the instance is
+# allowed to make on-demand upstream Reddit calls, and Postgres is bound
+# to localhost so `psql -h 127.0.0.1` works for ad-hoc inspection. Default
+# secrets are inlined so a fresh checkout boots with just `docker compose
+# up` — override via .env for any other environment.
+#
+# DO NOT deploy this file to production. Use deploy/docker-compose.public.yml
+# for an internet-facing instance (strict TOTP, no initiative upstream,
+# debug off) or deploy/docker-compose.homelab.yml for a Tailnet/LAN box.
+
 services:
   redmemo:
     build: .
     ports:
       - "8080:8080"
     environment:
-      - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}@postgres:5432/redmemo?sslmode=disable
+      # ---- Storage (defaults inlined for one-shot `docker compose up`) ----
+      - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:-redmemo}@postgres:5432/redmemo?sslmode=disable
       - REDMEMO_REDIS_ADDR=redis:6379
       - REDMEMO_LEGACY_SYNC=false
-      - REDMEMO_SERVER_SECRET=${SERVER_SECRET:?SERVER_SECRET is required (set it in .env)}
+
+      # ---- Auth: BYPASS so curl-driven verification works without TOTP -----
+      # AUTH_BYPASS short-circuits the /settings + /debug gate. SERVER_SECRET
+      # is therefore optional in this profile — kept here only so legitimate
+      # callers can still flip bypass off without missing the secret.
+      - REDMEMO_AUTH_BYPASS=on
+      - REDMEMO_SERVER_SECRET=${SERVER_SECRET:-test-secret-do-not-use-in-prod}
+
+      # ---- Test-friendly defaults --------------------------------------
+      - REDMEMO_DEFAULT_ENABLE_DEBUG=on
+      - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=off
+      # NSFW: show every post (incl. NSFW subs in archive nav) and never blur.
+      - REDMEMO_DEFAULT_SHOW_NSFW=on
+      - REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS=on
+      - REDMEMO_DEFAULT_BLUR_NSFW=off
+
+      # ---- Natural Prefetch: on, crawling r/golang for local L1/L2 coverage ---
+      # Swap the sub list for whatever you want to exercise — the unified
+      # search grammar accepts multi-sub lists like "sub:golang+rust".
+      - REDMEMO_PREFETCH_ENABLED=true
+      - REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH=on
+      - REDMEMO_DEFAULT_PREFETCH_SUBS=sub:golang
     volumes:
-      - ./config.yaml:/etc/redmemo/config.yaml:ro
+      # config.yaml is OPTIONAL — RedMemo runs on defaults + REDMEMO_* env
+      # vars. Uncomment when pinning a value that has no env-var equivalent
+      # (SEO canonical host, trusted-proxy CIDRs, HR-limit tuning, static
+      # OAuth tokens). See config.example.yaml.
+      # - ./config.yaml:/etc/redmemo/config.yaml:ro
       - media_data:/data/media
     depends_on:
       postgres:
@@ -18,17 +57,17 @@ services:
 
   postgres:
     image: postgres:17-alpine
-    # No host port binding — Postgres is only reachable inside the compose
-    # network. Add a `ports:` mapping locally if you need direct psql access;
-    # never publish 5432 to a public host without also tightening the password
-    # policy and (ideally) firewalling the port.
+    # Bound to 127.0.0.1 so `psql -h 127.0.0.1 -U redmemo` works for
+    # ad-hoc inspection during tests, but NOT exposed to the network.
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./deploy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
       POSTGRES_DB: redmemo
       POSTGRES_USER: redmemo
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-redmemo}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U redmemo"]
       interval: 5s
@@ -39,10 +78,10 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec
-    # No host port binding — Redis is only reachable inside the compose
-    # network. The rate-limit / HR-limit keys here are sensitive (an attacker
-    # who can write them can grant themselves unlimited upstream quota), so
-    # never expose 6379 to a public host without also enabling requirepass.
+    # Bound to 127.0.0.1 for `redis-cli -h 127.0.0.1` debugging during
+    # tests; not exposed to the network.
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:

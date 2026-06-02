@@ -181,6 +181,7 @@
   "archive_search.no_results": "没有匹配搜索条件的存档帖子。",
 
   "settings.page_title": "%s 设置",
+  "settings.bypass_warn": "警告:REDMEMO_AUTH_BYPASS 已启用 — TOTP 鉴权已关闭,任何能访问网络的人都能修改实例设置。仅适用于已被外层鉴权保护的家庭实验室环境。",
   "settings.debug_warn_pre": "警告:调试页面已",
   "settings.debug_warn_link": "开放",
   "settings.debug_warn_post": "!",

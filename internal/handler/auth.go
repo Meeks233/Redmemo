@@ -260,6 +260,17 @@ func constantTimeEqual(a, b string) bool {
 // /settings action even if a browser ever relaxes its Lax cookie behaviour.
 func (h *Handler) requireSettingsAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Bypass mode: TOTP gate disabled instance-wide. POSTs still get the
+		// same-origin CSRF check — that's the only brake left, and it costs
+		// nothing on legitimate browser submissions.
+		if h.cfg.Auth.BypassAuth {
+			if r.Method == http.MethodPost && !isSameOriginPost(r) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		if h.auth == nil { // safety: tests / misconfig — fail closed
 			http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
 			return

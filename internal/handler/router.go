@@ -198,8 +198,13 @@ func (h *Handler) Routes() http.Handler {
 	// Exhausted — no quota, no archive
 	mux.HandleFunc("GET /fuckreddit", h.handleFuckReddit)
 
-	// Debug error page preview
-	mux.HandleFunc("GET /debug", h.handleDebug)
+	// Debug page — guarded twice: (1) the EnableDebug user preference is the
+	// public-facing kill switch (off → 303 to /settings inside handleDebug);
+	// (2) when on, the same TOTP gate as /settings still applies so visitors
+	// without the ephemeral cookie land on the digits-input page (unless
+	// REDMEMO_AUTH_BYPASS is set, in which case the gate is short-circuited
+	// instance-wide).
+	mux.HandleFunc("GET /debug", h.requireSettingsAuth(h.handleDebug))
 
 	// Redlib compatibility redirects
 	mux.HandleFunc("GET /info", func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,104 @@
+# RedMemo — Public-instance profile.
+#
+# Threat model: exposed to the open internet behind nginx/Caddy with TLS.
+# Auth is mandatory (TOTP gate enforced; REDMEMO_AUTH_BYPASS deliberately
+# absent), the instance NEVER initiates upstream Reddit calls on its own
+# (every page served comes from the local archive — no on-demand upstream
+# leak), and /debug is hidden from the world.
+#
+# Required: an .env file containing
+#   PG_PASSWORD=<strong-password>
+#   SERVER_SECRET=<long-random-string>
+#
+# The Server-Secret is the pre-shared key that gates TOTP enrolment; rotate
+# it whenever you suspect leakage and run `redmemo --reset-totp` to wipe
+# the enrolled second factor.
+
+services:
+  redmemo:
+    image: ghcr.io/redmemo/redmemo:latest
+    # build: ..              # uncomment when building from source
+    ports:
+      - "8080:8080"           # front this with nginx/Caddy + Let's Encrypt
+    environment:
+      # ---- Storage (required) ----------------------------------------
+      - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}@postgres:5432/redmemo?sslmode=disable
+      - REDMEMO_REDIS_ADDR=redis:6379
+      - REDMEMO_LEGACY_SYNC=false
+
+      # ---- Auth ------------------------------------------------------
+      # Public: TOTP gate STRICTLY ENFORCED. The server-secret pre-gates
+      # enrolment; one wrong server-secret OR three wrong codes locks the
+      # IP out until the next 30s TOTP window.
+      - REDMEMO_SERVER_SECRET=${SERVER_SECRET:?SERVER_SECRET is required (set it in .env)}
+      # (REDMEMO_AUTH_BYPASS deliberately unset — would open the UI to
+      # everyone with network reach. Never set on a public instance.)
+
+      # ---- Debug page ------------------------------------------------
+      # OFF: /debug 303-redirects to /settings for everyone.
+      - REDMEMO_DEFAULT_ENABLE_DEBUG=off
+
+      # ---- Upstream policy -------------------------------------------
+      # NO on-demand upstream calls. Every served page comes from the
+      # local archive; missing posts return a friendly 503 from
+      # /fuckreddit instead of leaking the visitor's IP / fingerprint
+      # to Reddit. Prefetch still runs (it goes through the OAuth
+      # session under NP's pacing — a stealthier upstream path).
+      - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=on
+
+      # ---- SEO -------------------------------------------------------
+      # Off by default — flip on only if you actually want the archive
+      # crawled. canonical_host must match the public origin for
+      # sitemap.xml / <link rel=canonical> to produce absolute URLs.
+      - REDMEMO_SEO_ALLOW_INDEXING=false
+      # - REDMEMO_SEO_CANONICAL_HOST=https://memo.example.com
+
+      # ---- Trusted reverse proxy ------------------------------------
+      # If you front this with nginx/Caddy on the same host, add the
+      # proxy's IP/CIDR so the per-IP lockout tracks real client IPs.
+      # Without YAML this stays empty (XFF ignored). Set in config.yaml
+      # under server.trusted_proxy_cidrs if you need it.
+    volumes:
+      - media_data:/data/media
+      # Optional: mount a config.yaml to pin trusted_proxy_cidrs,
+      # hrlimit.* tuning, or static OAuth tokens.
+      # - ./config.yaml:/etc/redmemo/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    # No host port binding — Postgres is only reachable inside the compose
+    # network.
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      POSTGRES_DB: redmemo
+      POSTGRES_USER: redmemo
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redmemo"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  media_data:

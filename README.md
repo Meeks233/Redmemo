@@ -38,6 +38,67 @@ This project keeps Redlib's AGPL-3.0 license for any code it carries over.
 
 ---
 
+## Quick deployment
+
+RedMemo ships two ready-to-use Compose profiles. Pick the one that matches your network exposure, drop it into an empty directory, set the secrets in `.env`, and `docker compose up -d`. Both profiles boot on env vars alone — no `config.yaml` required.
+
+### 🏠 Homelab / LAN / Tailnet — auth bypassed
+
+For a box behind Tailscale, a VPN, or a reverse-proxy SSO that already gates access. The TOTP prompt is off, `/debug` is open, and the instance is allowed to make live upstream calls.
+
+```bash
+mkdir redmemo && cd redmemo
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
+mv docker-compose.homelab.yml docker-compose.yml
+echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
+# Optional — pre-seed the NP crawl list (otherwise leave for /settings):
+# echo "REDMEMO_DEFAULT_PREFETCH_SUBS=sub:golang+rust+selfhosted" >> .env
+docker compose up -d
+```
+
+Visit `http://<host>:8080/settings` directly — no TOTP gate. Full env-var reference for this profile: [Auth / TOTP gate](#auth--totp-gate), [Default user settings](#default-user-settings-redmemo_default_).
+
+### 🌐 Public instance — strict TOTP
+
+For an internet-facing deployment behind nginx/Caddy + TLS. TOTP enforced, `/debug` hidden, on-demand upstream calls disabled (every page served from the local archive), SEO opt-in.
+
+```bash
+mkdir redmemo && cd redmemo
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.public.yml
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
+mv docker-compose.public.yml docker-compose.yml
+cat > .env <<EOF
+PG_PASSWORD=$(openssl rand -hex 24)
+SERVER_SECRET=$(openssl rand -hex 32)
+EOF
+docker compose up -d
+```
+
+First visit to `/settings` walks through the safe-environment ack → server-secret entry → TOTP QR enrolment. Lose the authenticator? `docker compose exec redmemo redmemo --reset-totp`. Full env-var reference: [Auth / TOTP gate](#auth--totp-gate), [SEO](#seo).
+
+### Env-var fast nav
+
+Every config knob has a `REDMEMO_*` env var. Jump straight to the relevant table:
+
+| Concern | Section |
+|---------|---------|
+| Listen address, reverse-proxy trust | [Server settings](#server-settings) |
+| Auth bypass, TOTP, server secret | [Auth / TOTP gate](#auth--totp-gate) |
+| Database connection | [PostgreSQL](#postgresql) · [Redis](#redis) |
+| Media storage cap, eviction | [Media store](#media-store) |
+| Reddit OAuth client | [OAuth tokens](#oauth-tokens) · [Android user-agent](#android-user-agent) |
+| Outbound rate budget | [Rate-limit budget](#rate-limit-budget) · [HR rate-limit layer](#hr-rate-limit-layer-1) |
+| Prefetch master switch, dispatcher | [Natural Prefetch](#natural-prefetch) |
+| Branding, theme, archive badge | [Render / branding](#render--branding) |
+| Indexing, `sitemap.xml`, canonical host | [SEO](#seo) |
+| Migrating from a running Redlib | [Legacy redlib sync](#legacy-redlib-sync) |
+| **Per-user defaults** (theme, NSFW blur, debug toggle, NP crawl list, …) | [Default user settings](#default-user-settings-redmemo_default_) |
+
+> **One philosophy line.** The `/settings` page is the *undo button*; environment variables are how you actually deploy. Every `REDMEMO_DEFAULT_<KEY>` value is re-applied on every container start and **overrides whatever is currently stored in the DB** — so an immutable infrastructure pipeline (Compose, Kubernetes, NixOS, Ansible…) is the source of truth, and the UI exists only for one-off operator tweaks that survive only until you redeploy.
+
+---
+
 ## Migration from Redlib — Key Differences
 
 If you're coming from a running Redlib instance, the user-facing UI is intentionally the same — themes, layouts, cookies, route shape, search syntax all carry over (and `REDLIB_*` env vars are auto-translated, see [Legacy redlib sync](#legacy-redlib-sync)). The underlying philosophy, however, is meaningfully different. Four things to know:
@@ -107,22 +168,26 @@ Example: `sub:rust rating:nsfw score:>1000` becomes `subreddit:rust nsfw:yes` up
 
 ## Table of Contents
 
-1. [Migration from Redlib — Key Differences](#migration-from-redlib--key-differences)
+1. [Quick deployment](#quick-deployment)
+   - [Homelab / LAN / Tailnet](#-homelab--lan--tailnet--auth-bypassed)
+   - [Public instance](#-public-instance--strict-totp)
+   - [Env-var fast nav](#env-var-fast-nav)
+2. [Migration from Redlib — Key Differences](#migration-from-redlib--key-differences)
    - [Passive archive site](#1-passive-archive-site-upstream-restricted-by-design)
    - [New authentication model (server secret + TOTP)](#2-new-authentication-model-server-secret--totp)
    - [Persistent storage](#3-persistent-storage-postgres-post-archive--canonical-media-cache)
    - [Refactor in Go (templ SSR)](#4-refactor-in-go-templ-ssr-no-js-framework)
    - [e621-compatible unified search](#5-e621-compatible-unified-search)
-2. [Features](#features)
-3. [Architecture overview](#architecture-overview)
+3. [Features](#features)
+4. [Architecture overview](#architecture-overview)
    - [Failover chain](#failover-chain)
    - [Persistence layer (PostgreSQL + media store)](#persistence-layer-postgresql--media-store)
    - [Natural Prefetch (NP)](#natural-prefetch-np)
    - [HR rate-limit layer](#hr-rate-limit-layer)
-3. [Deployment](#deployment)
+5. [Deployment](#deployment)
    - [Docker Compose (recommended)](#docker-compose-recommended)
    - [Building from source](#building-from-source)
-4. [Configuration](#configuration)
+6. [Configuration](#configuration)
    - [Config file vs. environment variables](#config-file-vs-environment-variables)
    - [Server settings](#server-settings)
    - [Auth / TOTP gate](#auth--totp-gate)
@@ -138,8 +203,8 @@ Example: `sub:rust rating:nsfw score:>1000` becomes `subreddit:rust nsfw:yes` up
    - [SEO](#seo)
    - [Legacy redlib sync](#legacy-redlib-sync)
    - [Default user settings (`REDMEMO_DEFAULT_*`)](#default-user-settings-redmemo_default_)
-5. [Search & URL query reference](#search--url-query-reference)
-6. [License](#license)
+7. [Search & URL query reference](#search--url-query-reference)
+8. [License](#license)
 
 ---
 
@@ -274,12 +339,24 @@ The outbound HTTP transport is `bogdanfinn/tls-client`, which embeds its own TLS
 
 ### Config file vs. environment variables
 
-RedMemo loads `config.yaml` first, then layers `REDMEMO_*` environment variables on top. The example file is `config.example.yaml`.
+**`config.yaml` is fully optional.** RedMemo boots on built-in defaults plus `REDMEMO_*` environment variables; the YAML file is only useful when you need to pin a value that has no env-var equivalent (the `trusted_proxy_cidrs` list, the `hrlimit.*` knobs, the rarely-used static OAuth token list). Default deployments — including the bundled `docker-compose.yml` — are env-only.
+
+When a YAML file *is* present, the load order is: built-in defaults → `config.yaml` → `REDMEMO_*` env vars. A missing file is not an error.
+
+User-facing settings (theme, layout, `front_page_subs`, `prefetch_subs`, `enable_debug`, `disable_initiative_upstream_access`, …) are persisted in Postgres. Every one of them can be **seeded or pinned** at startup via `REDMEMO_DEFAULT_<KEY>` — those values are written to the DB with the highest-priority `env_override` source on every boot and **override whatever the user / legacy sync had stored**. Remove the env var and the row is automatically demoted, letting user changes stick again. See [Default user settings](#default-user-settings-redmemo_default_) below for the full key list.
 
 Two compatibility shims make migration from Redlib painless:
 
 - Any `REDLIB_*` (and to a lesser degree `LIBREDDIT_*`) variable is automatically translated into the matching `REDMEMO_*` variable at startup unless the latter is already set. Precedence: `REDMEMO_*` > `REDLIB_*` > `LIBREDDIT_*`.
 - `PORT` / `REDLIB_PORT` is translated into `REDMEMO_SERVER_LISTEN=:<port>` (Heroku-style).
+
+**Minimum required env vars** (no YAML fallback for these — they have no built-in defaults):
+
+| Env var | Description |
+|---------|-------------|
+| `REDMEMO_POSTGRES_DSN` | Full Postgres DSN. |
+| `REDMEMO_REDIS_ADDR` | `host:port` for Redis. |
+| `REDMEMO_SERVER_SECRET` | Pre-shared TOTP-enrolment secret. Startup refuses to launch without it. |
 
 ### Server settings
 
@@ -288,21 +365,33 @@ Two compatibility shims make migration from Redlib painless:
 | `server.listen` | `REDMEMO_SERVER_LISTEN` | `:8080` | Listen address. Accepts `:port` or `host:port`. |
 | `server.read_timeout` | `REDMEMO_SERVER_READ_TIMEOUT` | `30s` | HTTP server read timeout (Go duration). |
 | `server.write_timeout` | `REDMEMO_SERVER_WRITE_TIMEOUT` | `60s` | HTTP server write timeout. |
-| `server.trusted_proxy_cidrs` | — | `[]` | CIDRs whose `X-Forwarded-For` is trusted when deriving the client IP for `/settings` lockout. Leave empty when exposed directly; add the reverse proxy's CIDR (`127.0.0.1/32`, `10.0.0.0/8`) behind nginx/caddy. |
+| `server.trusted_proxy_cidrs` | `REDMEMO_SERVER_TRUSTED_PROXY_CIDRS` | `[]` | Comma-separated CIDR list whose `X-Forwarded-For` is trusted when deriving the client IP for `/settings` lockout. Leave empty when exposed directly; add the reverse proxy's CIDR behind nginx/caddy, e.g. `REDMEMO_SERVER_TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8`. |
 
 ### Auth / TOTP gate
 
 | YAML key | Env var | Required | Description |
 |----------|---------|----------|-------------|
-| `auth.server_secret` | `REDMEMO_SERVER_SECRET` | **yes** | Pre-shared secret required before TOTP enrolment. Startup refuses to launch without it. |
+| `auth.server_secret` | `REDMEMO_SERVER_SECRET` | **yes (unless bypass)** | Pre-shared secret required before TOTP enrolment. Startup refuses to launch without it — except when `REDMEMO_AUTH_BYPASS=on`. |
+| `auth.bypass_auth` | `REDMEMO_AUTH_BYPASS` | `false` | When `on`, the TOTP gate is disabled instance-wide — `/settings` and `/debug` are reachable without any cookie. Intended for trusted homelab deployments behind an outer auth layer (Tailscale, VPN, reverse-proxy SSO). The same-origin CSRF check on POSTs stays on; the brand cookie / theme / preference flow is unchanged. **Never set on a public-facing instance.** |
+
+`/debug` is gated twice:
+1. The user-facing `enable_debug` preference (off → 303 to `/settings`).
+2. The same TOTP gate as `/settings` — visitors without the ephemeral cookie land on the digits-input page. `REDMEMO_AUTH_BYPASS=on` short-circuits this layer.
 
 The administrative reset command (clears enrolment and lockouts) is documented in `docs/project-status.md`.
+
+### Deployment profiles
+
+Two ready-to-use Compose files live in [`deploy/`](deploy/):
+
+- **`docker-compose.homelab.yml`** — Tailnet / LAN deployment. `REDMEMO_AUTH_BYPASS=on`, `/debug` open, on-demand upstream Reddit calls allowed, Natural Prefetch on with an empty crawl list (fill `REDMEMO_DEFAULT_PREFETCH_SUBS` before starting).
+- **`docker-compose.public.yml`** — internet-facing deployment. TOTP gate strictly enforced (`REDMEMO_SERVER_SECRET` required), `/debug` off for everyone, no on-demand upstream calls (every page served from the local archive), SEO indexing off.
 
 ### PostgreSQL
 
 | YAML key | Env var | Default | Description |
 |----------|---------|---------|-------------|
-| `postgres.dsn` | `REDMEMO_POSTGRES_DSN` | — (required) | Full DSN, e.g. `postgres://redmemo:pw@postgres:5432/redmemo?sslmode=disable`. |
+| `postgres.dsn` | `REDMEMO_POSTGRES_DSN` | **required** | Full DSN, e.g. `postgres://redmemo:pw@postgres:5432/redmemo?sslmode=disable`. |
 | `postgres.max_open_conns` | — | `50` | Connection pool ceiling. |
 | `postgres.max_idle_conns` | — | `10` | Idle connection target. |
 
@@ -310,7 +399,7 @@ The administrative reset command (clears enrolment and lockouts) is documented i
 
 | YAML key | Env var | Default | Description |
 |----------|---------|---------|-------------|
-| `redis.addr` | `REDMEMO_REDIS_ADDR` | — (required) | `host:port`. |
+| `redis.addr` | `REDMEMO_REDIS_ADDR` | **required** | `host:port`. |
 | `redis.password` | `REDMEMO_REDIS_PASSWORD` | (empty) | Optional. |
 | `redis.db` | — | `0` | DB number. |
 | `redis.max_memory_mb` | — | `256` | `maxmemory` enforced via `allkeys-lru`. Working set for HR + sessions is < 1 MB; the rest is HTML cache. |
@@ -319,12 +408,14 @@ The administrative reset command (clears enrolment and lockouts) is documented i
 
 | YAML key | Env var | Default | Description |
 |----------|---------|---------|-------------|
-| `media.root_path` | `REDMEMO_MEDIA_ROOT_PATH` | — (required) | On-disk root, e.g. `/data/media`. Layout: `<root>/<hash[:2]>/<hash>`. |
+| `media.root_path` | `REDMEMO_MEDIA_ROOT_PATH` | `/data/media` | On-disk root. Layout: `<root>/<hash[:2]>/<hash>`. |
 | `media.max_size_gb` | `REDMEMO_MEDIA_MAX_SIZE_GB` | `50` | Soft cap. Eviction starts at `max_size_gb × eviction_threshold`. |
 | `media.eviction_check_interval` | `REDMEMO_MEDIA_EVICTION_CHECK_INTERVAL` | `5m` | How often the eviction goroutine wakes up. |
 | `media.eviction_threshold` | `REDMEMO_MEDIA_EVICTION_THRESHOLD` | `0.8` | Float in `[0, 1]`. Trigger eviction at this fraction of `max_size_gb`. |
 
 ### OAuth tokens
+
+OAuth sessions are managed entirely in the DB by the token holder, which bootstraps an anonymous `mobile_spoof` session on first start and persists refresh state across restarts. **No declaration is required.** Declare a token in YAML only if you want to pin a specific Reddit `client_id` at boot:
 
 ```yaml
 oauth:
@@ -335,7 +426,7 @@ oauth:
 
 | Field | Allowed values | Description |
 |-------|----------------|-------------|
-| `client_id` | string | Reddit OAuth client id (required). |
+| `client_id` | string | Reddit OAuth client id. |
 | `client_secret` | string | Optional — most mobile-spoof flows use the public client. |
 | `backend` | `mobile_spoof` \| `generic_web` | Selects the OAuth flow + header set. `mobile_spoof` mimics the official Android app. |
 
@@ -364,36 +455,32 @@ This is the **OAuth-side** budget tracker (parsed from Reddit's `X-Ratelimit-Rem
 
 ### Natural Prefetch
 
+Master switch and dispatcher tick:
+
 | YAML key | Env var | Default | Description |
 |----------|---------|---------|-------------|
-| `prefetch.enabled` | `REDMEMO_PREFETCH_ENABLED` | `true` | Master switch for L1/L2/L4. |
+| `prefetch.enabled` | `REDMEMO_PREFETCH_ENABLED` | `true` | Top-level kill switch for the prefetch subsystem. |
 | `prefetch.check_interval` | `REDMEMO_PREFETCH_CHECK_INTERVAL` | `30s` | Dispatcher tick. |
-| `prefetch.subreddits[]` | — | `[]` | Target list. |
 
-Per-sub entry:
+The **crawl list** and the per-user **on/off toggle** live in the DB (settings keys `prefetch_subs` and `enable_natural_prefetch`) — set them from `/settings` or seed them at boot via:
 
-```yaml
-- name: "golang"
-  sort: "hot"        # hot | new | top | rising | controversial
-  max_pages: 2       # how many 25-post pages per big cycle
-  fetch_comments: true
-  fetch_media: true
-  priority: 10       # higher = scheduled earlier
-```
+| Env var | Format | Example | Notes |
+|---------|--------|---------|-------|
+| `REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH` | `on` / `off` | `on` | Turns the L1/L2/L5 loops on. |
+| `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | `sub:golang+rust+linux` | Whitelist subs to crawl. Excludes (`sub:-foo`) are ignored. |
+| `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` | Per-sub freshness threshold (%). |
 
 ### HR rate-limit layer
 
-| YAML key | Default | Description |
-|----------|---------|-------------|
-| `hrlimit.enabled` | `true` | Master switch. When false, `Admit` always allows; `RecordUpstream` is a no-op. |
-| `hrlimit.l1_window` | `5s` | L1 tumbling window. |
-| `hrlimit.l1_threshold` | `5` | Requests that trip L1. |
-| `hrlimit.l2_window` | `30s` | L2 tumbling window. |
-| `hrlimit.l2_threshold` | `15` | Requests that trip L2. |
-| `hrlimit.l3_window` | `5m` | L3 tumbling window. |
-| `hrlimit.l3_threshold` | `50` | Requests that trip L3. |
-
-There is no equivalent env-var override for HR — change `config.yaml` to retune.
+| YAML key | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `hrlimit.enabled` | `REDMEMO_HRLIMIT_ENABLED` | `true` | Master switch. When false, `Admit` always allows; `RecordUpstream` is a no-op. |
+| `hrlimit.l1_window` | `REDMEMO_HRLIMIT_L1_WINDOW` | `5s` | L1 tumbling window. |
+| `hrlimit.l1_threshold` | `REDMEMO_HRLIMIT_L1_THRESHOLD` | `5` | Requests that trip L1. |
+| `hrlimit.l2_window` | `REDMEMO_HRLIMIT_L2_WINDOW` | `30s` | L2 tumbling window. |
+| `hrlimit.l2_threshold` | `REDMEMO_HRLIMIT_L2_THRESHOLD` | `15` | Requests that trip L2. |
+| `hrlimit.l3_window` | `REDMEMO_HRLIMIT_L3_WINDOW` | `5m` | L3 tumbling window. |
+| `hrlimit.l3_threshold` | `REDMEMO_HRLIMIT_L3_THRESHOLD` | `50` | Requests that trip L3. |
 
 ### Render / branding
 
@@ -422,7 +509,16 @@ A one-time helper for users migrating from an existing Redlib instance: pulls us
 
 ### Default user settings (`REDMEMO_DEFAULT_*`)
 
-Like Redlib, every per-user setting can be given an **instance-wide default** by setting `REDMEMO_DEFAULT_<COOKIE>=<value>`. Cookie names map 1:1 from Redlib so existing deployments can rename `REDLIB_DEFAULT_*` to `REDMEMO_DEFAULT_*` (or rely on auto-translation). The list is dynamic — anything you set is exposed; the table below is the well-known set inherited from Redlib.
+Like Redlib, every per-user setting can be given an **instance-wide default** by setting `REDMEMO_DEFAULT_<COOKIE>=<value>`. Cookie names map 1:1 from Redlib so existing deployments can rename `REDLIB_DEFAULT_*` to `REDMEMO_DEFAULT_*` (or rely on auto-translation).
+
+**The scan is fully dynamic** — `REDMEMO_DEFAULT_<ANY_KEY>` is written to the DB on every startup with the highest-priority `env_override` source, so it **overrides whatever was previously stored** (by the user, by legacy sync, or by an earlier env value). Removing the env var causes its `env_override` row to be demoted on the next boot, letting user changes stick again.
+
+The table below documents the well-known set; any new settings key (RedMemo-specific or Redlib-inherited) automatically gets the same treatment.
+
+**Normalization is applied identically to form save.** A few keys are format-canonicalised at env-application time, so the YAML/env path and the `/settings` UI produce the same stored value:
+- `PREFETCH_SUBS=golang` → stored as `sub:golang` (the `sub:` prefix is auto-added; bare lists work).
+- `FRONT_PAGE_SUBS=sub:Cats+Dogs` → stored as canonical `sub:cats+dogs`.
+- `VIDEO_QUALITY=garbage`, `PREFETCH_THRESHOLD=200`, `SCROLL_INTERVAL=abc`, `SETTINGS_TOKEN_TTL=999`, `AUTO_THEME_DAY=auto` and friends are **rejected at startup with a log line** rather than silently persisted — typos surface immediately instead of poisoning the DB.
 
 | Name | Possible values | Default |
 |------|-----------------|---------|
@@ -455,6 +551,28 @@ Instance-only toggles (no per-user equivalent):
 | `REDMEMO_DEFAULT_PUSHSHIFT_FRONTEND` | string | `undelete.pullpush.io` | Where "removed" links point. |
 | `REDMEMO_DEFAULT_ENABLE_RSS` | `on`, `off` | `off` | Toggle RSS feeds. |
 | `REDMEMO_DEFAULT_FULL_URL` | string | (empty) | Public URL — needed by RSS for absolute links. |
+
+**RedMemo-specific defaults** (all overridable, all auto-translated from `REDLIB_DEFAULT_*`):
+
+| Name | Possible values | Default | Description |
+|------|-----------------|---------|-------------|
+| `REDMEMO_DEFAULT_FRONT_PAGE_SUBS` | unified search grammar | `default` | Home-page feed query, e.g. `sub:golang+rust score>10`. Same grammar as `/search` and `/archive`. **Overrides** any stored value on every boot. |
+| `REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS` | `on`, `off` | `on` | Block outbound Reddit calls outside the NP-scheduled budget. **Overrides** stored value on every boot. |
+| `REDMEMO_DEFAULT_ENABLE_DEBUG` | `on`, `off` | `off` | Expose `/debug` to all visitors of this instance. **Overrides** stored value on every boot. |
+| `REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH` | `on`, `off` | `off` | Master toggle for the L1/L2/L5 background prefetch loops. |
+| `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | (empty) | NP crawl list, e.g. `sub:golang+rust`. |
+| `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` | Per-sub freshness threshold (%). |
+| `REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS` | `on`, `off` | `off` | Show NSFW subs in the local archive navigation. |
+| `REDMEMO_DEFAULT_FETCH_SUB_ABOUT` | `on`, `off` | `off` | Allow background `/r/<sub>/about.json` refresh. |
+| `REDMEMO_DEFAULT_LAZY_MEDIA` | `on`, `off` | `on` | Lazy-load images in feed cards. |
+| `REDMEMO_DEFAULT_VIDEO_QUALITY` | `source`, `1080`, `720`, `480`, `360`, `240` | `source` | DASH rendition picked for video posts. |
+| `REDMEMO_DEFAULT_MUTE_ALL_VIDEOS` | `on`, `off` | `off` | Start every video muted. |
+| `REDMEMO_DEFAULT_MUTE_NSFW_VIDEOS` | `on`, `off` | `on` | Start NSFW videos muted. |
+| `REDMEMO_DEFAULT_SCROLL_INTERVAL` | integer (seconds) | `2` | Auto-scroll cadence for infinite feeds. |
+| `REDMEMO_DEFAULT_AUTO_THEME_DAY` | any selectable theme | `light` | Day-side theme when `THEME=system` resolves to light. |
+| `REDMEMO_DEFAULT_AUTO_THEME_NIGHT` | any selectable theme | `black` | Night-side theme when `THEME=system` resolves to dark. |
+| `REDMEMO_DEFAULT_SETTINGS_TOKEN_TTL` | `5`, `10`, `15`, `30`, `60` (minutes) | `10` | `/settings` auth-cookie lifetime. Capped at 60 by design. |
+| `REDMEMO_DEFAULT_LANG` | supported language code | (auto) | Force a UI language; otherwise resolved from `Accept-Language`. |
 
 ---
 

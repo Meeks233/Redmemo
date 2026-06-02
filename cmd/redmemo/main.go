@@ -102,8 +102,14 @@ func main() {
 
 	// Server-secret gate. Without it the settings UI is unreachable, so we
 	// refuse to listen at all rather than silently expose an open endpoint.
-	if strings.TrimSpace(cfg.Auth.ServerSecret) == "" {
-		log.Fatalf("auth: REDMEMO_SERVER_SECRET (or auth.server_secret) is required; refusing to start")
+	// REDMEMO_AUTH_BYPASS=on opts out — the gate is short-circuited so no
+	// secret is needed; this is meant for trusted homelab deployments behind
+	// an outer auth layer (Tailscale, VPN, reverse-proxy SSO).
+	if !cfg.Auth.BypassAuth && strings.TrimSpace(cfg.Auth.ServerSecret) == "" {
+		log.Fatalf("auth: REDMEMO_SERVER_SECRET (or auth.server_secret) is required; refusing to start. Set REDMEMO_AUTH_BYPASS=on to skip the TOTP gate entirely (homelab only).")
+	}
+	if cfg.Auth.BypassAuth {
+		log.Printf("auth: REDMEMO_AUTH_BYPASS=on — /settings and /debug are OPEN. Ensure an outer auth layer (Tailscale, VPN, reverse-proxy SSO) is in place.")
 	}
 	authMgr := handler.NewAuthManager(cfg.Auth.ServerSecret, totpStore)
 
@@ -125,8 +131,19 @@ func main() {
 			}
 		}
 	}
-	// Step B: env var overrides (always win — scans all REDMEMO_DEFAULT_* vars)
+	// Step B: env var overrides (always win — scans all REDMEMO_DEFAULT_* vars).
+	// Run them through the SAME normaliser the /settings form uses so
+	// REDMEMO_DEFAULT_PREFETCH_SUBS=golang becomes stored as "sub:golang" (matching
+	// what a UI save would produce) and obvious typos (VIDEO_QUALITY=garbage,
+	// SCROLL_INTERVAL=abc, ...) surface in the log instead of silently poisoning
+	// the DB. Dead-sub filtering is intentionally skipped here — substatus is
+	// not yet initialised, and form save handles it on the next user touch.
 	envSettings := config.ScanExplicitSettings()
+	envSettings, rejected := handler.NormalizeSettings(envSettings)
+	for _, r := range rejected {
+		log.Printf("settings: REDMEMO_DEFAULT_%s=%q ignored — %s",
+			strings.ToUpper(r.Key), r.Value, r.Reason)
+	}
 	// Demote DB rows whose env var was removed since last startup
 	if demoted, err := settingsStore.DemoteOrphans(envSettings); err != nil {
 		log.Printf("settings: demote orphans failed: %v", err)

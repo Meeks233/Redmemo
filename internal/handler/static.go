@@ -426,11 +426,16 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	// Config
 	details = append(details, fmt.Sprintf("Listen: %s", h.cfg.Server.Listen))
 	details = append(details, fmt.Sprintf("Brand: %s", h.cfg.Render.BrandName))
-	var subNames []string
-	for _, s := range h.cfg.Prefetch.Subreddits {
-		subNames = append(subNames, s.Name)
+	// The crawl list lives in the DB (settings key `prefetch_subs`), not in
+	// config — surface the scheduler's runtime view so this line never lies
+	// about which subs are actually being prefetched.
+	if h.prefetcher != nil {
+		ps := h.prefetcher.Status()
+		details = append(details, fmt.Sprintf("Prefetch: %v (%d subs: %s)",
+			ps.Enabled, len(ps.ActiveSubs), strings.Join(ps.ActiveSubs, ", ")))
+	} else {
+		details = append(details, "Prefetch: scheduler not initialised")
 	}
-	details = append(details, fmt.Sprintf("Prefetch enabled: %v (%d subs: %s)", h.cfg.Prefetch.Enabled, len(h.cfg.Prefetch.Subreddits), strings.Join(subNames, ", ")))
 	details = append(details, fmt.Sprintf("Media cap: %d GB", h.cfg.Media.MaxSizeGB))
 
 	// Redis

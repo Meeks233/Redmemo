@@ -1,0 +1,89 @@
+# RedMemo — Homelab profile.
+#
+# Threat model: trusted LAN / Tailnet / behind some other auth layer. The
+# TOTP gate is OFF, /settings and /debug are reachable without any cookie,
+# and the instance is allowed to make on-demand upstream Reddit requests
+# (so first-touch posts and missing media are fetched live). Natural
+# Prefetch is on with an EMPTY crawl list — fill REDMEMO_DEFAULT_PREFETCH_SUBS
+# below before starting, or set it later from /settings.
+#
+# Required: an .env file containing
+#   PG_PASSWORD=<strong-password>
+#
+# Do NOT use this profile on a public-facing instance — auth is OFF.
+
+services:
+  redmemo:
+    image: ghcr.io/redmemo/redmemo:latest
+    # build: ..              # uncomment when building from source
+    ports:
+      - "8080:8080"
+    environment:
+      # ---- Storage (required) ----------------------------------------
+      - REDMEMO_POSTGRES_DSN=postgres://redmemo:${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}@postgres:5432/redmemo?sslmode=disable
+      - REDMEMO_REDIS_ADDR=redis:6379
+      - REDMEMO_LEGACY_SYNC=false
+
+      # ---- Auth ------------------------------------------------------
+      # Homelab: TOTP gate is OFF. The outer layer (Tailscale ACL,
+      # reverse-proxy SSO, VPN, ...) is responsible for access control.
+      - REDMEMO_AUTH_BYPASS=on
+
+      # ---- Debug page ------------------------------------------------
+      # Public-facing kill switch — keep ON in homelab so /debug renders.
+      # Combined with REDMEMO_AUTH_BYPASS=on the page is reachable to
+      # anyone who can hit the port.
+      - REDMEMO_DEFAULT_ENABLE_DEBUG=on
+
+      # ---- Upstream policy -------------------------------------------
+      # Allow on-demand upstream Reddit calls (first-touch posts, missing
+      # media). Without this, only the local archive is served.
+      - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=off
+
+      # ---- Natural Prefetch ------------------------------------------
+      # Master switch on, dispatcher tick at the default 30s. The crawl
+      # list is intentionally empty — fill it with your own subs using
+      # the unified search grammar (e.g. "sub:golang+rust+selfhosted")
+      # OR leave it empty and set the list later from /settings.
+      - REDMEMO_PREFETCH_ENABLED=true
+      - REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH=on
+      - REDMEMO_DEFAULT_PREFETCH_SUBS=
+    volumes:
+      - media_data:/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      POSTGRES_DB: redmemo
+      POSTGRES_USER: redmemo
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required (set it in .env)}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redmemo"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  media_data:

@@ -175,6 +175,11 @@ type SettingsPageData struct {
 	ArchivedSubs   []string
 	LiveSubs       []string
 	SelectedCounts map[string]int
+	// AuthBypass mirrors cfg.Auth.BypassAuth. When true, settings shows a
+	// prominent banner reminding the operator that the TOTP gate is OFF —
+	// anyone with network reach can edit instance settings. The flag is
+	// instance-wide, not per-user, so all visitors see the same banner.
+	AuthBypass bool
 }
 
 type ArchiveHubEntry struct {

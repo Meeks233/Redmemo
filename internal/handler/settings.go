@@ -39,6 +39,99 @@ var allowedSettingsTokenTTL = map[string]bool{
 	"5": true, "10": true, "15": true, "30": true, "60": true,
 }
 
+// NormalizeSettings canonicalises a settings map the same way the form save
+// does, EXCEPT for the dead-sub filter — that consults the substatus DB which
+// may not exist yet at env-application time. Returns the normalised map plus a
+// slice of (key, original-value, reason) tuples for keys that were dropped so
+// callers can log them. Safe to call on env_override input at startup so
+// `REDMEMO_DEFAULT_PREFETCH_SUBS=golang` becomes stored as `sub:golang` (matching
+// what a UI save would produce) and obvious typos surface in the log instead
+// of being silently persisted.
+func NormalizeSettings(updates map[string]string) (map[string]string, []RejectedSetting) {
+	out := make(map[string]string, len(updates))
+	var rejected []RejectedSetting
+
+	for k, v := range updates {
+		out[k] = v
+	}
+
+	if v, ok := out["front_page_subs"]; ok && v != "" && v != "all" {
+		p := searchquery.Parse(v)
+		p.WhiteSubs = filterValidSubsList(p.WhiteSubs)
+		p.BlackSubs = filterValidSubsList(p.BlackSubs)
+		out["front_page_subs"] = p.Canonical()
+	}
+
+	if v, ok := out["prefetch_subs"]; ok && v != "" {
+		names := filterValidSubsList(searchquery.ParseSubList(v))
+		if len(names) == 0 {
+			out["prefetch_subs"] = ""
+		} else {
+			out["prefetch_subs"] = "sub:" + searchquery.JoinSubs(names)
+		}
+	}
+
+	if v, ok := out["prefetch_threshold"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 99 {
+			delete(out, "prefetch_threshold")
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_threshold", Value: v, Reason: "must be an integer in [1, 99]"})
+		} else {
+			out["prefetch_threshold"] = strconv.Itoa(n)
+		}
+	}
+
+	if v, ok := out["video_quality"]; ok {
+		if _, valid := reddit.VideoQualityHeights[v]; !valid && v != "source" {
+			delete(out, "video_quality")
+			rejected = append(rejected, RejectedSetting{Key: "video_quality", Value: v, Reason: "must be \"source\" or a known DASH ladder height"})
+		}
+	}
+
+	for _, key := range []string{"auto_theme_day", "auto_theme_night"} {
+		if v, ok := out[key]; ok && !render.IsSelectableTheme(v) {
+			delete(out, key)
+			rejected = append(rejected, RejectedSetting{Key: key, Value: v, Reason: "must be a selectable theme (not \"auto\" / \"system\")"})
+		}
+	}
+
+	if v, ok := out["settings_token_ttl"]; ok && !allowedSettingsTokenTTL[v] {
+		delete(out, "settings_token_ttl")
+		rejected = append(rejected, RejectedSetting{Key: "settings_token_ttl", Value: v, Reason: "must be one of 5, 10, 15, 30, 60"})
+	}
+
+	if v, ok := out["scroll_interval"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
+			delete(out, "scroll_interval")
+			rejected = append(rejected, RejectedSetting{Key: "scroll_interval", Value: v, Reason: "must be a positive integer (seconds)"})
+		} else {
+			out["scroll_interval"] = strconv.Itoa(n)
+		}
+	}
+
+	return out, rejected
+}
+
+// RejectedSetting describes one key NormalizeSettings refused to accept,
+// used for startup logging of bad REDMEMO_DEFAULT_* values.
+type RejectedSetting struct {
+	Key    string
+	Value  string
+	Reason string
+}
+
+// filterValidSubsList keeps only syntactically valid subreddit names — same
+// regex check the form path uses, but standalone so NormalizeSettings can run
+// before any Handler exists.
+func filterValidSubsList(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if validSubName.MatchString(n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 
@@ -146,6 +239,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		ArchivedSubs:   archivedSubs,
 		LiveSubs:       liveSubs,
 		SelectedCounts: selectedCounts,
+		AuthBypass:     h.cfg.Auth.BypassAuth,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	h.renderer.RenderSettings(w, data)
@@ -161,63 +255,26 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Backend is the single source of truth for the homepage filter: parse the
-	// submitted query, drop locally-known-dead include subs (keep syntactically
-	// valid excludes), and re-serialize the WHOLE query to its canonical form so
-	// every honored constraint round-trips. An empty result means "show all".
-	if v, ok := updates["front_page_subs"]; ok {
+	// Format-canonicalise everything via the shared normaliser (same routine
+	// main.go runs on REDMEMO_DEFAULT_* values), then layer the dead-sub
+	// filter on top — that consults the live substatus DB and so only the form
+	// path can run it.
+	normalised, _ := NormalizeSettings(updates)
+	updates = normalised
+
+	if v, ok := updates["front_page_subs"]; ok && v != "" && v != "all" {
 		p := searchquery.Parse(v)
 		p.WhiteSubs = h.filterUsableSubs(p.WhiteSubs)
 		p.BlackSubs = h.filterValidSubs(p.BlackSubs)
 		updates["front_page_subs"] = p.Canonical()
 	}
 
-	// NP crawl list uses the simple a+b+c format. Validate every name, drop the
-	// known-dead, and store as a sub: clause so the scheduler's unified-grammar
-	// parser still picks them up. An empty list disables crawling.
-	if v, ok := updates["prefetch_subs"]; ok {
+	if v, ok := updates["prefetch_subs"]; ok && v != "" {
 		names := h.filterUsableSubs(searchquery.ParseSubList(v))
 		if len(names) == 0 {
 			updates["prefetch_subs"] = ""
 		} else {
 			updates["prefetch_subs"] = "sub:" + searchquery.JoinSubs(names)
-		}
-	}
-
-	if v, ok := updates["prefetch_threshold"]; ok {
-		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 99 {
-			delete(updates, "prefetch_threshold")
-		} else {
-			updates["prefetch_threshold"] = strconv.Itoa(n)
-		}
-	}
-
-	// Video quality must be "source" or a known rendition height; reject
-	// anything else so the stored value always maps to a real DASH ladder step.
-	if v, ok := updates["video_quality"]; ok {
-		if _, valid := reddit.VideoQualityHeights[v]; !valid && v != "source" {
-			delete(updates, "video_quality")
-		}
-	}
-
-	// The auto theme's day/night picks must name a real, selectable palette
-	// (never "auto"/"system", which carry no fixed palette of their own); reject
-	// anything else so the woken-theme CSS always resolves to an embedded sheet.
-	for _, key := range []string{"auto_theme_day", "auto_theme_night"} {
-		if v, ok := updates[key]; ok && !render.IsSelectableTheme(v) {
-			delete(updates, key)
-		}
-	}
-
-	if v, ok := updates["settings_token_ttl"]; ok && !allowedSettingsTokenTTL[v] {
-		delete(updates, "settings_token_ttl")
-	}
-
-	if v, ok := updates["scroll_interval"]; ok {
-		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-			delete(updates, "scroll_interval")
-		} else {
-			updates["scroll_interval"] = strconv.Itoa(n)
 		}
 	}
 

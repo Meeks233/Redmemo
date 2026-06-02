@@ -1,3 +1,22 @@
+# RedMemo configuration.
+#
+# This file is FULLY OPTIONAL. RedMemo runs on built-in defaults plus
+# REDMEMO_* environment variables; only mount this file when you want to
+# pin a value that does not have an env-var equivalent (e.g. the SEO
+# canonical host, the trusted-proxy CIDR list, a non-default HR-limit
+# tuning, or static OAuth tokens). For Docker deployments the recommended
+# setup is **env-only** — see README "Configuration" for the full list.
+#
+# Required env vars (no config-file fallback for these):
+#   REDMEMO_POSTGRES_DSN    e.g. postgres://redmemo:pw@postgres:5432/redmemo?sslmode=disable
+#   REDMEMO_REDIS_ADDR      e.g. redis:6379
+#   REDMEMO_SERVER_SECRET   pre-shared secret gating TOTP enrolment
+#
+# All settings-page preferences (theme, layout, front_page_subs,
+# prefetch_subs, enable_debug, disable_initiative_upstream_access, ...)
+# are persisted in Postgres and overrideable via REDMEMO_DEFAULT_<KEY> —
+# never declared here. See README "Default user settings" for the table.
+
 server:
   listen: ":8080"
   read_timeout: 30s
@@ -12,27 +31,21 @@ legacy:
   sync_enabled: true                   # one-time settings sync from old redlib instance
   instance: ""                         # empty = Docker DNS (redlib:8080); set to explicit address to override
 
-postgres:
-  dsn: "postgres://redmemo:password@postgres:5432/redmemo?sslmode=disable"
-  max_open_conns: 50
-  max_idle_conns: 10
-
-redis:
-  addr: "redis:6379"
-  password: ""
-  db: 0
-  max_memory_mb: 256
-
 media:
   root_path: "/data/media"
   max_size_gb: 50
   eviction_check_interval: 5m
   eviction_threshold: 0.8              # trigger eviction at 80% capacity
 
-oauth:
-  tokens:
-    - client_id: "ohXpoqrZYub1kg"
-      backend: "mobile_spoof"
+# OAuth tokens are managed entirely in the DB by the token holder, which
+# bootstraps an anonymous mobile_spoof session on first start. Declare a
+# token here ONLY if you want to pin a specific Reddit client_id at boot;
+# leave the whole `oauth` block out otherwise.
+#
+# oauth:
+#   tokens:
+#     - client_id: "ohXpoqrZYub1kg"
+#       backend: "mobile_spoof"
 
 # Android User-Agent spoofing (mobile_spoof backend).
 #
@@ -61,20 +74,12 @@ ratelimit:
   window_duration: 10m
   safety_buffer: 50                    # reserved for prefetch
 
+# Prefetch master switch + dispatcher tick. The CRAWL LIST (which subs are
+# prefetched) lives in the DB — set it from /settings or via
+# REDMEMO_DEFAULT_PREFETCH_SUBS (unified search grammar, e.g. "sub:golang+rust").
 prefetch:
   enabled: true
   check_interval: 30s
-  subreddits:
-    - name: "golang"
-      sort: "hot"
-      max_pages: 2
-      fetch_comments: true
-      fetch_media: true
-      priority: 10
-    - name: "linux"
-      sort: "new"
-      max_pages: 1
-      priority: 5
 
 hrlimit:
   enabled: true
