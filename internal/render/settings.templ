@@ -248,6 +248,17 @@ templ settingsContent(d SettingsPageData) {
 						</div>
 					</fieldset>
 				</div>
+				<div class="prefs" id="archive_control_settings">
+					<fieldset>
+						<legend>{ T(ctx, "settings.archive_control") }</legend>
+						<div style="text-align:left">
+							<label for="archive_control" title={ T(ctx, "settings.archive_control_title") }>{ T(ctx, "settings.archive_control_label") }</label>
+						</div>
+						<div class="sub-picker-search">
+							<input type="text" id="archive_control" name="archive_control" form="settings-form" value={ d.ArchiveControl } placeholder={ T(ctx, "settings.archive_control_placeholder") } style="text-align:left" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
+						</div>
+					</fieldset>
+				</div>
 				<div class="prefs" id="instance_info">
 					<fieldset>
 						<legend>{ T(ctx, "settings.instance_info") }</legend>
@@ -414,7 +425,7 @@ templ settingsContent(d SettingsPageData) {
 		// The homepage filter and its disable toggle live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'disable_initiative_upstream_access', 'settings_token_ttl'].forEach(function(id) {
+		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});

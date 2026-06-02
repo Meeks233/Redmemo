@@ -1328,13 +1328,14 @@ video.lazy-media:not([src]) {
     min-height: 180px;
 }
 
-/* Loading placeholder for post media that has not painted yet — the empty
-   <svg> wrapper of a still-loading image, or a lazy <img>/<video> before its
-   src is hydrated. A shimmer sweep plays over the frame icon so an unfilled
-   slot reads as "loading" rather than "blocked / rate-limited". The shimmer
-   layer animates; the frame-icon layer is pinned at 50% 50% in both keyframes
-   so only the sweep moves. */
-.post_media_image svg,
+/* Loading placeholder for media that has not painted yet — a lazy
+   <img>/<video> before its src is hydrated. A shimmer sweep over a faint
+   backdrop so an unfilled slot reads as "loading" rather than "blocked /
+   rate-limited". The <svg> wrapper around a post image gets NO backdrop:
+   its dimensions are set to the image's real W×H, so any colored fill there
+   shows as an inexplicable square block while the inner <image> downloads
+   (and lingers forever for permanently-404 signed CDN URLs). The animated
+   .post_media_image.media-loading::after spinner covers that case instead. */
 img.lazy-media:not([src]),
 video.lazy-media:not([src]) {
     background-color: var(--highlighted);

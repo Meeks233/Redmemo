@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/searchquery"
@@ -24,6 +25,7 @@ var settingsKeys = []string{
 	"hide_awards", "hide_score", "remove_default_feeds",
 	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
+	"archive_control",
 	"prefetch_threshold", "scroll_interval", "lazy_media",
 	"video_quality", "mute_all_videos", "mute_nsfw_videos",
 	"auto_theme_day", "auto_theme_night",
@@ -69,6 +71,13 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 		} else {
 			out["prefetch_subs"] = "sub:" + searchquery.JoinSubs(names)
 		}
+	}
+
+	// archive_control runs its own rule set (+ wins over -, duplicates dropped
+	// entirely) — see archive.ParseControl. We canonicalise to the same form
+	// here so the input box echoes exactly what the archive layer will honor.
+	if v, ok := out["archive_control"]; ok && v != "" {
+		out["archive_control"] = archive.ParseControl(v).Canonical()
 	}
 
 	if v, ok := out["prefetch_threshold"]; ok {
@@ -220,6 +229,13 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	prefetchQuery := searchquery.JoinSubs(prefetchSubs)
 
+	var archiveControl string
+	if h.settingsStore != nil {
+		if v, ok, _ := h.settingsStore.Get("archive_control"); ok {
+			archiveControl = v
+		}
+	}
+
 	data := render.SettingsPageData{
 		BasePage: render.BasePage{
 			URL:       r.URL.Path,
@@ -235,6 +251,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		PrefetchSubs:   prefetchSubs,
 		FrontPageQuery: frontPageQuery,
 		PrefetchQuery:  prefetchQuery,
+		ArchiveControl: archiveControl,
 		SubredditStats: subStats,
 		ArchivedSubs:   archivedSubs,
 		LiveSubs:       liveSubs,
@@ -288,6 +305,11 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 		for k, v := range updates {
 			h.siteDefaults[k] = v
+		}
+		// Hot-swap the archiver's Control whenever the user changes the
+		// archive_control field — no restart needed.
+		if v, ok := updates["archive_control"]; ok && h.archiver != nil {
+			h.archiver.SetControlFromString(v)
 		}
 	}
 

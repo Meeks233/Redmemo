@@ -1,11 +1,14 @@
 // @license http://www.gnu.org/licenses/agpl-3.0.html AGPL-3.0
 // audioSync.js — for every v.redd.it DASH/CMAF video on the page, ask the
 // server whether its audio track has been muxed in yet. v.redd.it serves
-// video and audio as separate streams; muxing them takes a few seconds, so a
-// freshly-seen video is served silent first. While the mux runs we show a
-// small notice under the video; once the audio is ready we reload just that
-// <video> in place (preserving playback position) so it picks up the sound
-// without a full page reload.
+// video and audio as separate streams; muxing them takes a few seconds (and
+// requires the full video to land on disk first), so while we wait we pair
+// the silent <video> with a hidden <audio> companion fetched separately via
+// /api/audio_track. The audio file is only a few hundred KB, so the viewer
+// hears sound almost immediately while the much larger video continues to
+// stream/lazy-load. Once the server finishes muxing the single combined mp4
+// we tear the companion down and reload the <video> in place to pick up the
+// canonical muxed copy (which carries its own audio).
 //
 // Online listings lazy-load video — lazyMedia.js defers the URL to data-src
 // and only sets the real src once the post nears the viewport — and infinite
@@ -19,6 +22,12 @@
 
     var POLL_MS = 2000;
     var MAX_POLLS = 150; // ~5 min ceiling
+
+    // Drift tolerance between the video clock and the companion audio clock.
+    // Two separate media elements never share a sample clock, so they will
+    // drift by a few tens of ms over time. Nudging on every timeupdate (~250
+    // ms) is enough; anything tighter is audible as a stutter.
+    var SYNC_DRIFT_S = 0.18;
 
     var tracked = ("WeakSet" in window) ? new WeakSet() : null;
     var trackedList = [];
@@ -68,6 +77,125 @@
     function track(video, src) {
         var notice = null;
         var polls = 0;
+        // Companion <audio> playing the standalone DASH_AUDIO_*.mp4 track for
+        // this video. Created on the first "pending" poll, removed when the
+        // server-side mux completes (applyReady) or the video turns out to
+        // have no audio (clearNotice on "silent").
+        var audioEl = null;
+        var syncListeners = null;
+        function attachAudioCompanion() {
+            if (audioEl) return;
+            audioEl = document.createElement("audio");
+            audioEl.preload = "auto";
+            audioEl.src = "/api/audio_track?src=" + encodeURIComponent(src);
+            audioEl.style.display = "none";
+            // The companion plays the real audio track, so its mute/volume
+            // must mirror the <video> the viewer sees — including the
+            // template's defaultMuted attribute (set from the "Mute all" /
+            // "Mute NSFW" preferences). Don't force the <video> muted: the
+            // DASH/CMAF video-only segment has no audio track to leak, and
+            // forcing it would override the user's chosen sound mode.
+            audioEl.muted = video.muted;
+
+            function safePlay(el) {
+                var p = el.play();
+                if (p && p.catch) { p.catch(function () {}); }
+            }
+            function syncPlay() {
+                if (!audioEl) return;
+                try { audioEl.currentTime = video.currentTime || 0; }
+                catch (e) { /* not seekable yet */ }
+                safePlay(audioEl);
+            }
+            function syncPause() {
+                if (audioEl) { audioEl.pause(); }
+            }
+            function syncSeek() {
+                if (!audioEl) return;
+                try { audioEl.currentTime = video.currentTime || 0; }
+                catch (e) { /* ignore */ }
+            }
+            function syncRate() {
+                if (audioEl) { audioEl.playbackRate = video.playbackRate; }
+            }
+            function nudge() {
+                if (!audioEl || audioEl.paused) return;
+                var drift = (video.currentTime || 0) - (audioEl.currentTime || 0);
+                if (drift > SYNC_DRIFT_S || drift < -SYNC_DRIFT_S) {
+                    try { audioEl.currentTime = video.currentTime || 0; }
+                    catch (e) { /* ignore */ }
+                }
+            }
+            function syncVolume() {
+                if (!audioEl) return;
+                audioEl.volume = video.volume;
+                // Mirror mute toggles so the user clicking the <video>'s
+                // mute control silences the companion in lockstep.
+                audioEl.muted = video.muted;
+            }
+
+            syncListeners = {
+                play: syncPlay,
+                pause: syncPause,
+                seeking: syncSeek,
+                seeked: syncSeek,
+                ratechange: syncRate,
+                timeupdate: nudge,
+                waiting: syncPause,
+                playing: syncPlay,
+                ended: syncPause,
+                volumechange: syncVolume,
+            };
+            for (var ev in syncListeners) {
+                video.addEventListener(ev, syncListeners[ev]);
+            }
+            audioEl.playbackRate = video.playbackRate;
+            audioEl.volume = video.volume;
+
+            // Once the companion has enough audio buffered to play, the
+            // viewer is already hearing sound — drop the "Loading audio…"
+            // notice even though the background mux is still running. The
+            // poller stays alive so applyReady can later swap to the single
+            // muxed mp4, but it no longer needs UI to announce that.
+            audioEl.addEventListener("canplay", function () {
+                if (notice && notice.parentNode) {
+                    notice.parentNode.removeChild(notice);
+                }
+                notice = null;
+            });
+
+            (video.parentNode || document.body).appendChild(audioEl);
+
+            // Video may already be playing when the companion attaches
+            // (autoplay listings) — get audio in sync straight away.
+            if (!video.paused && !video.ended) {
+                syncPlay();
+            }
+        }
+
+        function detachAudioCompanion() {
+            if (!audioEl) return;
+            for (var ev in syncListeners) {
+                video.removeEventListener(ev, syncListeners[ev]);
+            }
+            syncListeners = null;
+            try {
+                audioEl.pause();
+                // Firefox holds onto already-buffered audio after removeChild
+                // unless we also drop the source and reset the element — the
+                // muxed <video> would then play sound through the dangling
+                // companion, defeating the user's mute preference.
+                audioEl.removeAttribute("src");
+                while (audioEl.firstChild) {
+                    audioEl.removeChild(audioEl.firstChild);
+                }
+                audioEl.load();
+            } catch (e) { /* ignore */ }
+            if (audioEl.parentNode) {
+                audioEl.parentNode.removeChild(audioEl);
+            }
+            audioEl = null;
+        }
 
         function showPending() {
             if (!notice) {
@@ -75,24 +203,42 @@
                 var host = video.closest(".post_media_content") || video.parentNode;
                 host.appendChild(notice);
             }
+            // The audio_status poll returns "pending" until the server-side
+            // mux completes — and the mux is gated on the FULL video landing
+            // on disk, not on the (tiny) audio probe. So while this notice is
+            // up the bottleneck is the video download, not the audio. The
+            // separate <audio> companion is already streaming sound in
+            // parallel; the canplay handler above tears the notice down the
+            // moment audible bytes are buffered, which usually beats the
+            // video by a wide margin.
             notice.querySelector(".audio-sync-text").textContent =
-                "Video has audio, downloading…";
+                "Loading video…";
         }
 
         // applyReady swaps the silent stand-in for the freshly muxed audio
         // copy by reloading just this <video> in place — no full page reload.
         // The silent response was served no-store, so video.load() re-requests
         // and the server now returns the muxed file. Playback position and
-        // play/pause state are preserved across the swap.
+        // play/pause state are preserved across the swap. The companion
+        // <audio> is torn down first so it doesn't double up with the audio
+        // baked into the muxed file.
         function applyReady() {
             // No notice means the video was already muxed when the page
             // loaded — it is playing the audio copy already, nothing to swap.
-            if (!notice) {
+            if (!notice && !audioEl) {
                 return;
             }
 
             var resumeAt = video.currentTime || 0;
             var wasPlaying = !video.paused && !video.ended;
+            // The muxed file carries its own audio track. Reset the <video>
+            // back to the template's chosen sound mode (defaultMuted reflects
+            // the "Mute all" / "Mute NSFW" preferences) so the swap doesn't
+            // leave the viewer with a different mute state than every other
+            // video on the page.
+            var preferredMuted = video.defaultMuted;
+
+            detachAudioCompanion();
 
             function restore() {
                 video.removeEventListener("loadedmetadata", restore);
@@ -101,6 +247,17 @@
                         video.currentTime = resumeAt;
                     }
                 } catch (e) { /* seeking not ready — ignore */ }
+                // Keep the muted DOM attribute in lockstep with the property.
+                // Firefox's built-in <video> controls take the icon state
+                // from the attribute on a fresh src; if the property and the
+                // attribute disagree the toolbar shows the mute icon while
+                // audio is actually playing (or vice-versa).
+                video.muted = preferredMuted;
+                if (preferredMuted) {
+                    video.setAttribute("muted", "");
+                } else {
+                    video.removeAttribute("muted");
+                }
                 if (wasPlaying) {
                     var p = video.play();
                     if (p && p.catch) { p.catch(function () {}); }
@@ -109,8 +266,18 @@
             video.addEventListener("loadedmetadata", restore);
             video.load();
 
+            // Always announce the swap so the viewer knows the full clip is
+            // now playing from the cached muxed copy (no longer streaming
+            // live from the CDN). If the canplay handler already tore the
+            // "Loading…" notice down because the companion audio landed
+            // first, build a fresh one here.
+            if (!notice) {
+                notice = buildNotice();
+                var host = video.closest(".post_media_content") || video.parentNode;
+                if (host) { host.appendChild(notice); }
+            }
             notice.classList.add("audio-sync-ready");
-            notice.querySelector(".audio-sync-text").textContent = "Audio synced";
+            notice.querySelector(".audio-sync-text").textContent = "Video ready";
             var done = notice;
             notice = null;
             setTimeout(function () {
@@ -121,6 +288,7 @@
         }
 
         function clearNotice() {
+            detachAudioCompanion();
             if (notice && notice.parentNode) {
                 notice.parentNode.removeChild(notice);
             }
@@ -139,7 +307,9 @@
                         clearNotice();
                         return;
                     }
-                    // pending
+                    // pending — attach the companion (idempotent) so audio
+                    // bytes start landing in parallel with the video.
+                    attachAudioCompanion();
                     showPending();
                     polls++;
                     if (polls < MAX_POLLS) {

@@ -171,6 +171,9 @@ type SettingsPageData struct {
 	// the page no longer needs JS to reconstruct or validate them.
 	FrontPageQuery string
 	PrefetchQuery  string
+	// ArchiveControl echoes the persisted archive_control filter (the raw
+	// `suba+subb-subc` form). Empty means no filter — every sub archives.
+	ArchiveControl string
 	SubredditStats []SubredditStatView
 	ArchivedSubs   []string
 	LiveSubs       []string

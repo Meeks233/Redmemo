@@ -20,6 +20,10 @@ type Service struct {
 
 	nsfwMu    sync.Mutex
 	nsfwKnown map[string]bool // lowercase sub name → true (already marked NSFW in DB)
+
+	// control is the live Archive Control filter. Hot-swapped via SetControl on
+	// settings save / startup; read lock-free on every ArchivePost.
+	control controlPtr
 }
 
 func NewService(ps *store.PostStore, cs *store.CommentStore, ss *store.SubredditStore) *Service {
@@ -29,6 +33,19 @@ func NewService(ps *store.PostStore, cs *store.CommentStore, ss *store.Subreddit
 		subStore:     ss,
 		nsfwKnown:    make(map[string]bool),
 	}
+}
+
+// SetControl swaps in a freshly parsed Archive Control filter. Safe to call
+// concurrently with ArchivePost — subsequent archive calls see the new rule.
+// Passing nil clears the filter (allows everything).
+func (s *Service) SetControl(c *Control) {
+	s.control.store(c)
+}
+
+// SetControlFromString parses raw with ParseControl and installs the result.
+// Convenience for the settings save path and startup wiring.
+func (s *Service) SetControlFromString(raw string) {
+	s.SetControl(ParseControl(raw))
 }
 
 // SetSubStatusStore wires the SubStatusStore so the archiver can sticky-mark
@@ -83,6 +100,12 @@ func (s *Service) ArchivePost(post *reddit.Post, subreddit, source string) {
 		sub = subreddit
 	}
 
+	// Archive Control: the user's whitelist/blacklist short-circuits archival
+	// before any DB write. An empty/missing setting permits every sub.
+	if ctl := s.control.load(); ctl != nil && !ctl.Allow(sub) {
+		return
+	}
+
 	if post.NSFW || post.Flags.NSFW {
 		s.markNSFWIfNeeded(sub)
 	}
@@ -112,6 +135,11 @@ func (s *Service) ArchiveComments(postURLPath string, comments []reddit.Comment)
 	if len(comments) == 0 {
 		return
 	}
+	if ctl := s.control.load(); ctl != nil {
+		if sub := subFromPermalink(postURLPath); sub != "" && !ctl.Allow(sub) {
+			return
+		}
+	}
 	data, err := json.Marshal(comments)
 	if err != nil {
 		return
@@ -126,6 +154,9 @@ func (s *Service) ArchiveComments(postURLPath string, comments []reddit.Comment)
 }
 
 func (s *Service) ArchiveSubreddit(sub *reddit.Subreddit) {
+	if ctl := s.control.load(); ctl != nil && !ctl.Allow(sub.Name) {
+		return
+	}
 	jsonData, err := json.Marshal(sub)
 	if err != nil {
 		return
@@ -144,6 +175,21 @@ func (s *Service) ArchiveSubreddit(sub *reddit.Subreddit) {
 	}); err != nil {
 		log.Printf("archive: save subreddit %s: %v", sub.Name, err)
 	}
+}
+
+// subFromPermalink extracts the subreddit segment from a "/r/<sub>/..." path.
+// Returns "" when the input does not start with "/r/", so callers can treat
+// unknown shapes as "no sub" rather than mis-filtering on them.
+func subFromPermalink(p string) string {
+	const prefix = "/r/"
+	if !strings.HasPrefix(p, prefix) {
+		return ""
+	}
+	rest := p[len(prefix):]
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		return rest[:i]
+	}
+	return rest
 }
 
 func countComments(comments []reddit.Comment) int {

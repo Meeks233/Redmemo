@@ -60,6 +60,7 @@ All overridable, all auto-translated from `REDLIB_DEFAULT_*`.
 | `REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH` | `on`, `off` | `off` | Master toggle for the L1/L2/L5 background prefetch loops. |
 | `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | (empty) | NP crawl list, e.g. `sub:golang+rust`. |
 | `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` | Per-sub freshness threshold (%). |
+| `REDMEMO_DEFAULT_ARCHIVE_CONTROL` | `+`/`-` sub list | (empty) | Archive whitelist/blacklist, e.g. `cats+dogs` (only those) or `-spam-meta` (everything except). Any `+` discards all `-` entries; duplicate names are dropped entirely. Empty = archive everything. |
 | `REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS` | `on`, `off` | `off` | Show NSFW subs in the local archive navigation. |
 | `REDMEMO_DEFAULT_FETCH_SUB_ABOUT` | `on`, `off` | `off` | Allow background `/r/<sub>/about.json` refresh. |
 | `REDMEMO_DEFAULT_LAZY_MEDIA` | `on`, `off` | `on` | Lazy-load images in feed cards. |

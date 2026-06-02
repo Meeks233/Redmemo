@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -276,32 +277,67 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Run video and audio fetches concurrently. The video stream is tens of MB
+	// while the audio track is a few hundred KB — sequencing them (old behaviour)
+	// delayed audio until the entire video had landed. Probing in parallel lets
+	// the audio file finish within the first second or two of the video download,
+	// so the mux can fire the instant the video bytes are on disk and the
+	// "audio appearing" wall-clock collapses to ~= video download time + mux.
 	videoTmp := filepath.Join(tmpDir, "v.mp4")
+	type audioResult struct {
+		path           string
+		confirmedAbsent bool
+		err            error
+	}
+	audioCh := make(chan audioResult, 1)
+	// A dedicated child ctx lets a video-download failure abort the in-flight
+	// audio probe immediately, so the deferred RemoveAll isn't held up waiting
+	// for an unrelated retry budget to drain.
+	audioCtx, cancelAudio := context.WithCancel(ctx)
+	defer cancelAudio()
+	go func() {
+		// Retry budget mirrors the original sequential loop: transient audio-CDN
+		// failures (5xx, network blips) are common; back off and retry rather
+		// than poisoning the whole mux.
+		var (
+			a   string
+			abs bool
+			err error
+		)
+		for attempt := 1; ; attempt++ {
+			a, abs, err = p.probeAudio(audioCtx, videoURL, tmpDir)
+			if err == nil {
+				break
+			}
+			if attempt >= audioProbeMaxAttempts {
+				break
+			}
+			log.Printf("media: audio probe attempt %d/%d failed for %s: %v; retrying in %s",
+				attempt, audioProbeMaxAttempts, videoURL, err, audioProbeRetryDelay)
+			select {
+			case <-time.After(audioProbeRetryDelay):
+			case <-audioCtx.Done():
+				audioCh <- audioResult{err: audioCtx.Err()}
+				return
+			}
+		}
+		audioCh <- audioResult{path: a, confirmedAbsent: abs, err: err}
+	}()
+
 	if err := p.downloadTo(ctx, videoURL, videoTmp); err != nil {
+		// Cancel and drain the audio goroutine so its tmp files clean up before
+		// the deferred RemoveAll runs.
+		cancelAudio()
+		<-audioCh
 		return nil, fmt.Errorf("download video: %w", err)
 	}
 
-	// Transient audio-CDN failures (5xx, network blips) are common. Retry the
-	// whole probe a few times, spaced >=1s apart, before giving up.
-	var audioTmp string
-	var audioConfirmedAbsent bool
-	probeFailed := false
-	for attempt := 1; ; attempt++ {
-		audioTmp, audioConfirmedAbsent, err = p.probeAudio(ctx, videoURL, tmpDir)
-		if err == nil {
-			break
-		}
-		if attempt >= audioProbeMaxAttempts {
-			probeFailed = true
-			break
-		}
-		log.Printf("media: audio probe attempt %d/%d failed for %s: %v; retrying in %s",
-			attempt, audioProbeMaxAttempts, videoURL, err, audioProbeRetryDelay)
-		select {
-		case <-time.After(audioProbeRetryDelay):
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	ar := <-audioCh
+	audioTmp := ar.path
+	audioConfirmedAbsent := ar.confirmedAbsent
+	probeFailed := ar.err != nil
+	if ar.err != nil && errors.Is(ar.err, context.Canceled) {
+		return nil, ar.err
 	}
 
 	if probeFailed {

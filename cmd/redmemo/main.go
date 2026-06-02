@@ -221,6 +221,13 @@ func main() {
 	subStatusStore := store.NewSubStatusStore(db)
 	archiver.SetSubStatusStore(subStatusStore)
 
+	// Seed the Archive Control filter from the settings DB (which already
+	// reflects any REDMEMO_DEFAULT_ARCHIVE_CONTROL applied above). The /settings
+	// save path hot-swaps it again whenever the user edits the value.
+	if v, ok, _ := settingsStore.Get("archive_control"); ok {
+		archiver.SetControlFromString(v)
+	}
+
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthHolder, &settingsAdapter{store: settingsStore},
 		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,

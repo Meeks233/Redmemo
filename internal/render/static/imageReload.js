@@ -149,7 +149,15 @@
             .then(function (data) {
                 if (st.done) return;
                 if (data.state === "ready") { doReload(st); return; }
-                if (data.state === "unsupported") { finish(st); return; }
+                // "unsupported": this proxy path can't be polled at all.
+                // "failed": upstream is permanently 404/410 (expired signed
+                // Reddit CDN URL) — no amount of polling will recover it.
+                // Both are terminal: drop the spinner and let the broken-image
+                // icon stand in honestly instead of spinning for ~5 minutes.
+                if (data.state === "unsupported" || data.state === "failed") {
+                    finish(st);
+                    return;
+                }
                 setTimeout(function () { poll(st); }, POLL_MS); // pending
             })
             .catch(function () {

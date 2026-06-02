@@ -188,7 +188,7 @@ func TestPublicFetchSubreddit_Success(t *testing.T) {
 		w.Write([]byte(listing))
 	}))
 
-	posts, before, after, err := c.FetchSubreddit(context.Background(), "golang", "new", "", 25)
+	posts, before, after, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", 25)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

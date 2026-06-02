@@ -183,6 +183,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /api/status", h.handleStatus)
 	mux.HandleFunc("GET /api/probe-sub", h.handleProbeSub)
 	mux.HandleFunc("GET /api/audio_status", h.handleAudioStatus)
+	mux.HandleFunc("GET /api/audio_track", h.handleAudioTrack)
 	mux.HandleFunc("GET /api/media_status", h.handleMediaStatus)
 
 	// Legacy countdown redirect

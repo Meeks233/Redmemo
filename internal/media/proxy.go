@@ -31,7 +31,20 @@ type Proxy struct {
 	cache       *cache.Cache
 	httpClient  httpDoer
 	userAgentFn func() string
+
+	// failMu guards failures, an in-memory note of URLs whose upstream fetch
+	// returned a terminal 404/410. Reddit's signed preview URLs (preview.redd.it
+	// / external-preview.redd.it) eventually expire and 404 forever; without
+	// this gate, ensureCached + startBackgroundDownload would loop on every
+	// /api/media_status poll, and imageReload.js would spin for its full
+	// 5-minute MAX_POLLS budget on each image. Entries are dropped after
+	// permFailureTTL so a recovered URL (re-uploaded asset on the same path)
+	// is eventually retried.
+	failMu   sync.Mutex
+	failures map[string]time.Time
 }
+
+const permFailureTTL = 1 * time.Hour
 
 // httpDoer is the subset of tls_client.HttpClient the media proxy depends on,
 // narrowed so tests can inject a plain fhttp client.
@@ -105,7 +118,12 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 // spinner SVG.
 func (p *Proxy) serveUnavailable(w http.ResponseWriter, r *http.Request, originalURL string) {
 	if r.Header.Get("Sec-Fetch-Dest") == "image" {
-		p.startBackgroundDownload(originalURL)
+		// Permanently-gone signed URLs: skip the background-download kick (it
+		// would just re-404) so /api/media_status flips to "failed" on the
+		// first poll and imageReload.js can tear its spinner down.
+		if !p.isPermFailed(originalURL) {
+			p.startBackgroundDownload(originalURL)
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		http.Error(w, "media not ready", http.StatusServiceUnavailable)
 		return
@@ -298,7 +316,38 @@ func (p *Proxy) ensureCached(ctx context.Context, originalURL string) (*store.Me
 	if meta := p.cachedMedia(originalURL); meta != nil {
 		return meta, nil
 	}
+	if p.isPermFailed(originalURL) {
+		return nil, errPermFailed
+	}
 	return p.fetchOnce(ctx, originalURL)
+}
+
+var errPermFailed = fmt.Errorf("upstream permanently unavailable")
+
+// markPermFailed records originalURL as known-bad so subsequent ensureCached /
+// MediaStatus calls fail fast instead of re-fetching a doomed CDN URL. Called
+// when upstream returns 404 or 410.
+func (p *Proxy) markPermFailed(originalURL string) {
+	p.failMu.Lock()
+	defer p.failMu.Unlock()
+	if p.failures == nil {
+		p.failures = make(map[string]time.Time)
+	}
+	p.failures[originalURL] = time.Now().Add(permFailureTTL)
+}
+
+func (p *Proxy) isPermFailed(originalURL string) bool {
+	p.failMu.Lock()
+	defer p.failMu.Unlock()
+	exp, ok := p.failures[originalURL]
+	if !ok {
+		return false
+	}
+	if time.Now().After(exp) {
+		delete(p.failures, originalURL)
+		return false
+	}
+	return true
 }
 
 // fetchOnce runs Download for originalURL at most once across concurrent
@@ -358,6 +407,9 @@ func (p *Proxy) startBackgroundDownload(originalURL string) {
 func (p *Proxy) MediaStatus(originalURL string) string {
 	if p.cachedMedia(originalURL) != nil {
 		return "ready"
+	}
+	if p.isPermFailed(originalURL) {
+		return "failed"
 	}
 	p.startBackgroundDownload(originalURL)
 	return "pending"
@@ -435,10 +487,16 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	}
 	stagingPath := staging.Name()
 	hasher := sha256.New()
-	_, hdr, size, err := p.streamRangedTo(ctx, originalURL, 0, nil, io.MultiWriter(staging, hasher))
+	status, hdr, size, err := p.streamRangedTo(ctx, originalURL, 0, nil, io.MultiWriter(staging, hasher))
 	staging.Close()
 	if err != nil {
 		os.Remove(stagingPath)
+		// Signed Reddit CDN URLs (preview.redd.it, external-preview.redd.it)
+		// 404 permanently once their HMAC s= signature expires; 410 is the
+		// canonical "gone". Memo so we stop hammering them.
+		if status == http.StatusNotFound || status == http.StatusGone {
+			p.markPermFailed(originalURL)
+		}
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 

@@ -30,7 +30,7 @@ func (h *Handler) handleSubSearch(w http.ResponseWriter, r *http.Request) {
 func parsedToArchiveOpts(p searchquery.Parsed) store.ArchiveSearchOpts {
 	opts := store.ArchiveSearchOpts{
 		Query:     p.TextQuery(),
-		After:     p.After,
+		After:     p.ArchiveAfter(), // honors date:week / date:month timeframe
 		Before:    p.Before,
 		Media:     p.MediaTypes,
 		Author:    p.Author,
@@ -55,44 +55,6 @@ func parsedToArchiveOpts(p searchquery.Parsed) store.ArchiveSearchOpts {
 		opts.CommentsOp = p.Comments.SQLOp()
 	}
 	return opts
-}
-
-// filterPostsLocal enforces the constraints Reddit's search API can't express
-// (score, comments, date range) over live results before display.
-//
-// Media type is deliberately NOT enforced here: Reddit's search can't be asked
-// to return a specific media kind, so forcing a type:video/image filter over the
-// live results would strip out most of a page and routinely leave it empty. We
-// let every post through and silently drop the media-type constraint on live
-// search — no user-facing notice. (The offline archive fallback still filters by
-// media type via parsedToArchiveOpts, where the local DB has the data to do so.)
-func filterPostsLocal(q searchquery.Parsed, posts []reddit.Post) []reddit.Post {
-	if !q.HasLocalFilter() {
-		return posts
-	}
-	out := make([]reddit.Post, 0, len(posts))
-	for _, p := range posts {
-		if q.Score != nil {
-			n, err := strconv.Atoi(p.Score[1])
-			if err != nil || !q.Score.Match(n) {
-				continue
-			}
-		}
-		if q.Comments != nil {
-			n, err := strconv.Atoi(p.Comments[1])
-			if err != nil || !q.Comments.Match(n) {
-				continue
-			}
-		}
-		if q.After != nil && int64(p.CreatedTS) < q.After.Unix() {
-			continue
-		}
-		if q.Before != nil && int64(p.CreatedTS) > q.Before.Unix() {
-			continue
-		}
-		out = append(out, p)
-	}
-	return out
 }
 
 // primaryMediaURL returns the post's main cached media URL — the post media, or
@@ -150,12 +112,24 @@ func addLegacySub(subs []string, sub string) []string {
 func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string) {
 	prefs := h.readPreferences(r)
 	query := r.URL.Query().Get("q")
-	sort := r.URL.Query().Get("sort")
-	t := r.URL.Query().Get("t")
 	after := r.URL.Query().Get("after")
 	urlPath := r.URL.Path
 
 	parsed, redditQ := buildSearchQuery(query, sub)
+	// sort / timeframe used to live in their own <form id="search_sort">; they
+	// now spell `sort:` and `date:<keyword>` inside the query box. Fall back
+	// to the legacy URL params so old bookmarks and the "Load More" partial
+	// cursor (which still echoes data-sort/data-t) keep working. SortForSearch
+	// translates the user's word into one /search.json accepts (e.g. sort:hot
+	// → relevance) instead of silently dropping it.
+	sort := parsed.SortForSearch()
+	if sort == "" {
+		sort = r.URL.Query().Get("sort")
+	}
+	t := parsed.Timeframe
+	if t == "" {
+		t = r.URL.Query().Get("t")
+	}
 
 	// "Load More" button issues partial=1 requests. Two flavours:
 	//   - upstream: the search page in normal mode pages through Reddit via
@@ -190,7 +164,10 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
-			posts = filterPostsLocal(parsed, posts)
+			// No client-side post-filter: Reddit's `q` already enforces every
+			// API-expressible constraint (subreddit/author/flair/rating + free
+			// text). Anything the API can't express (score/comments/date/media)
+			// is silently dropped on the live path so the page isn't gutted.
 
 			data := render.SearchPageData{
 				BasePage: render.BasePage{
@@ -231,7 +208,10 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		if prefs.ShowNSFW != "on" {
 			opts.NSFW = "sfw"
 		}
-		opts.Sort = sort
+		opts.Sort = parsed.SortForArchive()
+		if opts.Sort == "" {
+			opts.Sort = sort
+		}
 		opts.Limit = 25
 		stored, _, _ := h.postStore.ArchiveSearch(opts)
 		if len(stored) > 0 {
@@ -356,7 +336,7 @@ func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed
 	}
 
 	go h.archiver.ArchivePosts(posts, "", "search")
-	posts = filterPostsLocal(parsed, posts)
+	// Live "Load More" page: same policy as the first page — no post-filter.
 
 	w.Header().Set("X-Next-After", nextAfter)
 	w.Header().Set("X-Source", "fallback")
@@ -386,7 +366,10 @@ func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Reque
 	if prefs.ShowNSFW != "on" {
 		opts.NSFW = "sfw"
 	}
-	opts.Sort = r.URL.Query().Get("sort")
+	opts.Sort = parsed.SortForArchive()
+	if opts.Sort == "" {
+		opts.Sort = r.URL.Query().Get("sort")
+	}
 	opts.Limit = 25
 	opts.Offset = offset
 	stored, _, err := h.postStore.ArchiveSearch(opts)

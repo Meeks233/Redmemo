@@ -244,10 +244,15 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 		return
 	}
 
+	// `t=` (Reddit's relative timeframe) is only meaningful for top/
+	// controversial; for other sorts it's silently ignored upstream. Source
+	// from the URL param so /r/X/top?t=week works without the query box.
+	t := r.URL.Query().Get("t")
+
 	// 2. HR gate / OAuth quota. On degrade, skip upstream and fall through.
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderSubredditFallback(w, r, sub, sort, after, prefs, limit) {
+		if h.renderSubredditFallback(w, r, sub, sort, t, after, prefs, limit) {
 			return
 		}
 	}
@@ -265,12 +270,12 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	h.serveDegradeMiss(w, r, reason)
 }
 
-func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, after string, prefs reddit.Preferences, limit int) bool {
+func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, t, after string, prefs reddit.Preferences, limit int) bool {
 	if sort == "" {
 		sort = "hot"
 	}
 
-	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, after, limit)
+	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, t, after, limit)
 	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
@@ -307,7 +312,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		},
 		Sub:                subInfo,
 		Posts:              posts,
-		Sort:               [2]string{sort, r.URL.Query().Get("t")},
+		Sort:               [2]string{sort, t},
 		Ends:               [2]string{before, afterCursor},
 		NoPosts:            len(posts) == 0,
 		HasOAuth:           h.oauthHolder.HasAvailableTokens(),

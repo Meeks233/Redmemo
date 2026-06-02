@@ -102,7 +102,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, after string, limit int) ([]Post, string, string, error) {
+func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]Post, string, string, error) {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -110,6 +110,9 @@ func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, after stri
 		limit = 25
 	}
 	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&limit=%d", sub, sort, limit)
+	if t != "" {
+		path += "&t=" + url.QueryEscape(t)
+	}
 	if after != "" {
 		path += "&after=" + after
 	}

@@ -68,9 +68,11 @@ func NewClient(tokens TokenProvider) *Client {
 	}
 }
 
-// FetchSubreddit fetches a subreddit listing.
+// FetchSubreddit fetches a subreddit listing. `t` is Reddit's relative
+// timeframe (hour|day|week|month|year|all) and is honored only by the
+// top/controversial sorts; it is harmlessly ignored by others.
 // Returns posts, before cursor, after cursor, error.
-func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, after string, limit int) ([]Post, string, string, error) {
+func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]Post, string, string, error) {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -79,6 +81,9 @@ func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, after string, li
 	}
 
 	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&include_over_18=on&limit=%d", sub, sort, limit)
+	if t != "" {
+		path += "&t=" + url.QueryEscape(t)
+	}
 	if after != "" {
 		path += "&after=" + after
 	}

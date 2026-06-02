@@ -172,6 +172,26 @@ func (h *Handler) handleAudioStatus(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"state":%q}`, h.mediaProxy.AudioStatus(upstream))
 }
 
+// handleAudioTrack serves a v.redd.it video's standalone audio track so the
+// page's hidden <audio> companion can start playback the moment the (tiny)
+// audio file lands — without waiting for the full video to download or the
+// background mux to finish. The "src" query param is the video element's own
+// /vid/... URL; the response is either the audio mp4, 204 (no audio), or 503
+// (transient CDN failure).
+func (h *Handler) handleAudioTrack(w http.ResponseWriter, r *http.Request) {
+	src := r.URL.Query().Get("src")
+	u, err := url.Parse(src)
+	if err != nil || !strings.HasPrefix(u.Path, "/vid/") || !media.IsMuxableVideoSegment(u.Path) {
+		http.Error(w, "unsupported", http.StatusBadRequest)
+		return
+	}
+	upstream := "https://v.redd.it/" + strings.TrimPrefix(u.Path, "/vid/")
+	if u.RawQuery != "" {
+		upstream += "?" + u.RawQuery
+	}
+	h.mediaProxy.ServeSeparateAudio(w, r, upstream)
+}
+
 // handleMediaStatus reports whether a proxied image is cached and ready to
 // serve, for the page's imageReload.js poller. The "path" query param is the
 // image element's own proxy URL (e.g. /img/abc.jpg?width=640). A pending state

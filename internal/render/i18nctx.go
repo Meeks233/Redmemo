@@ -181,9 +181,6 @@ var timeframes = []string{"hour", "day", "week", "month", "year", "all"}
 // commentSorts is the comment sort option set on the post page.
 var commentSorts = []string{"confidence", "top", "new", "controversial", "old"}
 
-// searchSorts is the search result sort option set.
-var searchSorts = []string{"relevance", "hot", "top", "new", "comments"}
-
 // userListings / userSorts are the user-profile listing tabs and sort options.
 var userListings = []string{"overview", "comments", "submitted"}
 var userSorts = []string{"hot", "new", "top", "controversial"}

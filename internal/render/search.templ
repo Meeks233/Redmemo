@@ -67,25 +67,10 @@ templ searchContent(d SearchPageData) {
 	@offlineBanner(d.IsOffline)
 	@degradedBanner(d.DegradedReason)
 	<div id="column_one">
-		// The query input now lives in the shared navbar searchbox (pre-filled
-		// with the raw query) so a second search always works. This form only
-		// refines sort/timeframe, carrying the active query in a hidden field.
-		<form id="search_sort">
-			<input type="hidden" name="q" value={ d.Params.Query }/>
-			<select id="sort_options" name="sort" title={ T(ctx, "search.sort_title") }>
-				for _, s := range searchSorts {
-					<option value={ s } if s == d.Params.Sort { selected }>{ T(ctx, "sort."+s) }</option>
-				}
-			</select>
-			if d.Params.Sort != "new" {
-				<select id="timeframe" name="t" title="Timeframe">
-					for _, tf := range timeframes {
-						<option value={ tf } if tf == d.Params.Timeframe { selected }>{ T(ctx, "time."+tf) }</option>
-					}
-				</select>
-			}
-			<button id="sort_submit" class="submit">@submitSVG()</button>
-		</form>
+		// The sort/timeframe selector form is gone; both controls are now
+		// expressed inside the query box itself ("sort:top time:week") and
+		// parsed by internal/searchquery. The query input lives in the shared
+		// navbar searchbox, pre-filled with the raw query.
 		if !d.IsFiltered && len(d.Subreddits) > 0 {
 			<div id="search_subreddits">
 				for _, sr := range d.Subreddits {
