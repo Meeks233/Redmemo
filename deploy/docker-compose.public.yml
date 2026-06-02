@@ -80,9 +80,14 @@ services:
     image: postgres:17-alpine
     # No host port binding — Postgres is only reachable inside the compose
     # network.
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c effective_cache_size=768MB
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
       POSTGRES_DB: redmemo
       POSTGRES_USER: redmemo

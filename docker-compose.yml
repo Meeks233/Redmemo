@@ -57,13 +57,18 @@ services:
 
   postgres:
     image: postgres:17-alpine
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=128MB
+      -c effective_cache_size=768MB
     # Bound to 127.0.0.1 so `psql -h 127.0.0.1 -U redmemo` works for
     # ad-hoc inspection during tests, but NOT exposed to the network.
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./deploy/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     environment:
       POSTGRES_DB: redmemo
       POSTGRES_USER: redmemo

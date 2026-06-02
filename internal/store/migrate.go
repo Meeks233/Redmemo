@@ -487,6 +487,17 @@ var migrations = []string{
 	// every later INSERT (Save's upsert) inherits a fresh key without touching it.
 	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS shuffle_key DOUBLE PRECISION NOT NULL DEFAULT random();
 	 CREATE INDEX IF NOT EXISTS idx_posts_shuffle_key ON posts (shuffle_key);`,
+
+	// v24: fold the only contents of the old deploy/init.sql into the app's
+	// migration chain so a fresh deploy needs zero external SQL files. pg_trgm
+	// is required for the future full-text search path on archived posts;
+	// CREATE EXTENSION IF NOT EXISTS is idempotent and runs as the database
+	// owner that POSTGRES_USER created (a superuser in the official image).
+	// Cluster-level tuning (shared_buffers, work_mem, …) cannot move here —
+	// shared_buffers requires a postgres restart — and now lives in the
+	// docker-compose `command:` args, where it takes effect at startup with
+	// no extra file to download.
+	`CREATE EXTENSION IF NOT EXISTS pg_trgm;`,
 }
 
 func RunMigrations(db *sql.DB) error {

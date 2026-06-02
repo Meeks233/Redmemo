@@ -11,7 +11,6 @@ For a box behind Tailscale, a VPN, or a reverse-proxy SSO that already gates acc
 ```bash
 mkdir redmemo && cd redmemo
 curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
 mv docker-compose.homelab.yml docker-compose.yml
 echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
 # Optional — pre-seed the NP crawl list (otherwise leave for /settings):
@@ -28,7 +27,6 @@ For an internet-facing deployment behind nginx/Caddy + TLS. TOTP enforced, `/deb
 ```bash
 mkdir redmemo && cd redmemo
 curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.public.yml
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
 mv docker-compose.public.yml docker-compose.yml
 cat > .env <<EOF
 PG_PASSWORD=$(openssl rand -hex 24)
