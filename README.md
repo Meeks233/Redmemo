@@ -8,22 +8,24 @@
 
 ---
 
-**10-second pitch:** RedMemo is what happens when you take Redlib's UI, rewrite the back-end in Go, and treat every fetched post / comment / image as something to *keep forever*. The same routes, themes and cookies you already know from Redlib — plus a Postgres + content-addressed media archive underneath, a passive natural-prefetch scheduler, and a TOTP-gated `/settings` panel.
+**10-second pitch:** RedMemo is what happens when you take Redlib's UI, rewrite the back-end in Go, and treat every fetched post / comment / image as something to *keep forever*. The same routes, themes and cookies you already know from Redlib — plus a [Postgres + content-addressed media archive](#persistence-layer-postgresql--media-store) underneath, a [passive natural-prefetch scheduler](#natural-prefetch-np), and a [TOTP-gated `/settings`](#2-new-authentication-model-server-secret--totp) panel.
 
-- 🗄 **Persistent**: every post & media blob you've ever seen lives in Postgres + an on-disk content-addressed store. Reddit deletions don't take your archive with them.
-- 🐢 **Passive**: when upstream is blocked or rate-limited, requests degrade to the local archive with a small banner — never a hard 5xx.
-- 🔐 **Gated**: `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
-- 🦫 **Go + templ**: server-side rendered via Go's templ; no JS framework, no client hydration, no client-side state.
+**Jump to:** [Quick deployment](#quick-deployment) · [Migration from Redlib](#migration-from-redlib--key-differences) · [Architecture](#architecture-overview) · [Configuration](#configuration) · [Search grammar](#search--url-query-reference)
+
+- 🗄 **[Persistent](#3-persistent-storage-postgres-post-archive--canonical-media-cache)**: every post & media blob you've ever seen lives in Postgres + an on-disk content-addressed store. Reddit deletions don't take your archive with them.
+- 🐢 **[Passive](#1-passive-archive-site-upstream-restricted-by-design)**: when upstream is blocked or rate-limited, requests [degrade to the local archive](#failover-chain) with a small banner — never a hard 5xx.
+- 🔐 **[Gated](#2-new-authentication-model-server-secret--totp)**: `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
+- 🦫 **[Go + templ](#4-refactor-in-go-templ-ssr-no-js-framework)**: server-side rendered via Go's templ; no JS framework, no client hydration, no client-side state.
 
 ---
 
 RedMemo keeps the UI and route shape you already know from Redlib and adds three things on top:
 
-1. **Persistent archive** — every post, comment tree and media blob that passes through is written to PostgreSQL and to a content-addressed media store. Once a thing has been seen by your instance, it never disappears even if Reddit removes it or your upstream quota runs dry.
-2. **Natural Prefetch (NP)** — a four-layer background scheduler (L1 listing / L2 media / L3 on-demand comments / L4 sub icons) that slowly fills the archive with human-like timing rather than burst polling.
-3. **HR rate-limit layer** — a three-tier tumbling-window cap (5 s / 30 s / 5 min) shared across all instances via Redis, so a busy front-end gracefully degrades to "archived content" with a small banner instead of slamming Reddit and getting blocked.
+1. **[Persistent archive](#persistence-layer-postgresql--media-store)** — every post, comment tree and media blob that passes through is written to PostgreSQL and to a content-addressed media store. Once a thing has been seen by your instance, it never disappears even if Reddit removes it or your upstream quota runs dry.
+2. **[Natural Prefetch (NP)](#natural-prefetch-np)** — a four-layer background scheduler (L1 listing / L2 media / L3 on-demand comments / L4 sub icons) that slowly fills the archive with human-like timing rather than burst polling.
+3. **[HR rate-limit layer](#hr-rate-limit-layer)** — a three-tier tumbling-window cap (5 s / 30 s / 5 min) shared across all instances via Redis, so a busy front-end [gracefully degrades to "archived content"](#failover-chain) with a small banner instead of slamming Reddit and getting blocked.
 
-The rendering layer, theme list, cookie-based user settings and most route handlers are direct ports of Redlib's templates, so the day-to-day browsing experience is identical.
+The rendering layer, theme list, cookie-based user settings and most route handlers are direct ports of Redlib's templates, so the day-to-day browsing experience is identical. For a side-by-side comparison of where RedMemo differs in philosophy, see [Migration from Redlib — Key Differences](#migration-from-redlib--key-differences).
 
 ---
 
@@ -211,12 +213,12 @@ Example: `sub:rust rating:nsfw score:>1000` becomes `subreddit:rust nsfw:yes` up
 ## Features
 
 - Drop-in Reddit front-end UI inherited from Redlib (all themes, all layouts, all user-toggles).
-- **Permanent archive**: posts and comment-tree snapshots are stored in PostgreSQL, media is stored on disk with SHA-256 content addressing and three-layer dedup.
-- **Four-level failover** per request: Redis HTML cache → Reddit API → PostgreSQL archive → `fuckreddit` degrade page.
-- **Natural Prefetch**: low-rate background crawler that fills the archive without bursting (12–24 h big cycles, 15–30 min inter-round gaps, 1–3 s inter-request jitter).
-- **HR rate limiter**: global three-tier tumbling cap on outgoing Reddit traffic, shared via Redis across multiple instances, with fail-closed behaviour when Redis is down.
-- **TOTP-gated `/settings`** with 3-strike per-IP lockout, persistent enrolment in PostgreSQL and an administrative CLI reset command.
-- **Archive surfaces** (`/archive`, `/archive/r/<sub>`) with optional SEO opt-in (`robots.txt` + `sitemap.xml`, off by default).
+- **[Permanent archive](#persistence-layer-postgresql--media-store)**: posts and comment-tree snapshots are stored in PostgreSQL, media is stored on disk with SHA-256 content addressing and three-layer dedup.
+- **[Four-level failover](#failover-chain)** per request: Redis HTML cache → Reddit API → PostgreSQL archive → `fuckreddit` degrade page.
+- **[Natural Prefetch](#natural-prefetch-np)**: low-rate background crawler that fills the archive without bursting (12–24 h big cycles, 15–30 min inter-round gaps, 1–3 s inter-request jitter).
+- **[HR rate limiter](#hr-rate-limit-layer)**: global three-tier tumbling cap on outgoing Reddit traffic, shared via Redis across multiple instances, with fail-closed behaviour when Redis is down.
+- **[TOTP-gated `/settings`](#auth--totp-gate)** with 3-strike per-IP lockout, persistent enrolment in PostgreSQL and an administrative CLI reset command.
+- **Archive surfaces** (`/archive`, `/archive/r/<sub>`) with optional [SEO opt-in](#seo) (`robots.txt` + `sitemap.xml`, off by default).
 
 ![/archive hub listing subreddit cards](docs/img/archive.png)
 
