@@ -33,13 +33,12 @@ docker compose up -d
 
 Visit `http://<host>:8080/`. No TOTP, intended for trusted networks.
 
-### Public — TOTP-gated `/settings`, nginx in front
+### Public — TOTP-gated `/settings`, internet-facing
 
 ```bash
 mkdir redmemo && cd redmemo
 curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.public.yml
 curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/nginx.conf
 mv docker-compose.public.yml docker-compose.yml
 cat > .env <<EOF
 PG_PASSWORD=$(openssl rand -hex 24)
@@ -47,6 +46,8 @@ REDMEMO_SERVER_SECRET=$(openssl rand -hex 32)
 EOF
 docker compose up -d
 ```
+
+RedMemo listens on `:8080` only — bring your own TLS-terminating reverse proxy (nginx, Caddy, Traefik, …) and forward to it. A sample nginx vhost lives at [`deploy/nginx.conf`](deploy/nginx.conf) as a reference (X-Accel-Redirect for `/media/`, static-asset caching, forwarded headers); adapt it to your own setup rather than wiring it in by default.
 
 Enrol TOTP at `/settings` with the server secret, then bind 3-strike per-IP lockout. Full env-var matrix in [Quick Deployment](docs/Quick-Deployment.md).
 
