@@ -304,9 +304,9 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 					<li class="desktop_item"><a target="_blank" href={ templ.SafeURL("https://archive.is/latest/" + post.Media.URL) }>{ T(ctx, "post.archiveis") }</a></li>
 					<li class="mobile_item"><a target="_blank" href={ templ.SafeURL("https://archive.is/latest/" + post.Media.URL) }>{ T(ctx, "post.archive_short") }</a></li>
 				}
-				if post.Media.DownloadName != "" {
+				if post.PostType == "video" || post.PostType == "gif" {
 					<li>
-						<a href={ templ.SafeURL(post.Media.URL) } download={ post.Media.DownloadName }>
+						<a href={ templ.SafeURL(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)) } download>
 							<span class="mobile_item">{ T(ctx, "post.download_short") }</span>
 							<span class="desktop_item">{ T(ctx, "post.download") }</span>
 						</a>

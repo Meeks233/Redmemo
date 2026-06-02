@@ -46,6 +46,14 @@ services:
       # session under NP's pacing — a stealthier upstream path).
       - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=on
 
+      # ---- Homepage --------------------------------------------------
+      # OFF by default: `/` redirects to the archive hub instead of
+      # rendering the curated feed. Visitors land on what's actually
+      # stored locally, with no implicit "default subs" disclosure of
+      # operator taste. Users can flip it back on per-account from
+      # /settings.
+      - REDMEMO_DEFAULT_REMOVE_DEFAULT_FEEDS=on
+
       # ---- SEO -------------------------------------------------------
       # Off by default — flip on only if you actually want the archive
       # crawled. canonical_host must match the public origin for

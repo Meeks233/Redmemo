@@ -251,11 +251,9 @@ templ settingsContent(d SettingsPageData) {
 				<div class="prefs" id="archive_control_settings">
 					<fieldset>
 						<legend>{ T(ctx, "settings.archive_control") }</legend>
-						<div style="text-align:left">
-							<label for="archive_control" title={ T(ctx, "settings.archive_control_title") }>{ T(ctx, "settings.archive_control_label") }</label>
-						</div>
+						<label for="archive_control" title={ T(ctx, "settings.archive_control_title") }>{ T(ctx, "settings.archive_control_label") }</label>
 						<div class="sub-picker-search">
-							<input type="text" id="archive_control" name="archive_control" form="settings-form" value={ d.ArchiveControl } placeholder={ T(ctx, "settings.archive_control_placeholder") } style="text-align:left" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
+							<input type="text" id="archive_control" name="archive_control" form="settings-form" value={ d.ArchiveControl } placeholder={ T(ctx, "settings.archive_control_placeholder") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
 						</div>
 					</fieldset>
 				</div>

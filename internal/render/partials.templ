@@ -201,10 +201,10 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 						<video
 							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
 							if lazy {
-								data-src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+								data-src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
 								data-poster={ post.Media.Poster }
 							} else {
-								src={ reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality) }
+								src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
 								poster={ post.Media.Poster }
 							}
 							if post.Media.Width > 0 && post.Media.Height > 0 {

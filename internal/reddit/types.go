@@ -92,7 +92,6 @@ type Media struct {
 	Width        int64
 	Height       int64
 	Poster       string // video poster image
-	DownloadName string
 	Duration     float64
 }
 

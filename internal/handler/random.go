@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
+	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/searchquery"
 	"github.com/redmemo/redmemo/internal/store"
 )
@@ -270,7 +271,7 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 			}
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("X-Random-Post", sp.URLPath)
-			http.Redirect(w, r, appendDLTitle(imgURL, sp.Title), http.StatusFound)
+			http.Redirect(w, r, render.WithDownloadTitle(imgURL, sp.Title), http.StatusFound)
 			return true
 		}
 		// The cursor resumes mid-sweep, so the first roundDone ends only a partial
@@ -436,22 +437,6 @@ func (h *Handler) writeWalkState(ctx context.Context, key string, origin, cursor
 // frac returns the fractional part of x in [0,1), the wrap used by the golden-
 // ratio origin rotation.
 func frac(x float64) float64 { return x - math.Floor(x) }
-
-// appendDLTitle attaches a dl_title query parameter to a local proxy URL so the
-// image/video proxy emits a friendly Content-Disposition filename. The proxy
-// strips dl_title before forwarding to Reddit's signed CDN, so this is safe to
-// stack on any /vid/, /img/, /preview/, /thumb/, /emoji/ or /hls/ path.
-func appendDLTitle(proxyURL, title string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return proxyURL
-	}
-	sep := "?"
-	if strings.Contains(proxyURL, "?") {
-		sep = "&"
-	}
-	return proxyURL + sep + "dl_title=" + url.QueryEscape(title)
-}
 
 func writeRandomError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

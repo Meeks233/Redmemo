@@ -1,6 +1,8 @@
 package media
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -144,30 +146,16 @@ func buildFragMP4(t *testing.T, path string, spec fragSpec) {
 	}
 }
 
-func moofSizes(t *testing.T, path string) []uint64 {
-	t.Helper()
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	bis, err := mp4.ExtractBox(f, nil, mp4.BoxPath{mp4.BoxTypeMoof()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sizes := make([]uint64, len(bis))
-	for i, bi := range bis {
-		sizes[i] = bi.Size
-	}
-	return sizes
-}
-
 func TestMuxFragmentedMP4(t *testing.T) {
 	dir := t.TempDir()
 	videoPath := filepath.Join(dir, "v.mp4")
 	audioPath := filepath.Join(dir, "a.mp4")
 	outPath := filepath.Join(dir, "out.mp4")
 
+	// trunDataOffset (96) bakes in a specific moof byte size, so leave
+	// sampleDur unset here — adding the per-sample-duration field would push
+	// the trun (and thus the moof) past 96 bytes and break the fixture's
+	// hardcoded data-offset alignment.
 	buildFragMP4(t, videoPath, fragSpec{
 		trackID: 1, movieTS: 1000, mediaTS: 3000, duration: 2000,
 		fragments: [][]byte{[]byte("VIDEO-FRAG-1"), []byte("VIDEO-FRAG-TWO")},
@@ -176,9 +164,6 @@ func TestMuxFragmentedMP4(t *testing.T) {
 		trackID: 1, movieTS: 1000, mediaTS: 48000, duration: 2100,
 		fragments: [][]byte{[]byte("AUDIO-A"), []byte("AUDIO-BB")},
 	})
-
-	vMoofSizes := moofSizes(t, videoPath)
-	aMoofSizes := moofSizes(t, audioPath)
 
 	if err := muxFragmentedMP4(videoPath, audioPath, outPath); err != nil {
 		t.Fatalf("mux: %v", err)
@@ -190,98 +175,122 @@ func TestMuxFragmentedMP4(t *testing.T) {
 	}
 	defer out.Close()
 
-	// Two tracks, video keeps id 1 and audio is renumbered to 2.
-	ids, err := trackIDs(out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
-		t.Fatalf("track ids = %v, want [1 2]", ids)
-	}
-
-	// mvex carries a trex per track, audio remapped to 2.
-	trexes, err := mp4.ExtractBoxWithPayload(out, nil,
-		mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeMvex(), mp4.BoxTypeTrex()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var trexIDs []uint32
-	for _, b := range trexes {
-		trexIDs = append(trexIDs, b.Payload.(*mp4.Trex).TrackID)
-	}
-	if len(trexIDs) != 2 || trexIDs[0] != 1 || trexIDs[1] != 2 {
-		t.Fatalf("trex ids = %v, want [1 2]", trexIDs)
-	}
-
-	// mvhd.next_track_ID advanced past the added track.
-	mvhds, err := mp4.ExtractBoxWithPayload(out, nil, mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeMvhd()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := mvhds[0].Payload.(*mp4.Mvhd).NextTrackID; got != 3 {
-		t.Errorf("next_track_ID = %d, want 3", got)
-	}
-	// Movie duration widened to cover the longer (audio) track: 2100 in the
-	// 1000-Hz movie timescale (both inputs share it here).
-	if got := mvhds[0].Payload.(*mp4.Mvhd).DurationV0; got != 2100 {
-		t.Errorf("movie duration = %d, want 2100", got)
-	}
-
-	// Fragments: video first, then audio; sequence numbers reassigned 1..4;
-	// tfhd track ids [1 1 2 2]; each moof keeps its source byte size; trun data
-	// offset copied unchanged.
-	out.Seek(0, 0)
+	// Output is PROGRESSIVE: ftyp / mdat / moov, with no fragmentation. The
+	// progressive layout is required for compatibility with VLC's native mp4
+	// demuxer and Telegram desktop's libavformat-derivative player.
 	moofs, err := mp4.ExtractBox(out, nil, mp4.BoxPath{mp4.BoxTypeMoof()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantMoofSizes := append(append([]uint64{}, vMoofSizes...), aMoofSizes...)
-	if len(moofs) != len(wantMoofSizes) {
-		t.Fatalf("moof count = %d, want %d", len(moofs), len(wantMoofSizes))
-	}
-	wantTfhd := []uint32{1, 1, 2, 2}
-	for i, m := range moofs {
-		if m.Size != wantMoofSizes[i] {
-			t.Errorf("moof[%d] size = %d, want %d (preservation broken)", i, m.Size, wantMoofSizes[i])
-		}
-		mfhd, err := mp4.ExtractBoxWithPayload(out, m, mp4.BoxPath{mp4.BoxTypeMfhd()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := mfhd[0].Payload.(*mp4.Mfhd).SequenceNumber; got != uint32(i+1) {
-			t.Errorf("moof[%d] sequence = %d, want %d", i, got, i+1)
-		}
-		tfhd, err := mp4.ExtractBoxWithPayload(out, m, mp4.BoxPath{mp4.BoxTypeTraf(), mp4.BoxTypeTfhd()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := tfhd[0].Payload.(*mp4.Tfhd).TrackID; got != wantTfhd[i] {
-			t.Errorf("moof[%d] tfhd track id = %d, want %d", i, got, wantTfhd[i])
-		}
-		trun, err := mp4.ExtractBoxWithPayload(out, m, mp4.BoxPath{mp4.BoxTypeTraf(), mp4.BoxTypeTrun()})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := trun[0].Payload.(*mp4.Trun).DataOffset; got != trunDataOffset {
-			t.Errorf("moof[%d] trun data offset = %d, want %d", i, got, trunDataOffset)
-		}
+	if len(moofs) != 0 {
+		t.Fatalf("progressive output must contain no moof boxes, got %d", len(moofs))
 	}
 
-	// mdat payloads survive intact and in order (video fragments, then audio).
-	out.Seek(0, 0)
-	mdats, err := mp4.ExtractBoxWithPayload(out, nil, mp4.BoxPath{mp4.BoxTypeMdat()})
+	// One trak per track, with the source video as id 1 and audio renumbered
+	// to id 2 to avoid the collision both source files would otherwise have
+	// (both arrive with their own track_id=1).
+	tkhds, err := mp4.ExtractBoxWithPayload(out, nil,
+		mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeTkhd()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantData := []string{"VIDEO-FRAG-1", "VIDEO-FRAG-TWO", "AUDIO-A", "AUDIO-BB"}
-	if len(mdats) != len(wantData) {
-		t.Fatalf("mdat count = %d, want %d", len(mdats), len(wantData))
+	if len(tkhds) != 2 {
+		t.Fatalf("trak count = %d, want 2", len(tkhds))
 	}
-	for i, b := range mdats {
-		if got := string(b.Payload.(*mp4.Mdat).Data); got != wantData[i] {
-			t.Errorf("mdat[%d] = %q, want %q", i, got, wantData[i])
+	if got := tkhds[0].Payload.(*mp4.Tkhd).TrackID; got != 1 {
+		t.Errorf("video trak id = %d, want 1", got)
+	}
+	if got := tkhds[1].Payload.(*mp4.Tkhd).TrackID; got != 2 {
+		t.Errorf("audio trak id = %d, want 2", got)
+	}
+
+	// stsz lists every sample's size — both video fragments produced one
+	// sample each, both audio fragments did too, so each track gets two
+	// entries matching the input payload sizes.
+	stszs, err := mp4.ExtractBoxWithPayload(out, nil,
+		mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeMdia(),
+			mp4.BoxTypeMinf(), mp4.BoxTypeStbl(), mp4.BoxTypeStsz()})
+	if err != nil || len(stszs) != 2 {
+		t.Fatalf("stsz extraction err=%v, count=%d, want 2", err, len(stszs))
+	}
+	wantVideoSizes := []uint32{uint32(len("VIDEO-FRAG-1")), uint32(len("VIDEO-FRAG-TWO"))}
+	wantAudioSizes := []uint32{uint32(len("AUDIO-A")), uint32(len("AUDIO-BB"))}
+	gotVideoSizes := stszs[0].Payload.(*mp4.Stsz).EntrySize
+	gotAudioSizes := stszs[1].Payload.(*mp4.Stsz).EntrySize
+	if !equalU32Slice(gotVideoSizes, wantVideoSizes) {
+		t.Errorf("video stsz = %v, want %v", gotVideoSizes, wantVideoSizes)
+	}
+	if !equalU32Slice(gotAudioSizes, wantAudioSizes) {
+		t.Errorf("audio stsz = %v, want %v", gotAudioSizes, wantAudioSizes)
+	}
+
+	// co64 carries one absolute chunk offset per source fragment — two per
+	// track — so the moov can locate each chunk's bytes inside the mdat.
+	co64s, err := mp4.ExtractBoxWithPayload(out, nil,
+		mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeMdia(),
+			mp4.BoxTypeMinf(), mp4.BoxTypeStbl(), mp4.BoxTypeCo64()})
+	if err != nil || len(co64s) != 2 {
+		t.Fatalf("co64 extraction err=%v, count=%d, want 2", err, len(co64s))
+	}
+	if got := len(co64s[0].Payload.(*mp4.Co64).ChunkOffset); got != 2 {
+		t.Errorf("video chunk offsets = %d, want 2", got)
+	}
+	if got := len(co64s[1].Payload.(*mp4.Co64).ChunkOffset); got != 2 {
+		t.Errorf("audio chunk offsets = %d, want 2", got)
+	}
+
+	// Sample bytes land in the mdat in fragment-interleaved order:
+	//   video[0], audio[0], video[1], audio[1]
+	// so a strict progressive reader (libavformat / VLC native mp4) reaches
+	// audio packets without first walking past the whole video track.
+	mdatBytesByteOrder, err := readMdatBytes(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantConcat := "VIDEO-FRAG-1" + "AUDIO-A" + "VIDEO-FRAG-TWO" + "AUDIO-BB"
+	if string(mdatBytesByteOrder) != wantConcat {
+		t.Errorf("mdat byte order = %q, want %q", string(mdatBytesByteOrder), wantConcat)
+	}
+}
+
+func equalU32Slice(a, b []uint32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
+	return true
+}
+
+// readMdatBytes returns the payload bytes of the (single) mdat box in the
+// progressive output. We bypass mp4.ExtractBoxWithPayload because the writer
+// emits a large-size (16-byte header) mdat, and we want raw bytes regardless
+// of header form.
+func readMdatBytes(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	bis, err := mp4.ExtractBox(f, nil, mp4.BoxPath{mp4.BoxTypeMdat()})
+	if err != nil {
+		return nil, err
+	}
+	if len(bis) != 1 {
+		return nil, errors.New("expected exactly one mdat")
+	}
+	if _, err := bis[0].SeekToPayload(f); err != nil {
+		return nil, err
+	}
+	payloadSize := bis[0].Size - bis[0].HeaderSize
+	buf := make([]byte, payloadSize)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 func TestMuxFragmentedMP4_RejectsNonFragmented(t *testing.T) {

@@ -131,11 +131,49 @@ func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL stri
 		state = *meta.AudioState
 	}
 
+	// A non-video destination (Sec-Fetch-Dest: empty/document — i.e. <a download>
+	// click, direct navigation, save-as) means the bytes the client receives ARE
+	// the keep-forever artifact. Falling through to the silent fallback would
+	// hand the viewer a soundless mp4 they then store on disk, while the page's
+	// audioSync companion makes plain <video> playback sound fine — exactly the
+	// "browser plays with sound, downloaded file silent" symptom.
+	//
+	// Sec-Fetch-Dest alone is unreliable: some browsers (Firefox/Chromium
+	// "Save Link As", "Save Video As") omit it or send "empty" inconsistently.
+	// `dl_title` is only added by download-rename links and is an unambiguous
+	// download-intent hint — but the page <video src> ALSO carries it (so the
+	// downloaded filename matches the visible title), so we must NOT treat
+	// dl_title alone as a download. Use it only as a tiebreaker when
+	// Sec-Fetch-Dest is missing entirely: a real <video src> always sets
+	// Sec-Fetch-Dest=video, so an absent header means the request did not come
+	// from a media element.
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	hasDLTitle := r.URL.Query().Get("dl_title") != ""
+	isDownload := (dest != "" && dest != "video" && dest != "audio") ||
+		(dest == "" && hasDLTitle)
+
 	// Conclusive cached result ('has_audio' or 'silent') — serve it as-is.
+	// Downloads bypass the 24h public cache: a stale silent copy must never
+	// outlive a successful remux, and the next save attempt has to revalidate.
 	if (state == "has_audio" || state == "silent") && fileOnDisk(meta) {
 		p.cache.RecordMediaAccess(r.Context(), key)
-		p.serve(w, r, meta, false)
+		p.serve(w, r, meta, isDownload)
 		return
+	}
+
+	if isDownload {
+		muxed, err := p.muxOnce(r.Context(), videoURL, key, false)
+		if err == nil && fileOnDisk(muxed) {
+			p.cache.RecordMediaAccess(r.Context(), key)
+			// no-store on the download response: a previous request for the
+			// same URL may have cached a silent fallback (24h public cache on
+			// the L135 fast path), and we don't want any future request to
+			// reuse a soundless copy.
+			p.serve(w, r, muxed, true)
+			return
+		}
+		// Fall through to the eager path on mux error — better to give the
+		// viewer a silent copy than a hung download.
 	}
 
 	// Audio not ready. Kick the mux in the background and serve the silent
