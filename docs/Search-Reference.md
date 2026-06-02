@@ -33,21 +33,21 @@ sub:-meta author:spez comments>=100
 
 ## `/random` endpoint
 
-`/random` selects a random archived post and 302-redirects to its media. It accepts a compact `t:` filter language for shell consumers in addition to the full e621 grammar above:
+`/random` selects a random archived post and 302-redirects to its media. It uses the same e621 grammar above — there is no separate /random grammar:
 
 | Modifier | Example | Meaning |
 |----------|---------|---------|
-| `t:<type>` | `t:img` | Include only posts whose media is of `<type>`. |
-| `t:-<type>` | `t:-gif` | Exclude posts of `<type>`. |
-| `t:<a>-<b>` | `t:vid-gif` | Include `<a>`, exclude `<b>`. Combinable: `t:img,vid,-gif`. |
-| `t:ins` / `t:instant` | `t:ins` | Return the raw cached media (redirect) or post body as `text/plain` instead of a JSON envelope. |
+| `type:<kind>` | `type:image` | Include only posts whose media is of `<kind>`. |
+| `type:-<kind>` | `type:-gif` | Exclude posts of `<kind>`. |
+| `type:<a>+<b>` | `type:image+video` | Include both `<a>` and `<b>`. Combinable with excludes: `type:image+video-gif`. |
+| `mode:raw` / `mode:instant` | `mode:raw` | Return the raw cached media (redirect) or post body as `text/plain` instead of a JSON envelope. |
 
-Supported `<type>` tokens: `img`, `vid`, `gif`, `gallery`, `text`, `link`, `self`.
+Supported `<kind>` tokens: `image` (alias `img`), `video` (alias `vid`), `gif`.
 
 The downstream proxy understands a `dl_title` query parameter so the resulting `Content-Disposition` filename is human-friendly:
 
 ```
-GET /random?t=vid
+GET /random?q=type:video
   → 302 /proxy/vreddit/<id>.mp4?dl_title=<post_title>
   → Content-Disposition: attachment; filename="post_title_vreddit_id_format.mp4"
 ```

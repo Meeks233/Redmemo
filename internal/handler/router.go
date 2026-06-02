@@ -136,6 +136,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /imageReload.js", static)
 	mux.Handle("GET /audioSync.js", static)
 	mux.Handle("GET /redditModal.js", static)
+	mux.Handle("GET /searchAutocomplete.js", static)
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)

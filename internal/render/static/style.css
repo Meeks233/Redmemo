@@ -853,6 +853,34 @@ select {
     outline: 0;
 }
 
+/* Inline ghost-text autocomplete (searchAutocomplete.js). The overlay sits
+   inside #search_field, aligned with the input's text box. The prefix mirrors
+   what the user typed in transparent so the layout matches pixel-for-pixel; the
+   suffix shows the suggested completion in a muted color, visible through the
+   transparent-background input. pointer-events:none lets clicks fall through. */
+#search_ghost {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    align-items: center;
+    font-size: 15px;
+    line-height: 22px;
+    white-space: pre;
+    overflow: hidden;
+    pointer-events: none;
+    color: transparent;
+}
+#search_ghost .sg-prefix {
+    color: transparent;
+}
+#search_ghost .sg-suffix {
+    color: var(--muted, #999);
+    opacity: 0.7;
+}
+
 #inside {
     display: flex;
     align-items: center;

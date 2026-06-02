@@ -25,16 +25,16 @@ import (
 //
 // The filter syntax is the SAME unified search-box grammar used by the navbar
 // (see internal/searchquery and docs/reddit-search.md) — there is no separate
-// /random grammar. So `?q=sub:golang+linux u>200 after:2025-01-01` filters by
+// /random grammar. So `?q=sub:golang+linux ups>200 after:2025-01-01` filters by
 // subreddit scope, score and date exactly as the search box would.
 //
 // As a browser-friendly convenience, `&` may be used in place of a space to
-// separate clauses, so `?q=s:golang&u>1000&t:img` is equivalent to
-// `?q=s:golang u>1000 t:img` (see randomQueryExpr).
+// separate clauses, so `?q=sub:golang&ups>1000&type:image` is equivalent to
+// `?q=sub:golang ups>1000 type:image` (see randomQueryExpr).
 //
-// One difference: if the query pins a media type (t:image / t:video / t:gif),
-// /random redirects straight to the concrete cached media resource instead of
-// returning the post as JSON.
+// One difference: if the query pins a media type (type:image / type:video /
+// type:gif), /random redirects straight to the concrete cached media resource
+// instead of returning the post as JSON.
 func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 	parsed := searchquery.Parse(randomQueryExpr(r))
 	opts := parsedToArchiveOpts(parsed)
@@ -48,7 +48,7 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 	if parsed.Instant {
 		// Instant mode walks the three media kinds in a fixed video → image →
 		// gif preference, restricted to the user's `t:` allow-set if one was
-		// given (e.g. `t:vid-gif+ins` only walks video). The first kind with a
+		// given (e.g. `type:vid-gif mode:ins` only walks video). The first kind with a
 		// resident match wins. If every allowed kind misses, drop the media
 		// filter entirely and fall through to the text path so a matching
 		// non-media post can be returned as plain text.
@@ -81,7 +81,7 @@ func (h *Handler) handleRandom(w http.ResponseWriter, r *http.Request) {
 		if h.serveRandomMedia(w, r, parsed, opts) {
 			return
 		}
-		// No resident media matched (e.g. t:vid where no videos have been
+		// No resident media matched (e.g. type:vid where no videos have been
 		// downloaded and muxed yet). Fall through to the JSON path so the
 		// user gets a matching post's metadata instead of a 503 — the SQL
 		// filter still constrains to the requested media types.
@@ -289,16 +289,16 @@ func (h *Handler) serveRandomMedia(w http.ResponseWriter, r *http.Request, parse
 
 // randomQueryExpr extracts the /random filter expression, treating `&` as
 // equivalent to a space between clauses. net/url splits the raw query on `&`,
-// so a browser-friendly URL like `?q=s:golang&u>1000&t:img` would otherwise
-// arrive as a `q` value of just `s:golang` plus stray keyless params. We instead
+// so a browser-friendly URL like `?q=sub:golang&ups>1000&type:image` would otherwise
+// arrive as a `q` value of just `sub:golang` plus stray keyless params. We instead
 // stitch the raw segments back together — stripping a leading `q=` and
 // percent-decoding each — so the whole query string parses identically to
-// `?q=s:golang u>1000 t:img`. A literal `&` inside a value still works when
+// `?q=sub:golang ups>1000 type:image`. A literal `&` inside a value still works when
 // percent-encoded as `%26`, since decoding happens after the split.
 //
 // Decoding uses PathUnescape (not QueryUnescape) so `+` stays a literal `+`.
 // `+` is a meaningful joiner inside grammar values — `sub:golang+rust`,
-// `t:vid-gif+ins`, `t:img+vid` — and treating it as the form-encoded space
+// `type:vid-gif`, `type:image+vid` — and treating it as the form-encoded space
 // would silently shatter those values into separate tokens. Users wanting a
 // literal space should percent-encode it as `%20`.
 func randomQueryExpr(r *http.Request) string {
