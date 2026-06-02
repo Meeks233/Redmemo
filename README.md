@@ -14,6 +14,45 @@
 - 🐢 **Passive** — when upstream is blocked or rate-limited, requests degrade to the local archive with a small banner, never a hard 5xx.
 - 🔐 **Gated** — `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
 - 🦫 **Go + templ** — server-side rendered; no JS framework, no client hydration, no client-side state.
+- 🔎 **Search** — e621-style unified grammar across local archive (`sub:`, `rating:`, `score:>1000`, `flair:`, …) — see the [Search & URL Reference](docs/Search-Reference.md).
+
+## TL;DR deploy
+
+Two Compose profiles ship in `deploy/`:
+
+### Homelab — LAN only, no auth gate
+
+```bash
+mkdir redmemo && cd redmemo
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
+mv docker-compose.homelab.yml docker-compose.yml
+echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
+docker compose up -d
+```
+
+Visit `http://<host>:8080/`. No TOTP, intended for trusted networks.
+
+### Public — TOTP-gated `/settings`, nginx in front
+
+```bash
+mkdir redmemo && cd redmemo
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.public.yml
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
+curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/nginx.conf
+mv docker-compose.public.yml docker-compose.yml
+cat > .env <<EOF
+PG_PASSWORD=$(openssl rand -hex 24)
+REDMEMO_SERVER_SECRET=$(openssl rand -hex 32)
+EOF
+docker compose up -d
+```
+
+Enrol TOTP at `/settings` with the server secret, then bind 3-strike per-IP lockout. Full env-var matrix in [Quick Deployment](docs/Quick-Deployment.md).
+
+![TOTP gate on /settings](docs/img/totp.png)
+
+<sub>The TOTP prompt guarding <code>/settings</code> on the public profile. 3-strike per-IP lockout, enrolment gated by <code>REDMEMO_SERVER_SECRET</code>.</sub>
 
 ## Documentation
 
@@ -28,23 +67,6 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 - **[Configuration Reference](docs/Configuration.md)** — every `REDMEMO_*` env var
 - **[Default User Settings](docs/Default-User-Settings.md)** — `REDMEMO_DEFAULT_*` overrides
 - **[Search & URL Reference](docs/Search-Reference.md)** — e621-style unified grammar
-
-## TL;DR deploy
-
-```bash
-mkdir redmemo && cd redmemo
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/init.sql
-mv docker-compose.homelab.yml docker-compose.yml
-echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
-docker compose up -d
-```
-
-Visit `http://<host>:8080/`. For a public, TOTP-gated profile and the full env-var matrix, see [Quick Deployment](docs/Quick-Deployment.md).
-
-![TOTP gate on /settings](docs/img/totp.png)
-
-<sub>The TOTP prompt guarding <code>/settings</code> on the public profile. 3-strike per-IP lockout, enrolment gated by <code>REDMEMO_SERVER_SECRET</code>.</sub>
 
 ## Credits
 
