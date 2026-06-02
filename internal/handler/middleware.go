@@ -81,6 +81,7 @@ var prefDefaults = map[string]string{
 	"wide":          "off",
 	"blur_spoiler":  "on",
 	"show_nsfw":     "on",
+	"show_local_nsfw_subs": "off",
 	"blur_nsfw":     "on",
 	"autoplay_videos":                 "on",
 	"fixed_navbar":                    "on",
@@ -142,6 +143,7 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.Wide = pref("wide")
 	p.BlurSpoiler = pref("blur_spoiler")
 	p.ShowNSFW = pref("show_nsfw")
+	p.ShowLocalNSFWSubs = pref("show_local_nsfw_subs")
 	p.BlurNSFW = pref("blur_nsfw")
 	p.HideSidebarAndSummary = pref("hide_sidebar_and_summary")
 	p.AutoplayVideos = pref("autoplay_videos")

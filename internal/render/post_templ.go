@@ -1532,7 +1532,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var91 string
 			templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 257, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 257, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 			if templ_7745c5c3_Err != nil {
@@ -1561,7 +1561,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var92 templ.SafeURL
 			templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 266, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 266, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 			if templ_7745c5c3_Err != nil {
@@ -1574,7 +1574,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var93 string
 			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "media.video"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 266, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 266, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 			if templ_7745c5c3_Err != nil {

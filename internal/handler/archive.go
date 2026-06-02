@@ -241,8 +241,13 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 
 	nsfwSet, deadSet := h.resolveArchiveTags(names)
 
+	hideNSFWSubs := prefs.ShowLocalNSFWSubs != "on"
 	subs := make([]render.ArchiveHubEntry, 0, len(raw))
 	for _, rs := range raw {
+		key := strings.ToLower(rs.Name)
+		if hideNSFWSubs && nsfwSet[key] {
+			continue
+		}
 		entry := render.ArchiveHubEntry{
 			Name:      rs.Name,
 			PostCount: rs.PostCount,
@@ -250,7 +255,6 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 		if icon, ok := iconMap[rs.Name]; ok {
 			entry.IconURL = icon.IconURL
 		}
-		key := strings.ToLower(rs.Name)
 		if nsfwSet[key] {
 			entry.NSFW = true
 		}

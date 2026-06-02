@@ -128,6 +128,11 @@ templ settingsContent(d SettingsPageData) {
 								<input type="checkbox" name="show_nsfw" id="show_nsfw" checked?={ d.Prefs.ShowNSFW == "on" }/>
 							</div>
 							<div class="prefs-group">
+								<label for="show_local_nsfw_subs">{ T(ctx, "settings.show_local_nsfw_subs") }</label>
+								<input type="hidden" value="off" name="show_local_nsfw_subs"/>
+								<input type="checkbox" name="show_local_nsfw_subs" id="show_local_nsfw_subs" checked?={ d.Prefs.ShowLocalNSFWSubs == "on" }/>
+							</div>
+							<div class="prefs-group">
 								<label for="blur_nsfw">{ T(ctx, "settings.blur_nsfw") }</label>
 								<input type="hidden" value="off" name="blur_nsfw"/>
 								<input type="checkbox" name="blur_nsfw" id="blur_nsfw" checked?={ d.Prefs.BlurNSFW == "on" }/>

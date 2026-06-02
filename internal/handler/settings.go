@@ -16,7 +16,7 @@ const cookieMaxAge = 52 * 7 * 24 * 60 * 60 // 52 weeks in seconds
 
 var settingsKeys = []string{
 	"theme", "lang", "front_page_subs", "layout", "wide",
-	"blur_spoiler", "show_nsfw", "blur_nsfw",
+	"blur_spoiler", "show_nsfw", "show_local_nsfw_subs", "blur_nsfw",
 	"hide_sidebar_and_summary",
 	"autoplay_videos", "fixed_navbar",
 	"disable_visit_reddit_confirmation",

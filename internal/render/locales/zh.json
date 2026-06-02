@@ -202,6 +202,7 @@
   "settings.comment_sort": "默认评论排序",
   "settings.blur_spoiler": "模糊剧透预览:",
   "settings.show_nsfw": "显示 NSFW 帖子:",
+  "settings.show_local_nsfw_subs": "在归档导航中显示 NSFW 板块:",
   "settings.blur_nsfw": "模糊 NSFW 预览:",
   "settings.autoplay": "自动播放视频",
   "settings.lazy_media": "懒加载帖子媒体",

@@ -2,9 +2,9 @@
 
 > A self-hosted Reddit **archive station** with permanent local storage, built on the shoulders of [Redlib](https://github.com/redlib-org/redlib) and its ancestor [Libreddit](https://github.com/libreddit/libreddit).
 
-![screenshot](https://i.ibb.co/18vrdxk/redlib-rust.png)
+![RedMemo browsing r/golang](docs/img/hero.png)
 
-<sub>UI inherited verbatim from Redlib — the screenshot above is Redlib's own. A RedMemo-specific capture showing the archive banner + `/archive` hub will replace it once the v1 surface freezes.</sub>
+<sub>RedMemo serving <code>/r/golang</code> — UI inherited verbatim from Redlib, content served from the local archive when upstream is rate-limited.</sub>
 
 ---
 
@@ -60,6 +60,10 @@ Redlib has no admin auth — `/settings` is a public cookie-write surface for an
 - Operators get an administrative CLI reset command for the case where the authenticator device is lost.
 
 In short: Redlib trusts the network; RedMemo trusts an authenticator app + a secret you set at deploy time.
+
+![TOTP gate on /settings](docs/img/totp.png)
+
+<sub>The TOTP prompt guarding <code>/settings</code>. 3-strike per-IP lockout, enrolment gated by <code>REDMEMO_SERVER_SECRET</code>.</sub>
 
 ### 3. Persistent storage (Postgres post archive + canonical media cache)
 
@@ -126,6 +130,10 @@ Redlib is written in **Rust** on top of Hyper, with Askama for templating. RedMe
 - **HR rate limiter**: global three-tier tumbling cap on outgoing Reddit traffic, shared via Redis across multiple instances, with fail-closed behaviour when Redis is down.
 - **TOTP-gated `/settings`** with 3-strike per-IP lockout, persistent enrolment in PostgreSQL and an administrative CLI reset command.
 - **Archive surfaces** (`/archive`, `/archive/r/<sub>`) with optional SEO opt-in (`robots.txt` + `sitemap.xml`, off by default).
+
+![/archive hub listing subreddit cards](docs/img/archive.png)
+
+<sub>The <code>/archive</code> hub — every sub RedMemo has ever seen, grouped by NSFW visibility, with the local icon cache (L4).</sub>
 - **Per-instance random media endpoint** (`/random`) with `t:` filter language (e.g. `t:img`, `t:vid-gif`, `t:ins`).
 - **`dl_title` redirect parameter** so videos served by `/random` come back as friendly filenames (`<post_title>_vreddit_id_format.mp4`).
 - **Direct Reddit transport** using `bogdanfinn/tls-client` with matching ClientHello and HTTP/2 fingerprints — no external `redlib` instance required.
@@ -134,24 +142,7 @@ Redlib is written in **Rust** on top of Hyper, with Askama for templating. RedMe
 
 ## Architecture overview
 
-```
-                        ┌─────────────────────┐
-   Browser ──────────▶  │   RedMemo (Go)      │  ──▶  Reddit API
-                        └─────────┬───────────┘
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        ▼                         ▼                         ▼
- ┌────────────┐         ┌────────────────┐         ┌─────────────────┐
- │ Redis      │         │ PostgreSQL     │         │ Media root      │
- │ - HTML     │         │ - posts        │         │  SHA-256 buckets│
- │ - HR ctr   │         │ - comments     │         │  X-Accel-Redir  │
- │ - OAuth rt │         │ - media_url +  │         │  to nginx       │
- │ - rate win │         │   media_content│         │                 │
- │ - settings │         │ - oauth_tokens │         │                 │
- │   cache    │         │ - prefetch_cfg │         │                 │
- └────────────┘         │ - sub_icons    │         └─────────────────┘
-                        └────────────────┘
-```
+![Four-level failover chain](docs/img/architecture.svg)
 
 See [`docs/architecture.md`](docs/architecture.md), [`docs/storage-design.md`](docs/storage-design.md), [`docs/prefetch.md`](docs/prefetch.md), [`docs/HR.md`](docs/HR.md) for the full design.
 
@@ -198,6 +189,8 @@ NP is a producer/consumer pipeline that quietly fills the archive without burst 
 | **L4** Icon cache | Startup + every 1 h + on `/archive` view | 1 Reddit API request per sub when stale | Keeps `sub_icons` fresh (default TTL 30 days). Icon image itself is a CDN download. |
 
 L1 and L2 never call the network directly — they submit work items to the dispatcher and block until it runs them, so a single pacing layer governs everything. See [`docs/prefetch.md`](docs/prefetch.md) for the producer/consumer state machine.
+
+![NP producer / consumer state machine](docs/img/np-flow.svg)
 
 ### HR rate-limit layer
 

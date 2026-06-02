@@ -169,6 +169,7 @@ type Preferences struct {
 	Wide                           string
 	BlurSpoiler                    string
 	ShowNSFW                       string
+	ShowLocalNSFWSubs              string // default "off" — when "off", NSFW subs are hidden from the archive nav (/archive) listing
 	BlurNSFW                       string
 	HideSidebarAndSummary          string
 	AutoplayVideos                 string
