@@ -8,7 +8,7 @@
 
 ---
 
-**10-second pitch.** Take Redlib's UI, rewrite the back-end in Go, and treat every fetched post, comment and image as something to *keep forever*. Same routes, themes and cookies you already know from Redlib — plus a Postgres + content-addressed media archive underneath, a passive natural-prefetch scheduler, and a TOTP-gated `/settings` panel.
+**10-second pitch.** Take Redlib's UI, rewrite the back-end in Go, cache the resources actively and passively. Same routes, themes and cookies you already know from Redlib — plus a Postgres + content-addressed media archive underneath, a passive natural-prefetch scheduler, and a TOTP-gated `/settings` panel.
 
 - 🗄 **Persistent** — every post & media blob ever seen lives in Postgres + an on-disk content-addressed store. Reddit deletions don't take your archive with them.
 - 🐢 **Passive** — when upstream is blocked or rate-limited, requests degrade to the local archive with a small banner, never a hard 5xx.
