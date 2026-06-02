@@ -22,6 +22,10 @@ Two Compose profiles ship in `deploy/`:
 
 ### Homelab — LAN only, no auth gate
 
+**When to pick this profile:**
+- You have a clean residential IP, you're an adult, and you're the only one on the network — no auth gate needed, just point a browser at it.
+- You front it with **SSO / forward-auth** (Authelia, Authentik, Tailscale Serve, Cloudflare Access, …) and want RedMemo itself to stay unauthenticated behind that perimeter.
+
 ```bash
 mkdir redmemo && cd redmemo
 curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
@@ -34,6 +38,10 @@ docker compose up -d
 Visit `http://<host>:8080/`. No TOTP, intended for trusted networks.
 
 ### Public — TOTP-gated `/settings`, internet-facing
+
+**When to pick this profile:**
+- You can't control who reaches the site (link-sharing, public DNS, search-indexable) and you need RedMemo's built-in TOTP gate + 3-strike per-IP lockout doing the auth work.
+- You want to lean on the **Archive hub** as a public resource — strangers can browse what RedMemo has already preserved, while `/settings` and prefetch controls stay locked behind enrolment.
 
 ```bash
 mkdir redmemo && cd redmemo
