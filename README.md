@@ -83,7 +83,12 @@ RedMemo would not exist without:
 
 - **[Redlib](https://github.com/redlib-org/redlib)** — the entire front-end (templates, styles, themes, route shape, user-settings model) descends from Redlib. A reference copy lives in `_redlib_ref/`.
 - **[Libreddit](https://github.com/libreddit/libreddit)** — the original alternative front-end Redlib was forked from, and the ultimate source of the UI everyone recognises.
+- **[Lucide](https://lucide.dev)** — a large portion of the SVG iconography (toolbar glyphs, status badges, archive-hub markers) is reused verbatim or with minor edits from the Lucide icon set (ISC), itself partly descended from [Feather](https://github.com/feathericons/feather) (MIT, © Cole Bemis).
 
 ## License
 
-RedMemo inherits the AGPL-3.0 license of Redlib and Libreddit for the code paths derived from them. New code follows the same license unless explicitly stated.
+RedMemo is licensed under **[GNU AGPL-3.0-or-later](LICENSE)**. This is the same copyleft license as Redlib and Libreddit, and is required because RedMemo is a derivative work of Redlib's templates, themes, route shape, and user-settings model.
+
+Concretely, anyone running a modified copy of RedMemo on a public server **must** offer the corresponding source code of that modified version to its users (AGPL §13). You are free to self-host, fork, sell support, or run it commercially; you are not free to ship a closed-source / SaaS-only fork.
+
+Third-party attributions (Redlib, Libreddit, Lucide, Feather, and Go module dependencies) are catalogued in **[NOTICE](NOTICE)**.

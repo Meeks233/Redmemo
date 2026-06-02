@@ -1,0 +1,107 @@
+RedMemo
+Copyright (C) 2026 RedMemo contributors
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version. See the LICENSE file for the full text.
+
+================================================================================
+Third-party components
+================================================================================
+
+This product incorporates, derives from, or bundles material from the
+following upstream projects. Each component remains under its original
+license; the combined work is distributed under AGPL-3.0-or-later.
+
+--------------------------------------------------------------------------------
+1. Redlib  --  https://github.com/redlib-org/redlib
+   License: GNU AGPL-3.0-or-later
+--------------------------------------------------------------------------------
+
+RedMemo's entire front-end surface -- HTML templates, CSS themes, route
+shape, cookie/user-settings model, search-query grammar, and large parts
+of the user-facing copy -- is a Go port of Redlib. A verbatim reference
+copy of the upstream source tree is retained in `_redlib_ref/` for
+attribution and diff purposes.
+
+Per AGPL-3.0 sections 5 and 13, RedMemo as a whole is licensed under
+AGPL-3.0-or-later. The full upstream contributor roll is preserved in
+`_redlib_ref/CREDITS`.
+
+--------------------------------------------------------------------------------
+2. Libreddit  --  https://github.com/libreddit/libreddit
+   License: GNU AGPL-3.0-or-later
+--------------------------------------------------------------------------------
+
+Redlib itself was forked from Libreddit, which is the original source of
+the alternative-front-end design RedMemo's UI ultimately descends from.
+
+--------------------------------------------------------------------------------
+3. Lucide  --  https://lucide.dev  --  https://github.com/lucide-icons/lucide
+   License: ISC
+--------------------------------------------------------------------------------
+
+RedMemo's iconography reuses a substantial number of SVG glyphs from the
+Lucide icon set, either verbatim or with minor stroke / viewBox edits.
+
+   ISC License
+
+   Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022
+   as part of Feather (MIT). All other copyright (c) for Lucide are held
+   by Lucide Contributors 2022.
+
+   Permission to use, copy, modify, and/or distribute this software for
+   any purpose with or without fee is hereby granted, provided that the
+   above copyright notice and this permission notice appear in all
+   copies.
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+   WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+   WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+   AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
+   DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
+   PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+   TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+   PERFORMANCE OF THIS SOFTWARE.
+
+--------------------------------------------------------------------------------
+4. Feather  --  https://github.com/feathericons/feather
+   License: MIT
+--------------------------------------------------------------------------------
+
+Approximately 130 icons within Lucide -- and therefore some of the icons
+reused by RedMemo -- originate from the Feather icon set by Cole Bemis.
+
+   The MIT License (MIT)
+
+   Copyright (c) 2013-2023 Cole Bemis
+
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of this software and associated documentation files (the
+   "Software"), to deal in the Software without restriction, including
+   without limitation the rights to use, copy, modify, merge, publish,
+   distribute, sublicense, and/or sell copies of the Software, and to
+   permit persons to whom the Software is furnished to do so, subject to
+   the following conditions:
+
+   The above copyright notice and this permission notice shall be
+   included in all copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+Go module dependencies
+================================================================================
+
+Compile-time and run-time Go dependencies retain their own upstream
+licenses; see `go.mod` and the LICENSE files inside each module's
+vendored / module-cache directory for the authoritative text. Notable
+dependencies include `bogdanfinn/tls-client` and the standard set of
+Postgres / Redis / templ libraries.
