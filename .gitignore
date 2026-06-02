@@ -1,7 +1,6 @@
 # --- Project-internal directories ---
-# Ignore the docs tree, but keep the image assets referenced from README.
-docs/*
-!docs/img/
+# Private development notes; docs/ itself is public.
+docs-internal/
 scripts
 _redlib_ref/
 
