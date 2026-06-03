@@ -23,6 +23,25 @@ func (h *Handler) staticHandler() http.Handler {
 	return h.renderer.StaticHandler()
 }
 
+// mediaBundleHandler serves the runtime-concatenated media-page JS bundle
+// (lazyMedia + videoAutoplay + videoPreload + audioSync + imageReload). Same
+// ETag + revalidate strategy as every other embedded asset: the bytes shift
+// when the build changes, the hash changes, and browsers pick it up on the
+// next conditional request.
+func (h *Handler) mediaBundleHandler() http.Handler {
+	body := render.MediaBundle()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("ETag", render.AssetETag())
+		w.Header().Set("Cache-Control", "public, max-age=0, must-revalidate")
+		if match := r.Header.Get("If-None-Match"); match != "" && match == render.AssetETag() {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Write(body)
+	})
+}
+
 func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	// Pull dl_title (frontend download-name hint) out before reconstructing the
 	// CDN URL; it must not leak to Reddit's signed image hosts. Strip it from
@@ -513,6 +532,9 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Debug surfaces token state and live runtime details — never cache it,
+	// nor allow any browser/proxy to retain a copy after the auth token rolls.
+	w.Header().Set("Cache-Control", "no-store")
 	h.renderer.RenderDebug(w, "Instance Diagnostics", prefs, dd)
 }
 

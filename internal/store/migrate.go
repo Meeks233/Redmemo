@@ -498,6 +498,14 @@ var migrations = []string{
 	// docker-compose `command:` args, where it takes effect at startup with
 	// no extra file to download.
 	`CREATE EXTENSION IF NOT EXISTS pg_trgm;`,
+
+	// v25: separate "upstream has no icon" from "fetch failed". Subs like r/golang
+	// permanently report empty icon_url; L4 should record that verdict once and
+	// never spend another /about.json call on them. has_icon defaults TRUE so
+	// every pre-existing row keeps the old retry behavior until L4 visits it
+	// again and learns the real verdict. NOT NULL is safe because the default
+	// covers backfill in a single rewrite.
+	`ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS has_icon BOOLEAN NOT NULL DEFAULT TRUE;`,
 }
 
 func RunMigrations(db *sql.DB) error {

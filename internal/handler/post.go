@@ -31,12 +31,14 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 		commentSort = prefs.CommentSort
 	}
 
-	// 1. Cache — keyed by UI language so a zh visitor never receives the
-	// cached zh-neutral page rendered for an en visitor (and vice versa).
-	cacheKey := prefs.Lang + ":" + urlPath
+	// 1. Cache — keyed by full prefs fingerprint so a zh visitor never receives
+	// the page rendered for an en visitor, nor a theme/NSFW variant they didn't
+	// pick. htmlCacheKey appends an FNV tag over every Preferences field.
+	rawQuery := ""
 	if commentSort != "" {
-		cacheKey += "?sort=" + commentSort
+		rawQuery = "sort=" + commentSort
 	}
+	cacheKey := htmlCacheKey(urlPath, rawQuery, prefs)
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
 		t.mark("cache")
 		t.writeHeader(w)
@@ -50,7 +52,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	// 2. HR gate / OAuth quota
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t) {
+		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t, cacheKey) {
 			return
 		}
 	}
@@ -59,7 +61,7 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	// (reason==""); when degraded, only the amber degraded banner shows.
 	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
-		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason, t)
+		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason, t, cacheKey)
 		return
 	}
 
@@ -123,28 +125,47 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	urlPath := "/r/" + sub + "/comments/" + id
-	// HTML cache entries are language-prefixed; drop every language variant.
-	for _, lang := range render.SupportedLangs {
-		h.cache.InvalidateHTML(r.Context(), lang+":"+urlPath)
+	// HTML cache keys now embed a prefs fingerprint; drop every variant under
+	// this URL path in one SCAN rather than enumerating known languages.
+	if err := h.cache.InvalidateHTMLPrefix(r.Context(), urlPath); err != nil {
+		log.Printf("handler: invalidate html prefix %s: %v", urlPath, err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprint(w, `{"ok":true}`)
 }
 
-func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences, t *reqTimer) bool {
-	post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
-	h.recordUpstream(r.Context())
+func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences, t *reqTimer, cacheKey string) bool {
+	// Coalesce concurrent identical post fetches so a viral post under
+	// simultaneous load only burns one OAuth quota unit. recordUpstream and
+	// the archiver spawn live inside the leader closure so they fire once
+	// per real Reddit hit, not once per merged caller.
+	type postFetchResult struct {
+		post     reddit.Post
+		comments []reddit.Comment
+		err      error
+	}
+	flightKey := "post|" + sub + "|" + id + "|" + commentSort
+	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
+		post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
+		h.recordUpstream(r.Context())
+		res := &postFetchResult{post: post, comments: comments, err: err}
+		if err != nil {
+			return res, nil
+		}
+		go func() {
+			h.archiver.ArchivePost(&post, sub, "oauth_fallback")
+			h.archiver.ArchiveComments(post.Permalink, comments)
+		}()
+		return res, nil
+	})
+	res := raw.(*postFetchResult)
 	t.mark("upstream")
-	if err != nil {
-		log.Printf("handler: fallback fetch post %s/%s: %v", sub, id, err)
+	if res.err != nil {
+		log.Printf("handler: fallback fetch post %s/%s: %v", sub, id, res.err)
 		return false
 	}
-
-	go func() {
-		h.archiver.ArchivePost(&post, sub, "oauth_fallback")
-		h.archiver.ArchiveComments(post.Permalink, comments)
-	}()
+	post, comments := res.post, res.comments
 
 	if sp, _ := h.postStore.Get(post.Permalink); sp != nil {
 		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
@@ -175,10 +196,11 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "fallback")
 	w.Write(buf.Bytes())
+	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 	return true
 }
 
-func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string, t *reqTimer) {
+func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string, t *reqTimer, cacheKey string) {
 	var post reddit.Post
 	if err := json.Unmarshal(sp.JSONData, &post); err != nil {
 		h.renderer.RenderError(w, prefs.Lang, "存档数据解析失败", http.StatusInternalServerError)
@@ -220,4 +242,5 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "archive")
 	w.Write(buf.Bytes())
+	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 }

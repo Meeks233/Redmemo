@@ -185,22 +185,24 @@ func (s *SubStatusStore) ListLive() ([]string, error) {
 	return names, rows.Err()
 }
 
-// ListAllAlive returns all locally known subs that are not dead/private/quarantined,
-// by unioning subreddit_status (live/unknown), posts (distinct), and prefetch_config,
-// then excluding dead entries from subreddit_status.
+// ListAllAlive returns all locally known subs that are not confirmed dead/private.
+// A sub is "known" if it appears in subreddit_status as live/quarantined, in posts,
+// or in prefetch_config (enabled). status='unknown' is NOT an exclusion: that value
+// doubles as the SetNSFW placeholder, so excluding it silently dropped NSFW-flagged
+// subs from L4 icon refresh. Only 'dead' and 'private' — gravestones written after
+// fail_count >= 3 in RecordFailure — actually mark a sub as gone.
 func (s *SubStatusStore) ListAllAlive() ([]string, error) {
 	rows, err := s.db.Query(`
-		SELECT DISTINCT name FROM (
+		SELECT s.name FROM (
 			SELECT name FROM subreddit_status WHERE status IN ('live', 'quarantined')
 			UNION
-			SELECT DISTINCT subreddit AS name FROM posts
+			SELECT DISTINCT subreddit FROM posts
 			UNION
-			SELECT subreddit AS name FROM prefetch_config WHERE enabled = true
-		) AS all_subs
-		WHERE name NOT IN (
-			SELECT name FROM subreddit_status WHERE status IN ('dead', 'private', 'unknown')
-		)
-		ORDER BY name`)
+			SELECT subreddit FROM prefetch_config WHERE enabled = true
+		) AS s
+		LEFT JOIN subreddit_status ss ON ss.name = s.name
+		WHERE ss.status IS NULL OR ss.status NOT IN ('dead', 'private')
+		ORDER BY s.name`)
 	if err != nil {
 		return nil, fmt.Errorf("list all alive subs: %w", err)
 	}

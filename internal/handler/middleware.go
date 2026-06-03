@@ -12,7 +12,11 @@ import (
 )
 
 func (h *Handler) applyMiddleware(next http.Handler) http.Handler {
-	return pathNormalize(logging(recovery(next)))
+	// recovery sits innermost so a panic in the handler is caught before
+	// gzip has started writing the response body — letting recovery emit a
+	// clean 500 (which gzip can then encode normally) instead of a
+	// half-written gzip frame followed by raw error text.
+	return pathNormalize(logging(gzipMiddleware(recovery(next))))
 }
 
 func pathNormalize(next http.Handler) http.Handler {

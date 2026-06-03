@@ -140,6 +140,13 @@ type Scheduler struct {
 	// applies; tests override it for deterministic, fast runs.
 	userActivePause func() time.Duration
 
+	// L4 icon round queue: pre-ordered (post count desc) list of subs still to
+	// fetch this round. Built lazily when empty by nextIconBatch. Both the
+	// hourly tick and passive /archive triggers drain from the same queue, so
+	// rapid triggers consume the round instead of multiplying upstream load.
+	iconMu    sync.Mutex
+	iconRound []string
+
 	// Observable state for debug page
 	statusMu    sync.RWMutex
 	l1Phase     string

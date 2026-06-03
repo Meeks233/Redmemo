@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"net"
@@ -246,9 +247,11 @@ func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences, limit int) {
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
+	cacheKey := htmlCacheKey(urlPath, "after="+after, prefs)
 
-	// 1. Cache — language-prefixed, see handlePost.
-	if cached, _ := h.cache.GetHTML(r.Context(), prefs.Lang+":"+urlPath+"?after="+after); cached != nil {
+	// 1. Cache — keyed by full prefs fingerprint so theme/NSFW/page_limit/lang
+	// changes never bleed across visitors. See handlePost for the long form.
+	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(cached)
@@ -263,7 +266,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	// 2. HR gate / OAuth quota. On degrade, skip upstream and fall through.
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderSubredditFallback(w, r, sub, sort, t, after, prefs, limit) {
+		if h.renderSubredditFallback(w, r, sub, sort, t, after, prefs, limit, cacheKey) {
 			return
 		}
 	}
@@ -273,7 +276,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	// quota, reason!=""→show only degraded banner, not the offline one).
 	posts, _ := h.postStore.ListBySubreddit(sub, limit, 0, prefs.ShowNSFW != "on")
 	if len(posts) > 0 {
-		h.renderSubredditFromArchive(w, r, sub, posts, prefs, reason == "", reason)
+		h.renderSubredditFromArchive(w, r, sub, posts, prefs, reason == "", reason, cacheKey)
 		return
 	}
 
@@ -281,38 +284,59 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	h.serveDegradeMiss(w, r, reason)
 }
 
-func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, t, after string, prefs reddit.Preferences, limit int) bool {
+func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, t, after string, prefs reddit.Preferences, limit int, cacheKey string) bool {
 	if sort == "" {
 		sort = "hot"
 	}
 
-	posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, t, after, limit)
-	h.recordUpstream(r.Context())
-	if err != nil {
-		log.Printf("handler: fallback fetch subreddit %s: %v", sub, err)
-		if h.subStatusStore != nil {
-			h.subStatusStore.RecordFailure(sub, err.Error())
+	// Coalesce concurrent identical fetches: only one upstream call burns
+	// quota even if N visitors hit the same /r/sub/sort?after=… at once.
+	// recordUpstream + archiver + MarkLive only fire in the leader's closure
+	// so they happen once per real Reddit hit, not once per merged caller.
+	type subFetchResult struct {
+		posts        []reddit.Post
+		before       string
+		after        string
+		err          error
+	}
+	flightKey := "sub|" + sub + "|" + sort + "|" + t + "|" + after + "|" + strconv.Itoa(limit)
+	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
+		posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, t, after, limit)
+		h.recordUpstream(r.Context())
+		res := &subFetchResult{posts: posts, before: before, after: afterCursor, err: err}
+		if err != nil {
+			if h.subStatusStore != nil {
+				h.subStatusStore.RecordFailure(sub, err.Error())
+			}
+			return res, nil
 		}
+		go func() {
+			h.archiver.ArchivePosts(posts, sub, "oauth_fallback")
+			if h.subStatusStore != nil {
+				h.subStatusStore.MarkLive(sub)
+			}
+		}()
+		return res, nil
+	})
+	res := raw.(*subFetchResult)
+	if res.err != nil {
+		log.Printf("handler: fallback fetch subreddit %s: %v", sub, res.err)
 		return false
 	}
+	posts, before, afterCursor := res.posts, res.before, res.after
 
 	// Active visit: cached if fresh, else fetch + persist (60-day TTL).
 	// Gated by the fetch_sub_about preference — when off (default), the HR
 	// layer is cache-only and never triggers an upstream about request.
 	// The background icon/about prefetch path (internal/prefetch/icon.go)
-	// is independent of this setting.
+	// is independent of this setting. Kept outside the singleflight because
+	// activeAbout is per-user prefs.
 	activeAbout := prefs.FetchSubAbout == "on"
 	subInfo, _ := h.fetchSubredditAbout(r.Context(), sub, activeAbout)
 
-	go func() {
-		h.archiver.ArchivePosts(posts, sub, "oauth_fallback")
-		if subInfo.Name != "" {
-			h.archiver.ArchiveSubreddit(&subInfo)
-		}
-		if h.subStatusStore != nil {
-			h.subStatusStore.MarkLive(sub)
-		}
-	}()
+	if subInfo.Name != "" {
+		go h.archiver.ArchiveSubreddit(&subInfo)
+	}
 
 	data := render.SubredditPageData{
 		BasePage: render.BasePage{
@@ -329,16 +353,19 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}
 
+	var buf bytes.Buffer
+	if err := h.renderer.RenderSubreddit(&buf, data); err != nil {
+		log.Printf("handler: render subreddit: %v", err)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "fallback")
-	if err := h.renderer.RenderSubreddit(w, data); err != nil {
-		log.Printf("handler: render subreddit: %v", err)
-	}
+	w.Write(buf.Bytes())
+	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 	return true
 }
 
-func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Request, sub string, stored []*store.StoredPost, prefs reddit.Preferences, offline bool, degradedReason string) {
+func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Request, sub string, stored []*store.StoredPost, prefs reddit.Preferences, offline bool, degradedReason string, cacheKey string) {
 	var posts []reddit.Post
 	for _, sp := range stored {
 		var p reddit.Post
@@ -363,10 +390,13 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 	}
 	data.Sub.Name = sub
 
+	var buf bytes.Buffer
+	if err := h.renderer.RenderSubreddit(&buf, data); err != nil {
+		log.Printf("handler: render subreddit from archive: %v", err)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Cache", "MISS")
 	w.Header().Set("X-Source", "archive")
-	if err := h.renderer.RenderSubreddit(w, data); err != nil {
-		log.Printf("handler: render subreddit from archive: %v", err)
-	}
+	w.Write(buf.Bytes())
+	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 }

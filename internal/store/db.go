@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -19,6 +20,11 @@ func New(dsn string, maxOpen, maxIdle int) (*sql.DB, error) {
 	if maxIdle > 0 {
 		db.SetMaxIdleConns(maxIdle)
 	}
+	// Recycle connections so stale sockets through NAT/firewall/PgBouncer
+	// can't survive forever. Idle connections also get capped so the pool
+	// shrinks back down between traffic bursts.
+	db.SetConnMaxLifetime(30 * time.Minute)
+	db.SetConnMaxIdleTime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		db.Close()

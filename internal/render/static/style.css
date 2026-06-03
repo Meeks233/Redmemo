@@ -36,6 +36,9 @@
     src: url("/Inter.var.woff2") format("woff2-variations");
     font-style: normal;
     font-weight: 100 900;
+    /* Render fallback immediately, swap once the 324KB variable font arrives,
+       so first paint isn't blocked on FOIT for cold visitors. */
+    font-display: swap;
 }
 
 /* Automatic theme selection */

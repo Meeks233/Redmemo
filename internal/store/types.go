@@ -93,6 +93,11 @@ type SubIcon struct {
 	Hash      *string
 	FetchedAt time.Time
 	ExpiresAt time.Time
+	// HasIcon distinguishes "upstream confirmed there is no icon" (false) from
+	// "we have one or have never asked" (true). False is a sticky terminal
+	// verdict: L4 refresh skips it forever. Transient fetch failures must NOT
+	// touch this field — they leave the prior verdict in place.
+	HasIcon bool
 	// About cache (separate expiry from icon). All nullable: zero values
 	// mean "about has never been fetched".
 	AboutJSON       []byte

@@ -64,6 +64,42 @@ func (c *Cache) InvalidateHTML(ctx context.Context, urlPath string) error {
 	return c.client.Del(ctx, htmlKey(urlPath)).Err()
 }
 
+// InvalidateHTMLPrefix drops every cached HTML entry whose key begins with the
+// given URL path — used to flush all per-prefs / per-query variants of one page
+// when a user-triggered refresh changes the underlying archive.
+func (c *Cache) InvalidateHTMLPrefix(ctx context.Context, urlPath string) error {
+	pattern := htmlKey(urlPath) + "*"
+	return c.scanDelete(ctx, pattern)
+}
+
+// InvalidateAllHTML drops every cache:html:* entry. Called after a settings
+// save because changes to site defaults affect what anonymous visitors render,
+// and per-prefs hashing alone can't reach already-cached anonymous variants.
+func (c *Cache) InvalidateAllHTML(ctx context.Context) error {
+	return c.scanDelete(ctx, "cache:html:*")
+}
+
+func (c *Cache) scanDelete(ctx context.Context, pattern string) error {
+	iter := c.client.Scan(ctx, 0, pattern, 200).Iterator()
+	var batch []string
+	for iter.Next(ctx) {
+		batch = append(batch, iter.Val())
+		if len(batch) >= 500 {
+			if err := c.client.Del(ctx, batch...).Err(); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
+	if len(batch) > 0 {
+		return c.client.Del(ctx, batch...).Err()
+	}
+	return nil
+}
+
 // --- Rate limit state ---
 
 func (c *Cache) GetRateLimitState(ctx context.Context) (*RateLimitState, error) {

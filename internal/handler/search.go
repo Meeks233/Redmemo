@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
@@ -146,7 +147,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		return
 	}
 
-	cacheKey := prefs.Lang + ":" + urlPath + "?" + r.URL.RawQuery
+	cacheKey := htmlCacheKey(urlPath, r.URL.RawQuery, prefs)
 
 	// 1. Cache
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
@@ -190,11 +191,14 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				NoPosts: len(posts) == 0,
 			}
 
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("X-Source", "fallback")
-			if err := h.renderer.RenderSearch(w, data); err != nil {
+			var buf bytes.Buffer
+			if err := h.renderer.RenderSearch(&buf, data); err != nil {
 				log.Printf("handler: render search: %v", err)
 			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Source", "fallback")
+			w.Write(buf.Bytes())
+			h.cacheHTMLAsync(cacheKey, buf.Bytes())
 			return
 		}
 		upstreamErr = err
@@ -245,11 +249,14 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				Interval:    prefs.ScrollInterval,
 			}
 
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("X-Source", "archive")
-			if err := h.renderer.RenderSearch(w, data); err != nil {
+			var buf bytes.Buffer
+			if err := h.renderer.RenderSearch(&buf, data); err != nil {
 				log.Printf("handler: render search from archive: %v", err)
 			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Source", "archive")
+			w.Write(buf.Bytes())
+			h.cacheHTMLAsync(cacheKey, buf.Bytes())
 			return
 		}
 	}

@@ -180,12 +180,25 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		for _, s := range subStats {
 			statSet[s.Name] = true
 		}
+		var missing []string
 		for _, name := range prefetchSubs {
 			if !statSet[name] {
-				cnt, _ := h.postStore.CountBySubreddit(name, false)
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			// Batch the per-name CountBySubreddit calls into one round-trip.
+			// SubredditCounts keys by stored-case subreddit, so fold to lower
+			// for the lookup; the display preserves the input name.
+			counts, _ := h.postStore.SubredditCounts(missing)
+			lower := make(map[string]int, len(counts))
+			for k, v := range counts {
+				lower[strings.ToLower(k)] = v
+			}
+			for _, name := range missing {
 				subStats = append(subStats, render.SubredditStatView{
 					Name:      name,
-					PostCount: cnt,
+					PostCount: int64(lower[strings.ToLower(name)]),
 				})
 			}
 		}
@@ -249,6 +262,10 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		AuthBypass:     h.cfg.Auth.BypassAuth,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Settings is rendered behind the ephemeral TOTP token cookie — never let a
+	// browser or intermediary cache it, or a token rollover would still serve
+	// the old session's view.
+	w.Header().Set("Cache-Control", "no-store")
 	h.renderer.RenderSettings(w, data)
 }
 
@@ -300,6 +317,15 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		// archive_control field — no restart needed.
 		if v, ok := updates["archive_control"]; ok && h.archiver != nil {
 			h.archiver.SetControlFromString(v)
+		}
+		// Site-default changes affect every anonymous render: a visitor with
+		// no overriding cookie picks up site defaults via readPreferences, so
+		// any cached HTML built against the old defaults is now stale and
+		// would never expire via per-cookie key fingerprinting. Sweep them.
+		if h.cache != nil {
+			if err := h.cache.InvalidateAllHTML(r.Context()); err != nil {
+				log.Printf("[settings] invalidate html cache: %v", err)
+			}
 		}
 	}
 

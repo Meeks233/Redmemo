@@ -138,7 +138,7 @@ func layout(p BasePage, s pageSlots) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" href=\"/opensearch.xml\"><link rel=\"manifest\" type=\"application/json\" href=\"/manifest.json\"><link rel=\"shortcut icon\" type=\"image/x-icon\" href=\"/favicon.ico\"><link rel=\"stylesheet\" type=\"text/css\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" href=\"/opensearch.xml\"><link rel=\"manifest\" type=\"application/json\" href=\"/manifest.json\"><link rel=\"shortcut icon\" type=\"image/x-icon\" href=\"/favicon.ico\"><link rel=\"preload\" href=\"/Inter.var.woff2\" as=\"font\" type=\"font/woff2\" crossorigin=\"anonymous\"><link rel=\"stylesheet\" type=\"text/css\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -414,7 +414,7 @@ func layout(p BasePage, s pageSlots) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if s.Media {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<script src=\"/lazyMedia.js\" defer></script> <script src=\"/videoAutoplay.js\" defer></script> <script src=\"/videoPreload.js\" defer></script> <script src=\"/audioSync.js\" defer></script> <script src=\"/imageReload.js\" defer></script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<script src=\"/media.bundle.js\" defer></script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

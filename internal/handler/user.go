@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"net/http"
@@ -17,9 +18,9 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	sort := r.URL.Query().Get("sort")
 	after := r.URL.Query().Get("after")
 	urlPath := r.URL.Path
+	cacheKey := htmlCacheKey(urlPath, r.URL.RawQuery, prefs)
 
-	// 1. Cache — language-prefixed, see handlePost.
-	cacheKey := prefs.Lang + ":" + urlPath + "?" + r.URL.RawQuery
+	// 1. Cache — keyed by full prefs fingerprint (see handlePost).
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -30,7 +31,7 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 	// 2. HR gate / OAuth quota
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs) {
+		if h.renderUserFallback(w, r, name, listing, sort, after, urlPath, prefs, cacheKey) {
 			return
 		}
 	}
@@ -72,7 +73,7 @@ func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
 	}
 }
 
-func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences) bool {
+func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences, cacheKey string) bool {
 	user, posts, _, err := h.redditCli.FetchUser(r.Context(), name, listing, sort, after)
 	h.recordUpstream(r.Context())
 	if err != nil {
@@ -96,10 +97,13 @@ func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, nam
 		NoPosts:            len(posts) == 0,
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("X-Source", "fallback")
-	if err := h.renderer.RenderUser(w, data); err != nil {
+	var buf bytes.Buffer
+	if err := h.renderer.RenderUser(&buf, data); err != nil {
 		log.Printf("handler: render user: %v", err)
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Source", "fallback")
+	w.Write(buf.Bytes())
+	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 	return true
 }

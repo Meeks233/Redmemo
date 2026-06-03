@@ -47,6 +47,10 @@ type Handler struct {
 	siteDefaults  map[string]string
 	auth          *AuthManager
 	stats         statsCache
+	// upstreamFlight coalesces concurrent identical Reddit fetches so N parallel
+	// requests for the same /r/sub/sort page (or /comments/id) only spend one
+	// OAuth quota unit. See singleflight.go.
+	upstreamFlight *singleFlight
 }
 
 // WithAuth wires the settings auth gate. Optional — when nil the gate is
@@ -102,6 +106,7 @@ func New(
 		spoofedClient:  transport.NewSpoofedClient(30 * time.Second),
 		cfg:            cfg,
 		siteDefaults:   defaults,
+		upstreamFlight: newSingleFlight(),
 	}
 }
 
@@ -138,6 +143,10 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /audioSync.js", static)
 	mux.Handle("GET /redditModal.js", static)
 	mux.Handle("GET /searchAutocomplete.js", static)
+
+	// One bundle for every media-page script (lazyMedia/videoAutoplay/
+	// videoPreload/audioSync/imageReload) — see render.MediaBundle.
+	mux.Handle("GET /media.bundle.js", h.mediaBundleHandler())
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)

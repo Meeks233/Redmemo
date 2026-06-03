@@ -16,6 +16,41 @@ import (
 //go:embed static
 var staticFS embed.FS
 
+// mediaBundle is the concatenation of every media-page JS file (lazyMedia,
+// videoAutoplay, videoPreload, audioSync, imageReload), built once at startup
+// and served at /media.bundle.js. Listing pages used to ship 5 separate
+// <script defer> tags totalling ~44KB uncompressed; this collapses them into
+// one request + one parse, which gzip then compresses far more efficiently
+// than five small responses (each with its own header overhead). Each source
+// file is already wrapped in an IIFE, so concatenation is safe — no global
+// scope collisions, no execution-order assumptions beyond the existing
+// document-order semantics of the original five tags.
+var mediaBundle = buildMediaBundle()
+
+func buildMediaBundle() []byte {
+	parts := []string{
+		"static/lazyMedia.js",
+		"static/videoAutoplay.js",
+		"static/videoPreload.js",
+		"static/audioSync.js",
+		"static/imageReload.js",
+	}
+	var buf []byte
+	for _, p := range parts {
+		b, err := staticFS.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		buf = append(buf, b...)
+		buf = append(buf, '\n')
+	}
+	return buf
+}
+
+// MediaBundle exposes the concatenated bundle bytes to the handler so it can
+// serve them at a stable URL alongside the other static assets.
+func MediaBundle() []byte { return mediaBundle }
+
 // assetETag is a content hash of every embedded static asset, computed once at
 // startup and sent as the ETag for all of them. The display Version is hardcoded
 // ("0.1.0") and never changes, so versioning asset URLs by it (or marking them
@@ -24,6 +59,11 @@ var staticFS embed.FS
 // they get a cheap 304 while nothing changed, and the fresh file the instant a
 // rebuild alters the embedded assets (the hash, and thus the ETag, changes).
 var assetETag = computeAssetETag()
+
+// AssetETag exposes the embedded-asset content hash to packages outside render
+// (the handler-side media-bundle endpoint reuses the same ETag so a rebuild
+// invalidates it in lockstep with /style.css and friends).
+func AssetETag() string { return assetETag }
 
 func computeAssetETag() string {
 	sub, err := fs.Sub(staticFS, "static")

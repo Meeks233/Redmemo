@@ -18,10 +18,10 @@ func (s *SubIconStore) Get(name string) (*SubIcon, error) {
 	icon := &SubIcon{}
 	err := s.db.QueryRow(`
 		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
-		       about_json, about_fetched_at, about_expires_at
+		       about_json, about_fetched_at, about_expires_at, has_icon
 		FROM sub_icons WHERE name = $1`, name,
 	).Scan(&icon.Name, &icon.IconURL, &icon.LocalPath, &icon.Hash, &icon.FetchedAt, &icon.ExpiresAt,
-		&icon.AboutJSON, &icon.AboutFetchedAt, &icon.AboutExpiresAt)
+		&icon.AboutJSON, &icon.AboutFetchedAt, &icon.AboutExpiresAt, &icon.HasIcon)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -33,15 +33,16 @@ func (s *SubIconStore) Get(name string) (*SubIcon, error) {
 
 func (s *SubIconStore) Save(icon *SubIcon) error {
 	_, err := s.db.Exec(`
-		INSERT INTO sub_icons (name, icon_url, local_path, hash, fetched_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO sub_icons (name, icon_url, local_path, hash, fetched_at, expires_at, has_icon)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (name) DO UPDATE SET
 			icon_url   = EXCLUDED.icon_url,
 			local_path = EXCLUDED.local_path,
 			hash       = EXCLUDED.hash,
 			fetched_at = EXCLUDED.fetched_at,
-			expires_at = EXCLUDED.expires_at`,
-		icon.Name, icon.IconURL, icon.LocalPath, icon.Hash, icon.FetchedAt, icon.ExpiresAt,
+			expires_at = EXCLUDED.expires_at,
+			has_icon   = EXCLUDED.has_icon`,
+		icon.Name, icon.IconURL, icon.LocalPath, icon.Hash, icon.FetchedAt, icon.ExpiresAt, icon.HasIcon,
 	)
 	if err != nil {
 		return fmt.Errorf("save sub icon: %w", err)
@@ -52,7 +53,7 @@ func (s *SubIconStore) Save(icon *SubIcon) error {
 func (s *SubIconStore) ListExpired() ([]*SubIcon, error) {
 	rows, err := s.db.Query(`
 		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
-		       about_json, about_fetched_at, about_expires_at
+		       about_json, about_fetched_at, about_expires_at, has_icon
 		FROM sub_icons
 		WHERE expires_at < NOW()
 		ORDER BY expires_at`)
@@ -66,7 +67,7 @@ func (s *SubIconStore) ListExpired() ([]*SubIcon, error) {
 func (s *SubIconStore) ListAll() ([]*SubIcon, error) {
 	rows, err := s.db.Query(`
 		SELECT name, icon_url, local_path, hash, fetched_at, expires_at,
-		       about_json, about_fetched_at, about_expires_at
+		       about_json, about_fetched_at, about_expires_at, has_icon
 		FROM sub_icons ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list all icons: %w", err)
@@ -134,6 +135,7 @@ func scanIcons(rows *sql.Rows) ([]*SubIcon, error) {
 			&icon.Name, &icon.IconURL, &icon.LocalPath, &icon.Hash,
 			&icon.FetchedAt, &icon.ExpiresAt,
 			&icon.AboutJSON, &icon.AboutFetchedAt, &icon.AboutExpiresAt,
+			&icon.HasIcon,
 		); err != nil {
 			return nil, fmt.Errorf("scan sub icon: %w", err)
 		}
