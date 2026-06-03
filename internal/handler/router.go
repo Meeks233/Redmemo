@@ -21,19 +21,19 @@ import (
 
 type Handler struct {
 	ratelimit      *ratelimit.Manager
-	hr             *hrlimit.Manager
-	cache          *cache.Cache
+	hr             hrManager
+	cache          htmlCache
 	renderer       *render.Engine
-	redditCli      *reddit.Client
+	redditCli      redditClient
 	publicCli      *reddit.PublicClient
-	oauthHolder    *oauth.TokenHolder
-	postStore      *store.PostStore
-	commentStore   *store.CommentStore
+	oauthHolder    tokenSource
+	postStore      postStorer
+	commentStore   commentStorer
 	subStore       *store.SubredditStore
 	mediaStore     *store.MediaIndexStore
 	settingsStore  *store.SettingsStore
 	mediaProxy     *media.Proxy
-	archiver       *archive.Service
+	archiver       archiverService
 	prefetcher     *prefetch.Scheduler
 	subStatusStore *store.SubStatusStore
 	subIconStore   *store.SubIconStore
@@ -85,9 +85,8 @@ func New(
 	if defaults == nil {
 		defaults = make(map[string]string)
 	}
-	return &Handler{
+	h := &Handler{
 		ratelimit:      rl,
-		hr:             hr,
 		cache:          c,
 		renderer:       r,
 		redditCli:      rc,
@@ -108,6 +107,16 @@ func New(
 		siteDefaults:   defaults,
 		upstreamFlight: newSingleFlight(),
 	}
+	// Preserve the nil-Manager fast path on h.hr (an HR-disabled instance feeds
+	// nil here). Assigning a typed-nil pointer to the interface field would
+	// make the != nil check below report a live manager and crash.
+	if hr != nil {
+		h.hr = hr
+	}
+	if arc != nil {
+		h.archiver = arc
+	}
+	return h
 }
 
 func (h *Handler) Routes() http.Handler {

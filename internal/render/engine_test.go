@@ -161,6 +161,89 @@ func TestRenderPost(t *testing.T) {
 	}
 }
 
+func TestRenderPostTimeMachineBadge(t *testing.T) {
+	build := func(removed bool, lang string, comments []reddit.Comment) PostPageData {
+		return PostPageData{
+			BasePage: BasePage{
+				URL:       "/r/golang/comments/abc/test",
+				BrandName: "TestBrand",
+				Version:   "0.1.0",
+				Prefs:     reddit.Preferences{Lang: lang},
+			},
+			Post: reddit.Post{
+				ID:        "abc",
+				Title:     "A Test Post",
+				Community: "golang",
+				PostType:  "self",
+				Score:     [2]string{"100", "100"},
+				Comments:  [2]string{"10", "10"},
+				Author:    reddit.Author{Name: "poster"},
+				RelTime:   "1h ago",
+				Removed:   removed,
+			},
+			Comments: comments,
+			Sort:     "confidence",
+		}
+	}
+
+	render := func(t *testing.T, d PostPageData) string {
+		t.Helper()
+		e := newTestEngine(t)
+		var buf bytes.Buffer
+		if err := e.RenderPost(&buf, d); err != nil {
+			t.Fatalf("RenderPost() error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("post removed en shows badge", func(t *testing.T) {
+		html := render(t, build(true, "en", nil))
+		if !strings.Contains(html, `class="time-machine-inline"`) {
+			t.Errorf("expected time-machine-inline class in output")
+		}
+		if !strings.Contains(html, "Time Machine") {
+			t.Errorf("expected 'Time Machine' label in output")
+		}
+	})
+
+	t.Run("post not removed has no badge", func(t *testing.T) {
+		html := render(t, build(false, "en", nil))
+		if strings.Contains(html, "time-machine-inline") {
+			t.Errorf("did not expect time-machine-inline class when Removed=false")
+		}
+	})
+
+	t.Run("removed comment shows badge", func(t *testing.T) {
+		comments := []reddit.Comment{
+			{
+				ID:      "c1",
+				Kind:    "t1",
+				Body:    "Gone.",
+				Author:  reddit.Author{Name: "commenter"},
+				Score:   [2]string{"5", "5"},
+				RelTime: "30m ago",
+				Removed: true,
+			},
+		}
+		d := build(false, "en", comments)
+		html := render(t, d)
+		if strings.Count(html, "time-machine-inline") < 1 {
+			t.Errorf("expected time-machine-inline class in comment area")
+		}
+		// Comment id should be present so we know the comment actually rendered.
+		if !strings.Contains(html, `id="c1"`) {
+			t.Errorf("expected comment c1 to be rendered")
+		}
+	})
+
+	t.Run("zh locale uses 时光机", func(t *testing.T) {
+		html := render(t, build(true, "zh", nil))
+		if !strings.Contains(html, "时光机") {
+			t.Errorf("expected '时光机' label in zh locale output")
+		}
+	})
+}
+
 func TestRenderSearch(t *testing.T) {
 	e := newTestEngine(t)
 	var buf bytes.Buffer
