@@ -219,17 +219,28 @@ func (h *Handler) renderHomepagePartial(w http.ResponseWriter, posts []reddit.Po
 	}
 }
 
+// pageLimitFromPrefs parses the user's page_limit setting back into an int,
+// clamped to [5, 25]. Empty/invalid values fall back to the 5-post default —
+// matching what NormalizeSettings would have refused to persist anyway.
+func pageLimitFromPrefs(prefs reddit.Preferences) int {
+	n, err := strconv.Atoi(prefs.PageLimit)
+	if err != nil || n < 5 || n > 25 {
+		return 5
+	}
+	return n
+}
+
 func (h *Handler) handleSubreddit(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	prefs := h.readPreferences(r)
-	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs, 5)
+	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs, pageLimitFromPrefs(prefs))
 }
 
 func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	sort := r.PathValue("sort")
 	prefs := h.readPreferences(r)
-	h.serveSubreddit(w, r, sub, sort, prefs, 5)
+	h.serveSubreddit(w, r, sub, sort, prefs, pageLimitFromPrefs(prefs))
 }
 
 func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences, limit int) {

@@ -242,6 +242,8 @@
   "settings.token_ttl_15": "15 minutes",
   "settings.token_ttl_30": "30 minutes",
   "settings.token_ttl_60": "1 hour",
+  "settings.page_limit": "Posts per upstream page",
+  "settings.page_limit_title": "How many posts each /r/{sub} or /search request fetches from Reddit. Lower values stretch your session-token quota; higher values mean fewer requests but each one costs more. Range 5-25, default 5.",
   "settings.version": "Version",
   "settings.archived_posts": "Archived Posts",
   "settings.archived_subs": "Archived Subreddits",

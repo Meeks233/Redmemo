@@ -160,7 +160,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	degrade, reason := h.shouldDegrade(r.Context())
 	var upstreamErr error
 	if !degrade && redditQ != "" {
-		posts, subs, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, 5)
+		posts, subs, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, pageLimitFromPrefs(prefs))
 		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
@@ -326,7 +326,7 @@ func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed
 		return
 	}
 
-	posts, _, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, 3)
+	posts, _, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, pageLimitFromPrefs(prefs))
 	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: search more %q: %v", query, err)

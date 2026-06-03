@@ -181,7 +181,7 @@ templ settingsContent(d SettingsPageData) {
 							</div>
 							<div class="prefs-group">
 								<label for="scroll_interval">{ T(ctx, "settings.scroll_interval") }</label>
-								<input type="number" name="scroll_interval" id="scroll_interval" min="1" step="1" value={ d.Prefs.ScrollInterval } style="width:60px"/>
+								<input type="number" name="scroll_interval" id="scroll_interval" min="1" max="60" step="1" value={ d.Prefs.ScrollInterval } style="width:60px"/>
 							</div>
 							<div class="prefs-group">
 								<label for="hide_sidebar_and_summary">{ T(ctx, "settings.hide_sidebar") }</label>
@@ -274,6 +274,10 @@ templ settingsContent(d SettingsPageData) {
 								<option value="30" selected?={ d.Prefs.SettingsTokenTTL == "30" }>{ T(ctx, "settings.token_ttl_30") }</option>
 								<option value="60" selected?={ d.Prefs.SettingsTokenTTL == "60" }>{ T(ctx, "settings.token_ttl_60") }</option>
 							</select>
+						</div>
+						<div class="prefs-group">
+							<label for="page_limit" title={ T(ctx, "settings.page_limit_title") }>{ T(ctx, "settings.page_limit") }</label>
+							<input type="number" name="page_limit" id="page_limit" form="settings-form" min="5" max="25" step="1" value={ d.Prefs.PageLimit } style="width:60px"/>
 						</div>
 						<div class="prefs-group">
 							<label for="enable_debug">{ T(ctx, "settings.enable_debug") }</label>
@@ -423,7 +427,7 @@ templ settingsContent(d SettingsPageData) {
 		// The homepage filter and its disable toggle live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl'].forEach(function(id) {
+		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});

@@ -31,6 +31,7 @@ var settingsKeys = []string{
 	"auto_theme_day", "auto_theme_night",
 	"disable_initiative_upstream_access",
 	"settings_token_ttl",
+	"page_limit",
 }
 
 // allowedSettingsTokenTTL is the whitelist of valid /settings auth-cookie
@@ -108,10 +109,19 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 		rejected = append(rejected, RejectedSetting{Key: "settings_token_ttl", Value: v, Reason: "must be one of 5, 10, 15, 30, 60"})
 	}
 
+	if v, ok := out["page_limit"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n < 5 || n > 25 {
+			delete(out, "page_limit")
+			rejected = append(rejected, RejectedSetting{Key: "page_limit", Value: v, Reason: "must be an integer in [5, 25]"})
+		} else {
+			out["page_limit"] = strconv.Itoa(n)
+		}
+	}
+
 	if v, ok := out["scroll_interval"]; ok {
-		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
+		if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 60 {
 			delete(out, "scroll_interval")
-			rejected = append(rejected, RejectedSetting{Key: "scroll_interval", Value: v, Reason: "must be a positive integer (seconds)"})
+			rejected = append(rejected, RejectedSetting{Key: "scroll_interval", Value: v, Reason: "must be an integer in [1, 60] (seconds)"})
 		} else {
 			out["scroll_interval"] = strconv.Itoa(n)
 		}

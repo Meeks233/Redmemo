@@ -193,6 +193,7 @@ type Preferences struct {
 	MuteNSFWVideos                 string // default "on"  — start NSFW videos muted (ignored when MuteAllVideos is on)
 	DisableInitiativeUpstreamAccess string // default "off" — when "on", user-driven session-token requests never hit Reddit, only the local archive (CDN media still flows, governed by the global limiter)
 	SettingsTokenTTL               string // /settings auth-cookie lifetime in minutes — discrete choices "5","10" (default),"15","30","60"; capped at 60
+	PageLimit                      string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 25], default "5"
 }
 
 // Params holds common query parameters for listing endpoints.

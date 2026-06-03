@@ -242,6 +242,8 @@
   "settings.token_ttl_15": "15 分钟",
   "settings.token_ttl_30": "30 分钟",
   "settings.token_ttl_60": "1 小时",
+  "settings.page_limit": "每次上游请求的帖子数",
+  "settings.page_limit_title": "每次 /r/{sub} 或 /search 向 Reddit 拉取多少条帖子。数值越小,session token 配额越省;数值越大,请求次数减少但单次开销更大。范围 5-25,默认 5。",
   "settings.version": "版本",
   "settings.archived_posts": "已存档帖子",
   "settings.archived_subs": "已存档 Subreddit",
