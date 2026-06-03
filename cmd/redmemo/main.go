@@ -81,6 +81,7 @@ func main() {
 	postStore := store.NewPostStore(db)
 	commentStore := store.NewCommentStore(db)
 	mediaIndexStore := store.NewMediaIndexStore(db)
+	mediaUnavailableStore := store.NewMediaUnavailableStore(db)
 	tokenStore := store.NewTokenStore(db)
 	deviceProfileStore := store.NewDeviceProfileStore(db)
 	subStore := store.NewSubredditStore(db)
@@ -214,7 +215,7 @@ func main() {
 		log.Printf("media: legacy cleanup: %v", err)
 	}
 
-	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, redisCache, sessionUA)
+	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, mediaUnavailableStore, redisCache, sessionUA)
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)

@@ -25,8 +25,28 @@
         type: ['image', 'video', 'gif'],
         sort: ['hot', 'new', 'top', 'rising', 'controversial', 'relevance'],
         mode: ['raw', 'full'],
-        date: ['today', 'week', 'month', 'year']
+        date: ['today', 'week', 'month', 'year'],
+        // sub: filled lazily from /api/archive/subs on first sub: use. Server
+        // returns archived sub names with >30 posts, ordered post-count desc.
+        sub: []
     };
+
+    // Lazy fetch state for the sub: value pool. We only hit the endpoint after
+    // the user has actually typed `sub:` once — every other page just pays the
+    // cost of an empty array lookup. Concurrent triggers share the in-flight
+    // promise so we never fan out duplicate requests.
+    var subsFetch = null;
+    function ensureSubs(onReady) {
+        if (VALUES.sub.length > 0) return;
+        if (subsFetch) { subsFetch.then(onReady); return; }
+        subsFetch = fetch('/api/archive/subs', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (list) {
+                if (Array.isArray(list)) VALUES.sub = list;
+            })
+            .catch(function () { /* network errors: stay empty, no suggestions */ });
+        subsFetch.then(onReady);
+    }
 
     // Longest-prefix completion of `partial` from `pool` — returns the suffix
     // to append. Empty when nothing matches or `partial` is already complete.
@@ -35,7 +55,7 @@
         var low = partial.toLowerCase();
         for (var i = 0; i < pool.length; i++) {
             var w = pool[i];
-            if (w.length > low.length && w.indexOf(low) === 0) {
+            if (w.length > low.length && w.toLowerCase().indexOf(low) === 0) {
                 return w.slice(low.length);
             }
         }
@@ -46,7 +66,7 @@
     // everything after the last whitespace up to the caret; suggestions only
     // fire when the caret sits at the very end of that token's text (so a
     // mid-edit caret doesn't splice ghost text into the middle of the field).
-    function suggestFor(value, caret) {
+    function suggestFor(value, caret, onLazyReady) {
         if (caret !== value.length) return '';
         var i = value.length;
         while (i > 0 && !/\s/.test(value.charAt(i - 1))) i--;
@@ -59,6 +79,12 @@
             var val = token.slice(colon + 1);
             var pool = VALUES[key];
             if (!pool) return '';
+            // sub:'s pool is fetched on demand. Kick the fetch on first use
+            // and re-call the field's refresh once it lands so the ghost
+            // appears retroactively without the user re-typing.
+            if (key === 'sub' && pool.length === 0 && onLazyReady) {
+                ensureSubs(onLazyReady);
+            }
             return completeFrom(pool, val);
         }
         var suf = completeFrom(KEYS, token);
@@ -86,7 +112,7 @@
             suffixSpan.textContent = pendingSuffix;
         }
         function refresh() {
-            pendingSuffix = suggestFor(input.value, input.selectionStart);
+            pendingSuffix = suggestFor(input.value, input.selectionStart, refresh);
             render();
         }
         function accept() {
@@ -132,12 +158,55 @@
         refresh();
     }
 
+    // Per-sub override grammar used by the NP-unified textarea:
+    //   subname+sub2=sort:rising&time:day+sub3=time:week
+    // Clauses separated by '+'; inside a clause the key/value pairs are
+    // joined by '&'. Recognised keys and value enums are a closed set — sort
+    // and time map to the same buckets the scheduler accepts.
+    var OVR_KEYS = ['sort', 'time'];
+    var OVR_VALUES = {
+        sort: ['hot', 'new', 'top', 'rising', 'controversial'],
+        time: ['hour', 'day', 'week', 'month', 'year', 'all']
+    };
+
+    // unifiedSuggestFor mirrors suggestFor's shape (returns the suffix to
+    // append) but understands the prefetch grammar. Bare-sub completion is
+    // intentionally left to the visible suggestion-picker — typing 'cat' and
+    // ghosting 'cats' would collide with the picker's per-letter filter — so
+    // the ghost only fires inside override clauses (after '=').
+    function unifiedSuggestFor(value, caret) {
+        if (caret !== value.length) return '';
+        // Current clause = everything after the last '+'.
+        var i = value.length;
+        while (i > 0 && value.charAt(i - 1) !== '+') i--;
+        var clause = value.slice(i);
+        var eq = clause.indexOf('=');
+        if (eq < 0) return ''; // bare sub — picker handles it
+        var body = clause.slice(eq + 1);
+        // Last k:v pair = everything after the trailing '&'.
+        var j = body.length;
+        while (j > 0 && body.charAt(j - 1) !== '&') j--;
+        var pair = body.slice(j);
+        var colon = pair.indexOf(':');
+        if (colon < 0) {
+            var keySuf = completeFrom(OVR_KEYS, pair);
+            return keySuf ? keySuf + ':' : '';
+        }
+        var key = pair.slice(0, colon).toLowerCase();
+        var val = pair.slice(colon + 1);
+        var pool = OVR_VALUES[key];
+        if (!pool) return '';
+        return completeFrom(pool, val);
+    }
+
     // Selection mode: the ghost lives inside the field's own value as a
     // highlighted trailing selection. Works equally for <input> and <textarea>
     // (including the auto-growing/wrapping homepage filter), no overlay CSS
     // needed. `committed` tracks the caret-side length so Backspace/Escape can
-    // drop the ghost without nuking real typed characters.
-    function attachSelection(el) {
+    // drop the ghost without nuking real typed characters. `suggestFn` defaults
+    // to the navbar grammar; pass unifiedSuggestFor for the NP-merged textarea.
+    function attachSelection(el, suggestFn) {
+        suggestFn = suggestFn || suggestFor;
         var committed = el.value.length;
         var ghosting = false;
 
@@ -161,7 +230,7 @@
             try { caret = el.selectionStart; } catch (e) { caret = real.length; }
             if (caret !== real.length) return;
 
-            var suf = suggestFor(real, real.length);
+            var suf = suggestFn(real, real.length, refresh);
             if (!suf) return;
             el.value = real + suf;
             ghosting = true;
@@ -238,4 +307,7 @@
 
     var homepageQuery = document.getElementById('front_page_subs');
     if (homepageQuery) attachSelection(homepageQuery);
+
+    var npUnified = document.getElementById('prefetch_unified');
+    if (npUnified) attachSelection(npUnified, unifiedSuggestFor);
 })();

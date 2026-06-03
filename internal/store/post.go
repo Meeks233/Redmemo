@@ -284,7 +284,7 @@ func (s *PostStore) RandomWalk(opts ArchiveSearchOpts, mediaOnly bool, origin, c
 	// Phase A: cursor sits at/above origin → we are still on the upper segment,
 	// climbing from cursor toward the top of the permutation.
 	if cursor >= origin {
-		upper, lastKey, err := s.randomWalkPage(opts, mediaOnly, cursor, false, 0, n)
+		upper, lastKey, err := s.randomWalkPage(opts, cursor, false, 0, n)
 		if err != nil {
 			return nil, cursor, false, err
 		}
@@ -302,7 +302,7 @@ func (s *PostStore) RandomWalk(opts ArchiveSearchOpts, mediaOnly bool, origin, c
 		}
 		// Spill into the lower segment [0, origin] to top up the page.
 		need := n - len(posts)
-		lower, lowKey, err := s.randomWalkPage(opts, mediaOnly, -1, true, origin, need)
+		lower, lowKey, err := s.randomWalkPage(opts, -1, true, origin, need)
 		if err != nil {
 			return posts, newCursor, false, err
 		}
@@ -316,7 +316,7 @@ func (s *PostStore) RandomWalk(opts ArchiveSearchOpts, mediaOnly bool, origin, c
 
 	// Phase B: cursor already wrapped below origin → climb the lower segment up to
 	// origin, then the round closes.
-	lower, lastKey, err := s.randomWalkPage(opts, mediaOnly, cursor, true, origin, n)
+	lower, lastKey, err := s.randomWalkPage(opts, cursor, true, origin, n)
 	if err != nil {
 		return nil, cursor, false, err
 	}
@@ -344,9 +344,10 @@ func (s *PostStore) Reshuffle() error {
 // randomWalkPage runs one keyset page of the random walk: the opts filter, plus
 // shuffle_key > low and (when hasHigh) shuffle_key <= high, ordered ascending and
 // capped at n. It returns the page and the largest shuffle_key it handed out.
-func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, mediaOnly bool, low float64, hasHigh bool, high float64, n int) ([]*StoredPost, float64, error) {
-	_ = mediaOnly // SQL gate dropped (see RandomWalk doc); per-candidate
-	// IsResident in serveRandomMedia is the ground truth.
+// mediaOnly is intentionally not threaded down here: the SQL gate was dropped
+// (see RandomWalk doc) in favor of per-candidate IsResident checks in
+// serveRandomMedia, which are the ground truth.
+func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, low float64, hasHigh bool, high float64, n int) ([]*StoredPost, float64, error) {
 	extra, args, argN := archiveFilterClauses(opts, 1)
 	where := "1=1" + extra
 	where += fmt.Sprintf(" AND shuffle_key > $%d", argN)

@@ -10,7 +10,9 @@
   "footer.code": "<> Code",
 
   "banner.offline": "You are viewing a local offline backup. Live data is currently unavailable.",
+  "banner.offline_label": "Offline",
   "banner.degraded": "You are browsing archived content",
+  "banner.degraded_label": "Archived",
 
   "modal.leave_title": "You are about to leave this site",
   "modal.leave_body": "Do you want to continue?",
@@ -236,6 +238,13 @@
   "settings.enable_np": "Enable natural prefetch",
   "settings.np_threshold": "Start after % of window elapsed",
   "settings.np_filter_placeholder": "Subs to prefetch, e.g. cats+dogs+memes",
+  "settings.np_global_sort": "Default sort",
+  "settings.np_global_timeframe": "Default timeframe",
+  "settings.np_sub_modes": "Per-sub overrides",
+  "settings.np_sub_modes_title": "Override the default sort/timeframe for specific subs. Grammar mirrors the navbar search: sub=key:value pairs joined by &, multiple subs joined by +. Recognised keys: sort (hot/new/top/rising/controversial), time (hour/day/week/month/year/all). Unrecognised pieces are silently dropped. Example: golang=sort:rising&time:day+golang=sort:top",
+  "settings.np_unified": "Subs to prefetch (with optional per-sub overrides)",
+  "settings.np_unified_title": "One field, one '+'-separated stream. Each clause is either a bare subreddit name (cats) or a per-sub override clause (cats=sort:rising&time:day). Recognised override keys: sort (hot/new/top/rising/controversial), time (hour/day/week/month/year/all). Override clauses take precedence over the global defaults above. Picking a suggestion appends a bare entry; type '=k:v' after a name to attach an override.",
+  "settings.np_unified_placeholder": "cats+dogs+golang=sort:rising&time:day+golang=sort:top",
   "settings.enable_debug": "Enable debug page",
   "settings.disable_upstream": "Disable initiative upstream access",
   "settings.disable_upstream_title": "When on, every user action that would spend session token quota is served from the local archive only — no active query is sent upstream. CDN media requests still flow (subject to the global rate limit). Use this on public deployments to keep your IP from being blacklisted by sudden bursts of upstream traffic.",
@@ -313,5 +322,6 @@
   "fr.unsafe_env": "You declined to confirm the environment is safe. The /settings gate will not proceed until you re-enter from a trusted screen.",
   "fr.reset_at": "Reset at:",
   "fr.access_directly": "Access Reddit directly",
-  "fr.congrats": "Congrats — Reddit hasn't sanctioned you yet… or has it?"
+  "fr.congrats": "Congrats — Reddit hasn't sanctioned you yet… or has it?",
+  "fr.internal_error": "Something went wrong serving this page. The local archive may not have this content yet — you can still try Reddit directly."
 }

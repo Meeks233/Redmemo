@@ -10,7 +10,9 @@
   "footer.code": "<> 源码",
 
   "banner.offline": "你正在查看本地离线备份,实时数据当前不可用。",
+  "banner.offline_label": "离线",
   "banner.degraded": "你正在浏览存档内容",
+  "banner.degraded_label": "存档",
 
   "modal.leave_title": "你即将离开本站",
   "modal.leave_body": "确定要继续吗?",
@@ -236,6 +238,13 @@
   "settings.enable_np": "启用自然预取",
   "settings.np_threshold": "在窗口过去百分之多少后开始",
   "settings.np_filter_placeholder": "要预取的 sub，例如 cats+dogs+memes",
+  "settings.np_global_sort": "默认排序",
+  "settings.np_global_timeframe": "默认时间范围",
+  "settings.np_sub_modes": "每个 sub 的自定义覆写",
+  "settings.np_sub_modes_title": "为指定 sub 单独覆盖默认排序/时间范围。语法与顶部 navbar 搜索一致：sub=key:value 用 & 拼接，多个 sub 用 + 拼接。可识别的 key：sort（hot/new/top/rising/controversial）、time（hour/day/week/month/year/all）。不符合规则的片段会被静默丢弃。示例：golang=sort:rising&time:day+golang=sort:top",
+  "settings.np_unified": "要预取的 sub（可附带每个 sub 的自定义覆写）",
+  "settings.np_unified_title": "一个输入框，一条 + 分隔的串。每个片段要么是裸的 sub 名（cats），要么是带覆写的 sub 片段（cats=sort:rising&time:day）。可识别的覆写 key：sort（hot/new/top/rising/controversial）、time（hour/day/week/month/year/all）。带覆写的片段会盖过上面的全局默认。点击下方建议会追加一个裸的 sub；在名字后输入 =k:v 即可附加覆写。",
+  "settings.np_unified_placeholder": "cats+dogs+golang=sort:rising&time:day+golang=sort:top",
   "settings.enable_debug": "启用调试页面",
   "settings.disable_upstream": "禁止主动访问上游",
   "settings.disable_upstream_title": "开启后,所有会消耗 session token 配额的用户动作都只读取本地缓存,不再主动向 Reddit 发起请求。CDN 媒体请求依然可用(受全局限流规则约束)。部署到公网时启用,可避免突发上游请求导致 IP 被拉黑。",
@@ -313,5 +322,6 @@
   "fr.unsafe_env": "你未确认环境安全。/settings 入口将拒绝继续,直到你在受信任的屏幕重新进入。",
   "fr.reset_at": "重置时间:",
   "fr.access_directly": "直接访问 Reddit",
-  "fr.congrats": "恭喜 — Reddit 还没制裁你……还是已经制裁了?"
+  "fr.congrats": "恭喜 — Reddit 还没制裁你……还是已经制裁了?",
+  "fr.internal_error": "这个页面没能正常呈现。本地存档可能还没有这份内容——你可以直接尝试访问 Reddit。"
 }

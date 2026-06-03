@@ -152,10 +152,20 @@
                 // "unsupported": this proxy path can't be polled at all.
                 // "failed": upstream is permanently 404/410 (expired signed
                 // Reddit CDN URL) — no amount of polling will recover it.
-                // Both are terminal: drop the spinner and let the broken-image
-                // icon stand in honestly instead of spinning for ~5 minutes.
+                // "unavailable": persistent ledger has parked the URL after
+                // N failed fetches (post banned upstream). The server will
+                // answer the <img> request itself with the question-mark
+                // SVG placeholder, so reload the slot to swap it in.
                 if (data.state === "unsupported" || data.state === "failed") {
                     finish(st);
+                    return;
+                }
+                // Both states forbid further fetches; the difference is which
+                // server-side SVG is served. Reloading the slot lets the
+                // proxy pick: question-mark for "unavailable", X-icon
+                // "Sorry, we missed it" for "dead".
+                if (data.state === "unavailable" || data.state === "dead") {
+                    doReload(st);
                     return;
                 }
                 setTimeout(function () { poll(st); }, POLL_MS); // pending
@@ -234,6 +244,13 @@
     function scan() {
         var imgs = document.querySelectorAll(".post_media_image img");
         for (var i = 0; i < imgs.length; i++) {
+            // Skip the hidden <desc><img> the post template emits as the
+            // screen-reader fallback inside a sized <svg> wrapper. It is
+            // never painted, but Chrome still loads it — and for our SVG
+            // unavailable placeholder its naturalWidth is 0, which would
+            // otherwise trip onError() and paint the spinner on top of
+            // the visible <svg><image> dead-placeholder.
+            if (imgs[i].closest("desc")) continue;
             watch(imgs[i]);
         }
     }

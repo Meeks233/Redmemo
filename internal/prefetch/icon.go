@@ -29,6 +29,13 @@ const (
 	// applies when manually opening tabs.
 	iconMinPerCycle = 1
 	iconMaxPerCycle = 4
+
+	// iconRoundBuildCooldown gates how often buildIconRound may run when the
+	// previous build produced an empty queue. Without it, every passive
+	// /archive visit re-runs the build, re-issues the SubredditCounts query,
+	// and re-emits the same "N sub(s) below threshold" skip event — spammy
+	// when the alive set is dominated by thin subs.
+	iconRoundBuildCooldown = 30 * time.Minute
 )
 
 // logListCap is the maximum number of sub names rendered into an event-log
@@ -160,10 +167,20 @@ func (s *Scheduler) nextIconBatch() []string {
 	defer s.iconMu.Unlock()
 
 	if len(s.iconRound) == 0 {
-		round := s.buildIconRound()
-		if len(round) == 0 {
+		// Cooldown applies only when the *previous* build produced an empty
+		// queue. A drained-but-recently-non-empty round must rebuild
+		// immediately so coverage isn't stalled; what we suppress is the
+		// repeated no-op rebuild that spams the skip log on every passive
+		// /archive trigger when the alive set is dominated by thin subs.
+		if !s.iconEmptyBuildAt.IsZero() && time.Since(s.iconEmptyBuildAt) < iconRoundBuildCooldown {
 			return nil
 		}
+		round := s.buildIconRound()
+		if len(round) == 0 {
+			s.iconEmptyBuildAt = time.Now()
+			return nil
+		}
+		s.iconEmptyBuildAt = time.Time{}
 		s.iconRound = round
 		s.Events.Addf(LevelInfo, "L4", "new round queued: %d sub(s) ordered by archive size: %s", len(round), previewList(round))
 	}

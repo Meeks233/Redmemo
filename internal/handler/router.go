@@ -186,6 +186,7 @@ func (h *Handler) Routes() http.Handler {
 	// Archive browser
 	mux.HandleFunc("GET /archive", h.handleArchiveHub)
 	mux.HandleFunc("GET /archive/r/{sub}", h.handleArchiveSub)
+	mux.HandleFunc("GET /api/archive/subs", h.handleArchiveSubsAPI)
 
 	// Settings — TOTP-gated. The same /settings POST endpoint serves both
 	// auth submissions (when no valid ephemeral token is held) and the actual

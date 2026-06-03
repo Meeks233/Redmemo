@@ -101,6 +101,9 @@ var prefDefaults = map[string]string{
 	"enable_natural_prefetch": "off",
 	"prefetch_subs":           "",
 	"prefetch_threshold":      "50",
+	"prefetch_sort":           "hot",
+	"prefetch_timeframe":      "day",
+	"prefetch_sub_modes":      "",
 	"scroll_interval":         "2",
 	"lazy_media":              "on",
 	"video_quality":           "source",
@@ -164,6 +167,9 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.EnableNaturalPrefetch = pref("enable_natural_prefetch")
 	p.PrefetchSubs = pref("prefetch_subs")
 	p.PrefetchThreshold = pref("prefetch_threshold")
+	p.PrefetchSort = pref("prefetch_sort")
+	p.PrefetchTimeframe = pref("prefetch_timeframe")
+	p.PrefetchSubModes = pref("prefetch_sub_modes")
 	p.ScrollInterval = pref("scroll_interval")
 	p.LazyMedia = pref("lazy_media")
 	p.VideoQuality = pref("video_quality")

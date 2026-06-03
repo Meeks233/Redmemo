@@ -40,10 +40,9 @@ templ errorContent(d ErrorPageData) {
 							<path class="ecg-line" d="M3 12h2l2 -3l3 6l2 -3h3" stroke="#22c55e" fill="none"></path>
 						</svg>
 					} else {
-						<svg class="heart-broken" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-							<path class="heart-shape" d="M19 14.828L13.405 20.422a2.032 2.032 0 0 1-2.81 0L4.998 14.818a5.523 5.523 0 0 1-.735-6.565A5.477 5.477 0 0 1 12 5.052a5.477 5.477 0 0 1 7.737 3.2 5.523 5.523 0 0 1-.737 6.576" stroke="#ef4444" fill="rgba(239,68,68,0.15)"></path>
-							<path class="slash-line" d="m2 2 20 20" stroke="#ef4444"></path>
-						</svg>
+						<svg class="heart-broken lucide-heart-crack" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+							<g class="heart-half left"><path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path><path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path></g><g class="heart-half right"><path class="heart-shape" d="M13.508 20.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5a5.5 5.5 0 0 1 9.591-3.677.6.6 0 0 0 .818.001A5.5 5.5 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5z"></path><path class="heart-crack" d="M12.409 5.824c-.702.792-1.15 1.496-1.415 2.166l2.153 2.156a.5.5 0 0 1 0 .707l-2.293 2.293a.5.5 0 0 0 0 .707L12 15"></path></g>
+													</svg>
 					}
 				</div>
 				<p class="error-status-code" id="error-message">{ strconv.Itoa(d.StatusCode) }</p>
@@ -233,6 +232,42 @@ templ errorContent(d ErrorPageData) {
 					</script>
 				}
 				if d.IsDebug {
+					<div class="error-diagnostics debug-puppet-section">
+						<h4>Notice Banner Variants (puppet)</h4>
+						@warningBanner(noticeBanner{
+							Kind:  "info",
+							Icon:  "hard-drive-download",
+							Label: T(ctx, "banner.offline_label"),
+							Items: []WarningItem{{Pre: T(ctx, "banner.offline")}},
+						})
+						@warningBanner(noticeBanner{
+							Kind:  "caution",
+							Icon:  "cloud-off",
+							Label: T(ctx, "banner.degraded_label"),
+							Href:  "/fuckreddit?reason=puppet",
+							Items: []WarningItem{{Pre: T(ctx, "banner.degraded")}},
+						})
+						@warningBanner(noticeBanner{
+							Kind:  "warning",
+							Icon:  "triangle-alert",
+							Label: T(ctx, "settings.warning_label"),
+							Items: []WarningItem{
+								{Pre: T(ctx, "settings.bypass_warn")},
+								{Pre: T(ctx, "settings.debug_warn_pre"), Link: T(ctx, "settings.debug_warn_link"), Href: "/debug", Post: T(ctx, "settings.debug_warn_post")},
+								{Pre: T(ctx, "settings.upstream_warn")},
+							},
+						})
+					</div>
+					<div class="error-diagnostics debug-puppet-section">
+						<h4>Error Render Variants (puppet)</h4>
+						<p>Every error path now renders through <code>/fuckreddit</code>. Click any reason to preview the live render (countdown frozen at 99:99 where applicable):</p>
+						<ul class="error-puppet-list">
+							for _, reason := range allFuckRedditReasons() {
+								<li><a href={ templ.SafeURL("/fuckreddit?reason=" + reason + "&freeze=1&from=/r/golang") }><code>{ reason }</code> — { frReasonText(ctx, reason) }</a></li>
+							}
+							<li><a href="/fuckreddit"><code>(empty)</code> — all clear state</a></li>
+						</ul>
+					</div>
 					<div class="error-diagnostics debug-puppet-section">
 						<h4>Media Loader Animation (puppet)</h4>
 						<style>

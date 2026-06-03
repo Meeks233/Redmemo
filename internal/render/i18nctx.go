@@ -258,6 +258,7 @@ func frReasonTexts(ctx context.Context) map[string]string {
 		"totp_replay":       T(ctx, "fr.totp_replay"),
 		"auth_locked":       T(ctx, "fr.auth_locked"),
 		"unsafe_env":        T(ctx, "fr.unsafe_env"),
+		"internal_error":    T(ctx, "fr.internal_error"),
 	}
 }
 
@@ -267,6 +268,24 @@ func frReasonText(ctx context.Context, reason string) string {
 	return frReasonTexts(ctx)[reason]
 }
 
+// allFuckRedditReasons returns every reason code in a stable display order, for
+// the /debug "Error Render Variants" puppet. New reasons must be appended here
+// (and to frReasonTexts) so the debug index covers them.
+func allFuckRedditReasons() []string {
+	return []string{
+		"upstream_disabled",
+		"quota_exhausted",
+		"hr_l1",
+		"hr_l2",
+		"hr_l3",
+		"hr_redis_down",
+		"totp_replay",
+		"auth_locked",
+		"unsafe_env",
+		"internal_error",
+	}
+}
+
 // frReasonIsStatic reports whether the reason is a one-shot auth-gate verdict
 // (no server-side countdown, no /api/status mirror). The /fuckreddit page must
 // suppress the countdown row AND the status poller for these — otherwise the
@@ -274,7 +293,7 @@ func frReasonText(ctx context.Context, reason string) string {
 // to "/", as if the degrade had cleared.
 func frReasonIsStatic(reason string) bool {
 	switch reason {
-	case "auth_locked", "unsafe_env", "totp_replay":
+	case "auth_locked", "unsafe_env", "totp_replay", "internal_error", "upstream_disabled":
 		return true
 	}
 	return false

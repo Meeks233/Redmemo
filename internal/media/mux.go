@@ -123,6 +123,14 @@ func fileOnDisk(meta *store.MediaMeta) bool {
 // page reload re-requests and upgrades to audio — while the mux runs in the
 // background. The page's audioSync.js surfaces that progress to the viewer.
 func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL string) {
+	// Persistent ledger gate. Render the placeholder picked by state — the
+	// soft question-mark for marked URLs (user reopening the post still
+	// revives), the X "Sorry, we missed it" for dead URLs (terminal, no more
+	// requests ever).
+	if st := p.unavailableState(videoURL); st != store.StateAlive {
+		p.serveUnavailableMarker(w, r, st)
+		return
+	}
 	key := muxCacheKey(videoURL)
 
 	meta, _ := p.mediaStore.Resolve(key)
@@ -202,6 +210,14 @@ func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL stri
 // (e.g. while the mux is still finishing, the audio_state write is mid-flight,
 // or the evictor has just reclaimed the file).
 func (p *Proxy) AudioStatus(videoURL string) string {
+	// Ledger short-circuits everything else. "unavailable" leaves the door
+	// open for a Revive on the next post visit; "dead" closes it forever.
+	switch p.unavailableState(videoURL) {
+	case store.StateUnavailable:
+		return "unavailable"
+	case store.StateDead:
+		return "dead"
+	}
 	key := muxCacheKey(videoURL)
 	meta, _ := p.mediaStore.Resolve(key)
 	state := ""
@@ -234,6 +250,13 @@ var muxSem = make(chan struct{}, 4)
 // retried within muxRetryCooldown. An 'abandoned' video is first revived so
 // the L5 layer re-enrols it with a fresh budget.
 func (p *Proxy) startBackgroundMux(videoURL, key string, meta *store.MediaMeta) {
+	// Ledger gate: if Reddit has refused this URL N times the row was marked
+	// "unavailable" and even spawning the goroutine is wasted work — the mux
+	// would just download a 403 again. The user re-opening the post is the
+	// only thing that revives a marked URL.
+	if p.isUnavailable(videoURL) {
+		return
+	}
 	if meta != nil && meta.LastAudioAttemptAt != nil &&
 		time.Since(*meta.LastAudioAttemptAt) < muxRetryCooldown {
 		return
@@ -362,11 +385,14 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		audioCh <- audioResult{path: a, confirmedAbsent: abs, err: err}
 	}()
 
-	if err := p.downloadTo(ctx, videoURL, videoTmp); err != nil {
+	if status, err := p.downloadToWithStatus(ctx, videoURL, videoTmp); err != nil {
 		// Cancel and drain the audio goroutine so its tmp files clean up before
 		// the deferred RemoveAll runs.
 		cancelAudio()
 		<-audioCh
+		// Feed the persistent ledger: repeated 403s on banned posts are how
+		// this retry storm was discovered in the first place.
+		p.recordUnavailable(videoURL, status, err.Error())
 		return nil, fmt.Errorf("download video: %w", err)
 	}
 
@@ -537,7 +563,8 @@ func (p *Proxy) downloadSilent(ctx context.Context, videoURL, key string) (*stor
 	defer os.RemoveAll(tmpDir)
 
 	stagingPath := filepath.Join(tmpDir, "v.mp4")
-	if err := p.downloadTo(ctx, videoURL, stagingPath); err != nil {
+	if status, err := p.downloadToWithStatus(ctx, videoURL, stagingPath); err != nil {
+		p.recordUnavailable(videoURL, status, err.Error())
 		return nil, fmt.Errorf("download: %w", err)
 	}
 	hash, outPath, err := publishContent(stagingPath, p.rootPath)

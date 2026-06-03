@@ -431,7 +431,6 @@ figcaption {
 
 main {
     display: flex;
-    flex-wrap: wrap;
     justify-content: center;
     max-width: 1000px;
     padding: 10px 20px;
@@ -564,7 +563,7 @@ aside {
 #user,
 #sub_meta,
 #sidebar_contents {
-    padding: 20px;
+    padding: 12px 16px;
 }
 
 #sidebar,
@@ -579,12 +578,12 @@ aside {
 
 #user_icon,
 #sub_icon {
-    width: 100px;
-    height: 100px;
+    width: 72px;
+    height: 72px;
     border: 2px solid var(--accent);
     border-radius: 100%;
-    padding: 10px;
-    margin: 10px;
+    padding: 6px;
+    margin: 6px;
 }
 
 #user_title,
@@ -606,7 +605,7 @@ aside {
 #sub_name,
 #sub_icon,
 #sub_description:not(:empty) {
-    margin-bottom: 20px;
+    margin-bottom: 10px;
 }
 
 #user_details,
@@ -1397,6 +1396,21 @@ video.lazy-media:not([src]) {
     position: relative;
     display: block;
     line-height: 0;
+}
+
+/* Reddit sometimes returns microscopic preview dimensions (e.g. 161x81 for
+   the obfuscated NSFW preview of an external imgur post). The post template
+   wraps the image in <svg width="Wpx" height="Hpx">, so when the upstream is
+   gone and we serve the dead/uncertain placeholder, it gets crammed into that
+   tiny box and the placeholder caption renders at ~6px. Letting the wrapper
+   grow to a readable minimum keeps the placeholder legible without affecting
+   normally-sized post images. width/height:auto override the inline attrs so
+   the min-* actually expands the box instead of being clamped. */
+.post_media_image > svg {
+    min-width: 240px;
+    min-height: 180px;
+    width: auto;
+    height: auto;
 }
 
 .post_media_image.media-loading::after {
@@ -3164,72 +3178,52 @@ th {
     color: var(--text);
 }
 
-/* Debug warning banner */
-.offline-banner {
-    flex: 0 0 100%;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px 16px;
-    margin-bottom: 16px;
-    background: #3b82f622;
-    border: 1px solid #3b82f688;
-    border-radius: 6px;
-    color: var(--text);
-    font-weight: 500;
-    font-size: 0.95em;
-}
-
-.offline-banner svg {
-    flex-shrink: 0;
-    color: #60a5fa;
-}
-
-/* HR-degraded banner — clickable, amber so it's visually distinct from
-   the blue offline banner. Click → /fuckreddit?reason=... */
-.degraded-banner {
-    flex: 0 0 100%;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px 16px;
-    margin-bottom: 16px;
-    background: #f59e0b22;
-    border: 1px solid #f59e0b88;
-    border-radius: 6px;
-    color: var(--text);
-    font-weight: 500;
-    font-size: 0.95em;
-    text-decoration: none;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.degraded-banner:hover {
-    background: #f59e0b44;
-}
-
-.degraded-banner svg {
-    flex-shrink: 0;
-    color: #f59e0b;
-}
-
+/* Unified notice banner — rail (icon + caps label) on the left, bulleted item
+   list on the right. Three colour variants share the same structure:
+     --warning  gold   — operator alerts (settings)
+     --info     blue   — passive info (viewing local offline archive)
+     --caution  amber  — clickable degradation prompt (/fuckreddit) */
 .warning-banner {
+    flex: 0 0 100%;
+    box-sizing: border-box;
     display: flex;
     align-items: stretch;
     gap: 16px;
     padding: 12px 16px;
     margin-bottom: 16px;
-    background: #b8860b22;
-    border: 1px solid #b8860b88;
     border-radius: 6px;
+    border: 1px solid transparent;
     color: var(--text);
     font-weight: 500;
     font-size: 0.95em;
+    text-decoration: none;
+}
+
+.warning-banner--warning {
+    background: #b8860b22;
+    border-color: #b8860b88;
+}
+
+.warning-banner--info {
+    background: #3b82f622;
+    border-color: #3b82f688;
+}
+
+.warning-banner--caution {
+    background: #f59e0b22;
+    border-color: #f59e0b88;
+}
+
+/* The caution variant is the only one rendered as <a> today (degraded banner
+   → /fuckreddit). Give it a hover affordance; the other variants stay inert
+   even if a future caller wraps them in an anchor — harmless. */
+a.warning-banner {
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+a.warning-banner--caution:hover {
+    background: #f59e0b44;
 }
 
 .warning-banner__rail {
@@ -3241,8 +3235,12 @@ th {
     flex: 0 0 auto;
     min-width: 56px;
     padding-right: 14px;
-    border-right: 1px solid #b8860b44;
+    border-right: 1px solid transparent;
 }
+
+.warning-banner--warning .warning-banner__rail { border-right-color: #b8860b44; }
+.warning-banner--info    .warning-banner__rail { border-right-color: #3b82f644; }
+.warning-banner--caution .warning-banner__rail { border-right-color: #f59e0b44; }
 
 .warning-banner__icon {
     flex: 0 1 auto;
@@ -3252,8 +3250,11 @@ th {
     max-height: 28px;
     max-width: 28px;
     aspect-ratio: 1 / 1;
-    color: #daa520;
 }
+
+.warning-banner--warning .warning-banner__icon { color: #daa520; }
+.warning-banner--info    .warning-banner__icon { color: #60a5fa; }
+.warning-banner--caution .warning-banner__icon { color: #f59e0b; }
 
 .warning-banner__label {
     font-weight: 700;
@@ -3283,10 +3284,13 @@ th {
 
 .warning-banner__bullet {
     flex: 0 0 auto;
-    color: #daa520;
     font-weight: 900;
     line-height: 1.45;
 }
+
+.warning-banner--warning .warning-banner__bullet { color: #daa520; }
+.warning-banner--info    .warning-banner__bullet { color: #60a5fa; }
+.warning-banner--caution .warning-banner__bullet { color: #f59e0b; }
 
 .warning-banner__text {
     flex: 1 1 auto;
@@ -3956,4 +3960,39 @@ th {
 @keyframes audio-sync-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
+}
+
+/* Media-unavailable placeholder card (audioSync.js → showUnavailable).
+   Rendered in place of a <video> whose upstream segments have been refused
+   N times — typically a post banned upstream — so the player can't recover. */
+.media-unavailable-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 24px 16px;
+    margin: 8px 0;
+    border: 1px dashed var(--highlighted);
+    border-radius: 6px;
+    background: var(--background);
+    color: var(--text);
+    text-align: center;
+    min-height: 160px;
+}
+.media-unavailable-card svg {
+    color: var(--accent, #d54455);
+    opacity: 0.75;
+}
+.media-unavailable-text {
+    margin: 4px 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.media-unavailable-hint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted, var(--text));
+    opacity: 0.7;
 }

@@ -196,6 +196,9 @@ type Preferences struct {
 	EnableNaturalPrefetch          string
 	PrefetchSubs                   string
 	PrefetchThreshold              string
+	PrefetchSort                   string // global default sort for NP L1: hot|new|top|rising|controversial (default "hot")
+	PrefetchTimeframe              string // global default t for NP L1 (only honored by top/controversial): hour|day|week|month|year|all (empty = none)
+	PrefetchSubModes               string // per-sub overrides, one rule per line: "sub=sort[:timeframe]" (e.g. "golang=new\nrust=top:week")
 	ScrollInterval                 string
 	LazyMedia                      string // default "on" — defer media requests until the post enters the viewport
 	VideoQuality                   string // preferred max v.redd.it height: "source" (default) | "1080" | "720" | "480" | "360" | "240"

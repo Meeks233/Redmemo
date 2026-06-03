@@ -25,6 +25,8 @@ var settingsKeys = []string{
 	"hide_awards", "hide_score", "remove_default_feeds",
 	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
+	"prefetch_sort", "prefetch_timeframe", "prefetch_sub_modes",
+	"prefetch_unified",
 	"archive_control",
 	"prefetch_threshold", "scroll_interval", "lazy_media",
 	"video_quality", "mute_all_videos", "mute_nsfw_videos",
@@ -42,6 +44,214 @@ var allowedSettingsTokenTTL = map[string]bool{
 	"5": true, "10": true, "15": true, "30": true, "60": true,
 }
 
+// validPrefetchSort and validPrefetchTimeframe mirror redlib's listing-API
+// query grammar: any value Reddit accepts for `/r/{sub}/{sort}.json?t=...`.
+var validPrefetchSort = map[string]bool{
+	"hot": true, "new": true, "top": true, "rising": true, "controversial": true,
+}
+
+var validPrefetchTimeframe = map[string]bool{
+	"hour": true, "day": true, "week": true, "month": true, "year": true, "all": true,
+}
+
+type prefetchSubModeReject struct {
+	raw    string
+	reason string
+}
+
+// PrefetchSubOverride is one parsed per-sub override clause. Empty Sort or
+// Timeframe means "fall back to the global setting".
+type PrefetchSubOverride struct {
+	Sub       string
+	Sort      string
+	Timeframe string
+}
+
+// ParsePrefetchSubModes parses the navbar-style query grammar used by the NP
+// per-sub override field:
+//
+//	sub=sort:rising&time:day+sub2=sort:top+sub3=time:week
+//
+// Clauses are separated by '+'. Each clause is `<sub>=<k>:<v>(&<k>:<v>)*`.
+// Recognised keys are `sort` and `time`. The parser is intentionally lenient
+// to match how the navbar search drops unparseable trailing fragments — any
+// clause whose subname is malformed is dropped wholesale, and any individual
+// k:v pair with an unknown key or out-of-range value is silently discarded
+// without nuking the rest of its clause. Duplicate subnames collapse to the
+// last occurrence.
+func ParsePrefetchSubModes(raw string) ([]PrefetchSubOverride, []prefetchSubModeReject) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	var bad []prefetchSubModeReject
+	byName := make(map[string]*PrefetchSubOverride)
+	var order []string
+
+	for _, clause := range strings.Split(raw, "+") {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+		eq := strings.IndexByte(clause, '=')
+		if eq < 0 {
+			bad = append(bad, prefetchSubModeReject{raw: clause, reason: "missing '=' (expected sub=k:v)"})
+			continue
+		}
+		sub := strings.ToLower(strings.TrimSpace(clause[:eq]))
+		body := strings.TrimSpace(clause[eq+1:])
+		if !validSubName.MatchString(sub) {
+			bad = append(bad, prefetchSubModeReject{raw: clause, reason: "invalid subreddit name"})
+			continue
+		}
+
+		ov := &PrefetchSubOverride{Sub: sub}
+		anyOK := false
+		for _, kv := range strings.Split(body, "&") {
+			kv = strings.TrimSpace(kv)
+			if kv == "" {
+				continue
+			}
+			colon := strings.IndexByte(kv, ':')
+			if colon < 0 {
+				bad = append(bad, prefetchSubModeReject{raw: kv, reason: "missing ':' (expected k:v)"})
+				continue
+			}
+			key := strings.ToLower(strings.TrimSpace(kv[:colon]))
+			val := strings.ToLower(strings.TrimSpace(kv[colon+1:]))
+			switch key {
+			case "sort":
+				if !validPrefetchSort[val] {
+					bad = append(bad, prefetchSubModeReject{raw: kv, reason: "sort must be hot/new/top/rising/controversial"})
+					continue
+				}
+				ov.Sort = val
+				anyOK = true
+			case "time", "t", "timeframe":
+				if !validPrefetchTimeframe[val] {
+					bad = append(bad, prefetchSubModeReject{raw: kv, reason: "time must be hour/day/week/month/year/all"})
+					continue
+				}
+				ov.Timeframe = val
+				anyOK = true
+			default:
+				bad = append(bad, prefetchSubModeReject{raw: kv, reason: "unknown key (expected sort or time)"})
+			}
+		}
+		if !anyOK {
+			bad = append(bad, prefetchSubModeReject{raw: clause, reason: "no usable sort/time overrides"})
+			continue
+		}
+		if _, dup := byName[sub]; !dup {
+			order = append(order, sub)
+		}
+		byName[sub] = ov
+	}
+
+	out := make([]PrefetchSubOverride, 0, len(order))
+	for _, sub := range order {
+		out = append(out, *byName[sub])
+	}
+	return out, bad
+}
+
+// CanonicalPrefetchSubModes renders parsed overrides back to the wire form,
+// stable for echo-back in the settings UI.
+func CanonicalPrefetchSubModes(overrides []PrefetchSubOverride) string {
+	if len(overrides) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(overrides))
+	for _, o := range overrides {
+		var kvs []string
+		if o.Sort != "" {
+			kvs = append(kvs, "sort:"+o.Sort)
+		}
+		if o.Timeframe != "" {
+			kvs = append(kvs, "time:"+o.Timeframe)
+		}
+		if len(kvs) == 0 {
+			continue
+		}
+		parts = append(parts, o.Sub+"="+strings.Join(kvs, "&"))
+	}
+	return strings.Join(parts, "+")
+}
+
+func normalizePrefetchSubModes(raw string) (string, []prefetchSubModeReject) {
+	overrides, bad := ParsePrefetchSubModes(raw)
+	return CanonicalPrefetchSubModes(overrides), bad
+}
+
+// splitPrefetchUnified parses the merged NP textarea grammar — a single
+// `+`-separated stream where each clause is either a bare subreddit name
+// ("golang") or a per-sub override clause ("cats=sort:rising&time:day") — and
+// fans it out into the two storage keys the scheduler already consumes. Bare
+// names land in prefetch_subs; override clauses land in prefetch_sub_modes,
+// and their subnames are also added to prefetch_subs so the override actually
+// drives a crawl. Final canonicalisation/validation is left to the existing
+// prefetch_subs and prefetch_sub_modes branches below.
+func splitPrefetchUnified(raw string) (subsCSV, modesRaw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	var modesOrder, allSubsOrder []string
+	seenSub := make(map[string]bool)
+	for _, clause := range strings.Split(raw, "+") {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+		eq := strings.IndexByte(clause, '=')
+		var name string
+		if eq < 0 {
+			name = strings.ToLower(clause)
+		} else {
+			name = strings.ToLower(strings.TrimSpace(clause[:eq]))
+			modesOrder = append(modesOrder, clause)
+		}
+		if name != "" && !seenSub[name] {
+			seenSub[name] = true
+			allSubsOrder = append(allSubsOrder, name)
+		}
+	}
+	return strings.Join(allSubsOrder, "+"), strings.Join(modesOrder, "+")
+}
+
+// ComposePrefetchUnified rebuilds the merged textarea value for echo-back to
+// the settings page from the two stored keys. Bare subs (those without an
+// override clause) come first, then the canonical override clauses, joined by
+// '+'. Empty inputs produce an empty string.
+func ComposePrefetchUnified(subsCSV, modesRaw string) string {
+	overrideSet := make(map[string]bool)
+	for _, clause := range strings.Split(modesRaw, "+") {
+		clause = strings.TrimSpace(clause)
+		if clause == "" {
+			continue
+		}
+		eq := strings.IndexByte(clause, '=')
+		if eq < 0 {
+			continue
+		}
+		overrideSet[strings.ToLower(strings.TrimSpace(clause[:eq]))] = true
+	}
+	var bare []string
+	for _, name := range strings.Split(subsCSV, "+") {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" || overrideSet[name] {
+			continue
+		}
+		bare = append(bare, name)
+	}
+	parts := bare
+	if modesRaw != "" {
+		parts = append(parts, modesRaw)
+	}
+	return strings.Join(parts, "+")
+}
+
 // NormalizeSettings canonicalises a settings map the same way the form save
 // does, EXCEPT for the dead-sub filter — that consults the substatus DB which
 // may not exist yet at env-application time. Returns the normalised map plus a
@@ -56,6 +266,19 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 
 	for k, v := range updates {
 		out[k] = v
+	}
+
+	// prefetch_unified is a virtual form-only key: the merged settings textarea
+	// posts a single `+`-separated stream of bare subs and per-sub override
+	// clauses. Split it into the two real storage keys (prefetch_subs and
+	// prefetch_sub_modes) so the existing validation, persistence, and
+	// scheduler-side resolution all continue to work unchanged. If the caller
+	// also sent the legacy keys, the unified value wins.
+	if v, ok := out["prefetch_unified"]; ok {
+		subsCSV, modesRaw := splitPrefetchUnified(v)
+		out["prefetch_subs"] = subsCSV
+		out["prefetch_sub_modes"] = modesRaw
+		delete(out, "prefetch_unified")
 	}
 
 	if v, ok := out["front_page_subs"]; ok && v != "" && v != "all" {
@@ -115,6 +338,28 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 			rejected = append(rejected, RejectedSetting{Key: "page_limit", Value: v, Reason: "must be an integer in [5, 25]"})
 		} else {
 			out["page_limit"] = strconv.Itoa(n)
+		}
+	}
+
+	if v, ok := out["prefetch_sort"]; ok && v != "" {
+		if !validPrefetchSort[v] {
+			delete(out, "prefetch_sort")
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_sort", Value: v, Reason: "must be one of hot/new/top/rising/controversial"})
+		}
+	}
+
+	if v, ok := out["prefetch_timeframe"]; ok && v != "" {
+		if !validPrefetchTimeframe[v] {
+			delete(out, "prefetch_timeframe")
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_timeframe", Value: v, Reason: "must be one of hour/day/week/month/year/all"})
+		}
+	}
+
+	if v, ok := out["prefetch_sub_modes"]; ok && v != "" {
+		cleaned, bad := normalizePrefetchSubModes(v)
+		out["prefetch_sub_modes"] = cleaned
+		for _, b := range bad {
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_sub_modes", Value: b.raw, Reason: b.reason})
 		}
 	}
 
@@ -236,6 +481,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		frontPageQuery = searchquery.Parse(prefs.FrontPageSubs).Canonical()
 	}
 	prefetchQuery := searchquery.JoinSubs(prefetchSubs)
+	prefetchUnified := ComposePrefetchUnified(prefetchQuery, h.siteDefaults["prefetch_sub_modes"])
 
 	archiveControl := h.siteDefaults["archive_control"]
 
@@ -254,6 +500,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		PrefetchSubs:   prefetchSubs,
 		FrontPageQuery: frontPageQuery,
 		PrefetchQuery:  prefetchQuery,
+		PrefetchUnified: prefetchUnified,
 		ArchiveControl: archiveControl,
 		SubredditStats: subStats,
 		ArchivedSubs:   archivedSubs,

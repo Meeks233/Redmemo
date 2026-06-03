@@ -245,6 +245,15 @@ func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences, limit int) {
+	// Operator has pinned the instance to cache-only mode: send /r/{sub}
+	// visitors to the equivalent archive route instead of attempting upstream
+	// and falling back. Skips the cache/HR gate/archive chain entirely so the
+	// URL surface advertises the archive truthfully.
+	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+		http.Redirect(w, r, "/archive/r/"+sub, http.StatusFound)
+		return
+	}
+
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
 	cacheKey := htmlCacheKey(urlPath, "after="+after, prefs)

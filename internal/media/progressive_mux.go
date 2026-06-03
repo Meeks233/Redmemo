@@ -438,11 +438,6 @@ func writeMdat(out *os.File, vr, ar io.ReadSeeker, vFrags, aFrags []fragSamples)
 		return nil, nil, 0, err
 	}
 
-	payloadStart, err := out.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
 	n := len(vFrags)
 	if len(aFrags) > n {
 		n = len(aFrags)
@@ -483,7 +478,6 @@ func writeMdat(out *os.File, vr, ar io.ReadSeeker, vFrags, aFrags []fragSamples)
 	if _, err := out.Seek(payloadEnd, io.SeekStart); err != nil {
 		return nil, nil, 0, err
 	}
-	_ = payloadStart
 	return vChunkOffsets, aChunkOffsets, uint64(payloadEnd), nil
 }
 

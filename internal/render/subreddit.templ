@@ -125,18 +125,6 @@ templ subredditBody(d SubredditPageData) {
 								<div title={ d.Sub.Members[1] }>{ d.Sub.Members[0] }</div>
 								<div title={ d.Sub.Active[1] }>{ d.Sub.Active[0] }</div>
 							</div>
-							<div id="sub_actions">
-								<div id="sub_subscription">
-									<form action={ templ.SafeURL("/r/" + d.Sub.Name + "/subscribe?redirect=" + d.RedirectURL) } method="POST">
-										<button class="subscribe">{ T(ctx, "sidebar.subscribe") }</button>
-									</form>
-								</div>
-								<div id="sub_filter">
-									<form action={ templ.SafeURL("/r/" + d.Sub.Name + "/filter?redirect=" + d.RedirectURL) } method="POST">
-										<button class="filter">{ T(ctx, "sidebar.filter") }</button>
-									</form>
-								</div>
-							</div>
 						</div>
 					</details>
 					<details class="panel" id="sidebar">

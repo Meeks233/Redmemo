@@ -19,17 +19,37 @@ type WarningItem struct {
 	Post string
 }
 
+// noticeBanner is the unified parameter bag for the shared banner component.
+// Kind selects the colour variant: "warning" (gold — settings-style alerts),
+// "info" (blue — passive informational notices like offline archive viewing),
+// or "caution" (amber — operational degradation that the user can act on).
+// Icon is a lucide-style key resolved by bannerIcon (triangle-alert,
+// hard-drive-download, cloud-off, …). Href, when non-empty, wraps the whole
+// banner in an anchor so it is clickable.
+type noticeBanner struct {
+	Kind  string
+	Icon  string
+	Label string
+	Items []WarningItem
+	Href  string
+}
+
 // partials.templ holds the shared presentational components (banners, flair,
 // search box, poll, listing card) as typed templ components. Every page renders
 // through templ now; the old html/template partials.html has been removed.
 
 // offlineBanner shows the local-archive notice when a page is served offline.
+// Thin wrapper over warningBanner with the "info" (blue) variant and the
+// hard-drive-download lucide icon — preserves the original blue colour while
+// routing through the shared notice component.
 templ offlineBanner(isOffline bool) {
 	if isOffline {
-		<div class="offline-banner">
-			<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
-			<span>{ T(ctx, "banner.offline") }</span>
-		</div>
+		@warningBanner(noticeBanner{
+			Kind:  "info",
+			Icon:  "hard-drive-download",
+			Label: T(ctx, "banner.offline_label"),
+			Items: []WarningItem{{Pre: T(ctx, "banner.offline")}},
+		})
 	}
 }
 
@@ -50,13 +70,18 @@ templ localInfiniteLoader(endpoint, qs string, pageSize, current int, interval s
 	<script src="/infiniteScroll.js"></script>
 }
 
-// degradedBanner links to /fuckreddit when the page is served degraded.
+// degradedBanner links to /fuckreddit when the page is served degraded. Thin
+// wrapper over warningBanner with the "caution" (amber) variant and the
+// cloud-off lucide icon — the whole banner is clickable via Href.
 templ degradedBanner(reason string) {
 	if reason != "" {
-		<a class="degraded-banner" href={ templ.SafeURL("/fuckreddit?reason=" + reason) }>
-			<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-			<span>{ T(ctx, "banner.degraded") }</span>
-		</a>
+		@warningBanner(noticeBanner{
+			Kind:  "caution",
+			Icon:  "cloud-off",
+			Label: T(ctx, "banner.degraded_label"),
+			Href:  "/fuckreddit?reason=" + reason,
+			Items: []WarningItem{{Pre: T(ctx, "banner.degraded")}},
+		})
 	}
 }
 
@@ -281,30 +306,66 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 	</div>
 }
 
-// warningBanner renders a single bordered notice block listing one or more
-// WarningItems. The left rail shows a triangle icon that scales with the box
-// height and the localized "Warning" label below it; each item is rendered as
-// a bulleted row on the right. Renders nothing when items is empty.
-templ warningBanner(label string, items []WarningItem) {
-	if len(items) > 0 {
-		<div class="warning-banner">
-			<div class="warning-banner__rail">
-				<svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
-				<span class="warning-banner__label">{ label }</span>
-			</div>
-			<ul class="warning-banner__list">
-				for _, it := range items {
-					<li class="warning-banner__item">
-						<span class="warning-banner__bullet" aria-hidden="true">•</span>
-						<span class="warning-banner__text">
-							{ it.Pre }
-							if it.Link != "" {
-								<a href={ templ.SafeURL(it.Href) }>{ it.Link }</a>{ it.Post }
-							}
-						</span>
-					</li>
-				}
-			</ul>
-		</div>
+// bannerIcon resolves a lucide-style icon name to an inline SVG. Keeping the
+// switch here (rather than in callers) lets us share the warning-banner__icon
+// class so sizing/colour rules stay in one place.
+templ bannerIcon(name string) {
+	switch name {
+		case "hard-drive-download":
+			<svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="M12 2v8"></path><path d="m16 6-4 4-4-4"></path><rect width="20" height="8" x="2" y="14" rx="2"></rect><path d="M6 18h.01"></path><path d="M10 18h.01"></path></svg>
+		case "cloud-off":
+			<svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="m2 2 20 20"></path><path d="M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193"></path><path d="M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07"></path></svg>
+		default:
+			<svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
 	}
+}
+
+// warningBannerBody is the inner rail+list markup shared by both the <div>
+// and the <a> rendering paths — keeps the structure in one place.
+templ warningBannerBody(b noticeBanner) {
+	<div class="warning-banner__rail">
+		@bannerIcon(b.Icon)
+		<span class="warning-banner__label">{ b.Label }</span>
+	</div>
+	<ul class="warning-banner__list">
+		for _, it := range b.Items {
+			<li class="warning-banner__item">
+				<span class="warning-banner__bullet" aria-hidden="true">•</span>
+				<span class="warning-banner__text">
+					{ it.Pre }
+					if it.Link != "" {
+						<a href={ templ.SafeURL(it.Href) }>{ it.Link }</a>{ it.Post }
+					}
+				</span>
+			</li>
+		}
+	</ul>
+}
+
+// warningBanner renders the unified notice block — a left rail (icon + caps
+// label) and a bulleted item list on the right. Kind picks the colour variant
+// (warning gold / info blue / caution amber); Icon picks the rail glyph; Href,
+// when set, makes the whole banner a clickable anchor. Renders nothing when
+// Items is empty so callers can pass a conditional list without an extra guard.
+templ warningBanner(b noticeBanner) {
+	if len(b.Items) > 0 {
+		if b.Href != "" {
+			<a class={ "warning-banner", "warning-banner--" + bannerKind(b.Kind) } href={ templ.SafeURL(b.Href) }>
+				@warningBannerBody(b)
+			</a>
+		} else {
+			<div class={ "warning-banner", "warning-banner--" + bannerKind(b.Kind) }>
+				@warningBannerBody(b)
+			</div>
+		}
+	}
+}
+
+// bannerKind defaults the variant to "warning" so callers passing an empty
+// Kind still get a sane colour modifier in the class list.
+func bannerKind(k string) string {
+	if k == "" {
+		return "warning"
+	}
+	return k
 }

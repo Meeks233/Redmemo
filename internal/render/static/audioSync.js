@@ -287,6 +287,62 @@
             }, 4000);
         }
 
+        // overlayCard hides the spinning <video> and drops a card with the
+        // given SVG icon and copy in its place. Shared between the soft
+        // (question-mark) and terminal (X) presentations; the loop is parked
+        // either way because both states forbid further polling — a revival,
+        // when allowed, comes from the user reloading the post page.
+        function overlayCard(iconPaths, title, hint) {
+            var host = video.closest(".post_media_content") || video.parentNode;
+            if (!host) return;
+            try { video.pause(); } catch (e) { /* ignore */ }
+            video.style.display = "none";
+            var card = document.createElement("div");
+            card.className = "media-unavailable-card";
+            card.setAttribute("role", "status");
+            var paths = "";
+            for (var i = 0; i < iconPaths.length; i++) {
+                paths += '<path d="' + iconPaths[i] + '"/>';
+            }
+            card.innerHTML =
+                '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" ' +
+                'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+                'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                paths + '</svg>' +
+                '<p class="media-unavailable-text">' + title + '</p>' +
+                '<p class="media-unavailable-hint">' + hint + '</p>';
+            host.appendChild(card);
+            polls = MAX_POLLS;
+        }
+
+        // showUncertain: soft refusal — ledger said no for now, but a fresh
+        // page load (which calls Revive) might bring it back. lucide
+        // circle-question-mark glyph.
+        function showUncertain() {
+            overlayCard(
+                ["M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", "M12 17h.01"],
+                "Media temporarily unavailable",
+                "Reopen the post to retry"
+            );
+            // The question-mark glyph wraps an outer circle — add it separately
+            // because overlayCard's path list models stroked paths, not circles.
+            var card = video.parentNode && video.parentNode.querySelector(".media-unavailable-card svg");
+            if (card) {
+                card.insertAdjacentHTML("afterbegin",
+                    '<circle cx="12" cy="12" r="10"/>');
+            }
+        }
+
+        // showDead: terminal refusal — the ledger has already burned a
+        // user-triggered retry. lucide X glyph + "Sorry, we missed it…".
+        function showDead() {
+            overlayCard(
+                ["M18 6 6 18", "m6 6 12 12"],
+                "Sorry, we missed it…",
+                "Reddit removed this before we could archive it"
+            );
+        }
+
         function clearNotice() {
             detachAudioCompanion();
             if (notice && notice.parentNode) {
@@ -305,6 +361,22 @@
                     }
                     if (data.state === "silent" || data.state === "unsupported") {
                         clearNotice();
+                        return;
+                    }
+                    if (data.state === "unavailable") {
+                        // Soft state: refused N times but the user reopening
+                        // the post can still revive. Question-mark card +
+                        // hint to retry.
+                        clearNotice();
+                        showUncertain();
+                        return;
+                    }
+                    if (data.state === "dead") {
+                        // Terminal: the URL already burned a user-triggered
+                        // retry and Reddit said no again. No more requests
+                        // ever; "Sorry, we missed it" with the X glyph.
+                        clearNotice();
+                        showDead();
                         return;
                     }
                     // pending — attach the companion (idempotent) so audio

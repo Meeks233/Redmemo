@@ -144,8 +144,9 @@ type Scheduler struct {
 	// fetch this round. Built lazily when empty by nextIconBatch. Both the
 	// hourly tick and passive /archive triggers drain from the same queue, so
 	// rapid triggers consume the round instead of multiplying upstream load.
-	iconMu    sync.Mutex
-	iconRound []string
+	iconMu           sync.Mutex
+	iconRound        []string
+	iconEmptyBuildAt time.Time
 
 	// Observable state for debug page
 	statusMu    sync.RWMutex
@@ -386,11 +387,19 @@ func (s *Scheduler) producerLoop(ctx context.Context) {
 	}
 }
 
+// isEnabled reports whether NP should run. An empty crawl list (prefetch_subs
+// blank, whether from the settings UI or REDMEMO_DEFAULT_PREFETCH_SUBS=) is
+// treated the same as the toggle being off — without subs there is nothing for
+// the layer to do, so we surface "disabled" instead of looping on "no subs
+// configured".
 func (s *Scheduler) isEnabled() bool {
 	if s.settings == nil {
 		return false
 	}
-	return s.settings.Get("enable_natural_prefetch") == "on"
+	if s.settings.Get("enable_natural_prefetch") != "on" {
+		return false
+	}
+	return len(s.activeSubs()) > 0
 }
 
 func (s *Scheduler) activeSubs() []string {
@@ -406,6 +415,86 @@ func (s *Scheduler) activeSubs() []string {
 	return searchquery.Parse(v).WhiteSubs
 }
 
+// subMode holds the resolved per-sub listing API parameters NP will use this
+// round. Mirrors redlib's `/r/{sub}/{sort}.json?t=...` request grammar.
+type subMode struct {
+	Sort      string // hot|new|top|rising|controversial
+	Timeframe string // hour|day|week|month|year|all (only honored by top/controversial)
+}
+
+// resolveSubMode returns the listing-API mode for sub: per-sub override from
+// prefetch_sub_modes wins per-field (sort and time are overridden independently),
+// then the global prefetch_sort + prefetch_timeframe, then ("hot", "day") as
+// the hard-coded fallback. The per-sub query grammar mirrors navbar search:
+// `suba=sort:rising&time:day+subb=sort:top`.
+func (s *Scheduler) resolveSubMode(sub string) subMode {
+	mode := subMode{Sort: "hot", Timeframe: "day"}
+	if s.settings != nil {
+		if v := s.settings.Get("prefetch_sort"); v != "" {
+			mode.Sort = v
+		}
+		if v := s.settings.Get("prefetch_timeframe"); v != "" {
+			mode.Timeframe = v
+		}
+		if raw := s.settings.Get("prefetch_sub_modes"); raw != "" {
+			target := strings.ToLower(sub)
+			for _, clause := range strings.Split(raw, "+") {
+				clause = strings.TrimSpace(clause)
+				eq := strings.IndexByte(clause, '=')
+				if eq < 0 {
+					continue
+				}
+				if strings.ToLower(strings.TrimSpace(clause[:eq])) != target {
+					continue
+				}
+				body := strings.TrimSpace(clause[eq+1:])
+				for _, kv := range strings.Split(body, "&") {
+					colon := strings.IndexByte(kv, ':')
+					if colon < 0 {
+						continue
+					}
+					key := strings.ToLower(strings.TrimSpace(kv[:colon]))
+					val := strings.ToLower(strings.TrimSpace(kv[colon+1:]))
+					switch key {
+					case "sort":
+						mode.Sort = val
+					case "time", "t", "timeframe":
+						mode.Timeframe = val
+					}
+				}
+				break
+			}
+		}
+	}
+	// top/controversial honour timeframe; for hot/new/rising it is harmlessly
+	// ignored upstream, but we drop it so cursorKey stays minimal and event
+	// logs don't claim a meaningless tf for those sorts. Applied uniformly so
+	// the no-settings / no-sub_modes paths don't leak the default "day" tf.
+	if mode.Sort != "top" && mode.Sort != "controversial" {
+		mode.Timeframe = ""
+	}
+	return mode
+}
+
+// tfSuffix renders a timeframe as a compact event-log label suffix, or "" when
+// no timeframe is set (e.g. sort=hot, where t is meaningless).
+func tfSuffix(t string) string {
+	if t == "" {
+		return ""
+	}
+	return "/" + t
+}
+
+// cursorKey scopes the listing cursor to (sub, sort, timeframe) so a mid-cycle
+// mode swap doesn't reuse a cursor that belongs to a different listing — the
+// `after` token returned by /r/sub/hot is not valid against /r/sub/new.
+func cursorKey(sub string, m subMode) string {
+	if m.Timeframe != "" {
+		return sub + "|" + m.Sort + "|" + m.Timeframe
+	}
+	return sub + "|" + m.Sort
+}
+
 func (s *Scheduler) userRequestedRecently() bool {
 	last := s.lastUserReq.Load()
 	if last == 0 {
@@ -417,23 +506,16 @@ func (s *Scheduler) userRequestedRecently() bool {
 func (s *Scheduler) waitUntilEnabled(ctx context.Context) error {
 	for {
 		if s.isEnabled() {
-			if subs := s.activeSubs(); len(subs) > 0 {
-				s.setL1Status("ready", 0, 0, subs, nil, time.Time{})
-				return nil
-			}
-			v := ""
-			if s.settings != nil {
-				v = s.settings.Get("prefetch_subs")
-			}
-			s.Events.Addf(LevelSkip, "L1", "no subs configured (prefetch_subs=%q), sleeping 30s", v)
-		} else {
-			v := ""
-			if s.settings != nil {
-				v = s.settings.Get("enable_natural_prefetch")
-			}
-			s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
-			s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q), sleeping 30s", v)
+			s.setL1Status("ready", 0, 0, s.activeSubs(), nil, time.Time{})
+			return nil
 		}
+		toggle, subs := "", ""
+		if s.settings != nil {
+			toggle = s.settings.Get("enable_natural_prefetch")
+			subs = s.settings.Get("prefetch_subs")
+		}
+		s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
+		s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q, prefetch_subs=%q), sleeping 30s", toggle, subs)
 		if err := sleep(ctx, 30*time.Second); err != nil {
 			return err
 		}
@@ -508,24 +590,32 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 				return err
 			}
 
+			// Resolve the listing-API mode (sort + timeframe) for this sub.
+			// Per-sub override beats the global default; cursors and the
+			// exhausted-page flag are scoped to (sub, sort, t) so a mid-cycle
+			// settings edit doesn't reuse a cursor minted against a different
+			// listing endpoint.
+			mode := s.resolveSubMode(sub)
+			ck := cursorKey(sub, mode)
+
 			// Skip only subs that genuinely ran out of pages. A sub that
 			// failed to fetch in an earlier round has no cursor either, but
 			// must be retried — not silently dropped for the rest of the cycle.
-			if round > 0 && exhausted[sub] {
+			if round > 0 && exhausted[ck] {
 				continue
 			}
 			// This sub is still in play this round (whether it succeeds or
 			// fails), so the cycle should not end early on its account.
 			activeSubs++
 
-			cursor := cursors[sub]
+			cursor := cursors[ck]
 			var posts []reddit.Post
 			var after string
 			var fetchErr error
 
-			label := fmt.Sprintf("L1 r/%s round %d/%d listing (after=%q)", sub, round+1, maxRoundsPerCycle, cursor)
+			label := fmt.Sprintf("L1 r/%s [%s%s] round %d/%d listing (after=%q)", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1, maxRoundsPerCycle, cursor)
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
-				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", "", cursor, pageSize)
+				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
 				s.recordUpstream(ctx)
 				// Token() returns nil for three distinct reasons; ErrNoTokenAvailable
 				// collapses them. Disambiguate before reacting:
@@ -573,12 +663,12 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 							}
 							return
 						}
-						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", "", cursor, pageSize)
+						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
 						s.recordUpstream(ctx)
 					} else {
 						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
 						if s.tokenWaiter.WaitForToken(ctx) {
-							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, "hot", "", cursor, pageSize)
+							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
 							s.recordUpstream(ctx)
 						}
 					}
@@ -606,11 +696,11 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			}
 
 			if after != "" {
-				cursors[sub] = after
+				cursors[ck] = after
 			} else {
-				delete(cursors, sub)
-				exhausted[sub] = true
-				s.Events.Addf(LevelInfo, "L1", "r/%s: no more pages after round %d", sub, round+1)
+				delete(cursors, ck)
+				exhausted[ck] = true
+				s.Events.Addf(LevelInfo, "L1", "r/%s [%s%s]: no more pages after round %d", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1)
 			}
 
 			if err := s.submitL2(ctx, sub); err != nil {

@@ -211,6 +211,11 @@ type SettingsPageData struct {
 	// the page no longer needs JS to reconstruct or validate them.
 	FrontPageQuery string
 	PrefetchQuery  string
+	// PrefetchUnified is the merged NP-textarea value echoed back to the
+	// settings form: bare subs first, then canonical per-sub override clauses,
+	// all joined by '+'. Composed server-side from prefetch_subs and
+	// prefetch_sub_modes so the page renders it verbatim.
+	PrefetchUnified string
 	// ArchiveControl echoes the persisted archive_control filter (the raw
 	// `suba+subb-subc` form). Empty means no filter — every sub archives.
 	ArchiveControl string
@@ -491,27 +496,36 @@ func (e *Engine) RenderRateLimit(w http.ResponseWriter, lang string, resetSecond
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusTooManyRequests)
 	prefs := reddit.Preferences{Lang: lang}
-	data := ErrorPageData{
+	data := FuckRedditPageData{
 		BasePage:     e.basePage("", prefs),
-		Message:      "All upstreams are rate-limited, please try again later",
-		StatusCode:   http.StatusTooManyRequests,
-		Details:      details,
 		ResetSeconds: resetSeconds,
+		Reason:       "hr_l3",
 	}
-	errorPage(data).Render(e.i18nContext(lang), w)
+	fuckRedditPage(data).Render(e.i18nContext(lang), w)
 }
 
+// RenderError funnels every user-facing error through the /fuckreddit page so
+// there is exactly one error route and one design. The caller's message is
+// mapped to a localized reason code; status-specific reasons take precedence
+// when recognised. RenderDebug stays on its own template — it is not an error.
 func (e *Engine) RenderError(w http.ResponseWriter, lang, msg string, statusCode int, details ...string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(statusCode)
 	prefs := reddit.Preferences{Lang: lang}
-	data := ErrorPageData{
-		BasePage:   e.basePage("", prefs),
-		Message:    msg,
-		StatusCode: statusCode,
-		Details:    details,
+	reason := "internal_error"
+	switch statusCode {
+	case http.StatusTooManyRequests:
+		reason = "hr_l3"
+	case http.StatusNotFound:
+		if strings.Contains(msg, "upstream") {
+			reason = "upstream_disabled"
+		}
 	}
-	errorPage(data).Render(e.i18nContext(lang), w)
+	data := FuckRedditPageData{
+		BasePage: e.basePage("", prefs),
+		Reason:   reason,
+	}
+	fuckRedditPage(data).Render(e.i18nContext(lang), w)
 }
 
 type FuckRedditPageData struct {

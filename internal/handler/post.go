@@ -35,6 +35,13 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	if !strings.HasSuffix(urlPath, "/") {
 		urlPath += "/"
 	}
+
+	// Revive ledger marks on every media URL this post references. The user
+	// actively opening the post is the one signal we treat as "maybe it's
+	// back now": clear marked_unavailable_at so the next /vid/ or /img/ hit
+	// goes through to Reddit once more before re-marking on failure. Best-
+	// effort and silent — a DB error just means no revive this turn.
+	h.reviveMediaForPost(urlPath)
 	commentSort := r.URL.Query().Get("sort")
 	if commentSort == "" {
 		commentSort = prefs.CommentSort
@@ -248,6 +255,41 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	w.Write(buf.Bytes())
 	h.cacheHTMLAsync(cacheKey, buf.Bytes())
 	return true
+}
+
+// reviveMediaForPost pulls every media URL referenced by the archived post
+// (main media, gallery, thumbnail) and asks the proxy to clear any ledger
+// mark on them. No-op when the post isn't archived yet or has no media. The
+// upstream form is what the media_unavailable rows were recorded against
+// (the local /vid//img/ paths get unfolded by reddit.UnformatURL first).
+func (h *Handler) reviveMediaForPost(urlPath string) {
+	if h.mediaProxy == nil || h.postStore == nil {
+		return
+	}
+	sp, _ := h.postStore.Get(urlPath)
+	if sp == nil || len(sp.JSONData) == 0 {
+		return
+	}
+	var post reddit.Post
+	if err := json.Unmarshal(sp.JSONData, &post); err != nil {
+		return
+	}
+	urls := make([]string, 0, 4+len(post.Gallery))
+	if u := reddit.UnformatURL(post.Media.URL); u != "" {
+		urls = append(urls, u)
+	}
+	if u := reddit.UnformatURL(post.Media.AltURL); u != "" {
+		urls = append(urls, u)
+	}
+	if u := reddit.UnformatURL(post.Thumbnail.URL); u != "" {
+		urls = append(urls, u)
+	}
+	for _, g := range post.Gallery {
+		if u := reddit.UnformatURL(g.URL); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	h.mediaProxy.ReviveMedia(urls)
 }
 
 func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, sp *store.StoredPost, prefs reddit.Preferences, commentSort string, offline bool, degradedReason string, t *reqTimer, cacheKey string) {

@@ -54,6 +54,40 @@ func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (r
 const archivePageSize = 25
 const archiveHubMinPosts = 10
 
+// archiveSubSuggestMinPosts is the minimum archived-post count a sub must
+// have to appear in the navbar search-box `sub:` autocomplete pool. Keeps
+// the suggestion list to subs the user has actually built up rather than
+// every single sub that ever had one post archived.
+const archiveSubSuggestMinPosts = 30
+
+// handleArchiveSubsAPI returns the JSON list of archived sub names with more
+// than archiveSubSuggestMinPosts posts, ordered by post count descending so
+// the most-archived subs appear first in the autocomplete prefix scan. The
+// response is cacheable for a short window — the list changes slowly as new
+// subs cross the threshold via prefetch.
+func (h *Handler) handleArchiveSubsAPI(w http.ResponseWriter, r *http.Request) {
+	if h.postStore == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+	raw, err := h.postStore.ArchivedSubsByTop(archiveSubSuggestMinPosts)
+	if err != nil {
+		log.Printf("handler: archive subs suggest: %v", err)
+		http.Error(w, "", http.StatusInternalServerError)
+		return
+	}
+	names := make([]string, 0, len(raw))
+	for _, rs := range raw {
+		names = append(names, rs.Name)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	if err := json.NewEncoder(w).Encode(names); err != nil {
+		log.Printf("handler: archive subs suggest encode: %v", err)
+	}
+}
+
 // parseArchiveSearch reads the /archive local-search box from the request and
 // converts it into a PostgreSQL query via the shared e621-style query parser.
 // The returned bool reports whether a search is active (an empty box is not).

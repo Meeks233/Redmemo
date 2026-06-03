@@ -437,7 +437,9 @@ func TestIsEnabled(t *testing.T) {
 	}{
 		{"nil settings", nil, false},
 		{"off", &mockSettings{data: map[string]string{"enable_natural_prefetch": "off"}}, false},
-		{"on", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on"}}, true},
+		{"on but no subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on"}}, false},
+		{"on with empty subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on", "prefetch_subs": ""}}, false},
+		{"on with subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on", "prefetch_subs": "sub:golang"}}, true},
 		{"empty", &mockSettings{data: map[string]string{}}, false},
 	}
 
@@ -999,5 +1001,280 @@ func TestCycleState_MidCycleRestore(t *testing.T) {
 	}
 	if loaded.Cursors["golang"] != "t3_mid" {
 		t.Errorf("cursor for golang = %q, want t3_mid", loaded.Cursors["golang"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-sub listing mode (NP custom query) tests
+//
+// Covers the redlib-style `/r/{sub}/{sort}.json?t=...` grammar plumbed through
+// prefetch_sort / prefetch_timeframe / prefetch_sub_modes. Tests intentionally
+// include malformed clauses, whitespace, unknown keys, unknown values and
+// duplicate clauses to assert the parser fails open (falls back to global /
+// default) rather than panicking or producing junk modes.
+// ---------------------------------------------------------------------------
+
+func TestResolveSubMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings SettingsProvider
+		sub      string
+		wantSort string
+		wantTF   string
+	}{
+		// --- defaults / global ------------------------------------------------
+		{
+			name:     "nil settings → hot, tf dropped",
+			settings: nil,
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+		{
+			name:     "empty settings → hot, tf dropped",
+			settings: &mockSettings{data: map[string]string{}},
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+		{
+			name:     "global sort=new → tf dropped (new doesn't honor t)",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "new"}},
+			sub:      "golang",
+			wantSort: "new",
+			wantTF:   "",
+		},
+		{
+			name:     "global sort=top inherits default tf=day",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "top"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "global sort=top + tf=week",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "top", "prefetch_timeframe": "week"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "week",
+		},
+		{
+			name:     "global sort=controversial honors tf",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "controversial", "prefetch_timeframe": "all"}},
+			sub:      "golang",
+			wantSort: "controversial",
+			wantTF:   "all",
+		},
+		{
+			name:     "global tf on hot is silently dropped",
+			settings: &mockSettings{data: map[string]string{"prefetch_timeframe": "year"}},
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+		{
+			name:     "global tf on hot is dropped even with non-matching sub_modes clause",
+			settings: &mockSettings{data: map[string]string{"prefetch_timeframe": "year", "prefetch_sub_modes": "other=sort:top"}},
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+
+		// --- per-sub overrides ------------------------------------------------
+		{
+			name:     "per-sub sort override picks top, inherits default tf=day",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:top"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "per-sub sort+time override",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:top&time:month"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "month",
+		},
+		{
+			name:     "per-sub time-only override on top-default uses alias t:",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "top", "prefetch_sub_modes": "golang=t:hour"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "hour",
+		},
+		{
+			name:     "per-sub timeframe alias",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:top&timeframe:year"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "year",
+		},
+		{
+			name:     "per-sub sort=new drops global tf set in same clause",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:new&time:week"}},
+			sub:      "golang",
+			wantSort: "new",
+			wantTF:   "",
+		},
+		{
+			name:     "per-sub sort=new drops globally set tf",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "top", "prefetch_timeframe": "week", "prefetch_sub_modes": "golang=sort:new"}},
+			sub:      "golang",
+			wantSort: "new",
+			wantTF:   "",
+		},
+		{
+			name:     "case-insensitive sub name match",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "GoLang=sort:rising"}},
+			sub:      "GOLANG",
+			wantSort: "rising",
+			wantTF:   "",
+		},
+		{
+			name:     "case-insensitive keys and values",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=SORT:TOP&TIME:WEEK"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "week",
+		},
+		{
+			name:     "multiple subs picks correct clause",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "suba=sort:rising+subb=sort:top&time:day"}},
+			sub:      "subb",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "sub not listed falls back to global",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "new", "prefetch_sub_modes": "suba=sort:top"}},
+			sub:      "subb",
+			wantSort: "new",
+			wantTF:   "",
+		},
+
+		// --- robustness / malformed input ------------------------------------
+		{
+			name:     "clause missing = is ignored (falls back to global)",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "new", "prefetch_sub_modes": "golang"}},
+			sub:      "golang",
+			wantSort: "new",
+			wantTF:   "",
+		},
+		{
+			name:     "kv missing : is skipped, other kv still applied",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sortTOP&sort:top"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "empty body after = falls back to defaults",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang="}},
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+		{
+			name:     "unknown key is ignored",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=garbage:xyz&sort:top"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "whitespace around clause and kv is tolerated",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "  golang  =  sort : top  &  time : week  "}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "week",
+		},
+		{
+			name:     "duplicate clauses: first match wins",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:top+golang=sort:new"}},
+			sub:      "golang",
+			wantSort: "top",
+			wantTF:   "day",
+		},
+		{
+			name:     "all-empty + separators in sub_modes",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "+++"}},
+			sub:      "golang",
+			wantSort: "hot",
+			wantTF:   "",
+		},
+		{
+			name:     "leading/trailing + with one valid clause",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "+golang=sort:rising+"}},
+			sub:      "golang",
+			wantSort: "rising",
+			wantTF:   "",
+		},
+		{
+			name:     "kv with empty value clears sort then drops tf",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "top", "prefetch_timeframe": "week", "prefetch_sub_modes": "golang=sort:"}},
+			sub:      "golang",
+			wantSort: "",
+			wantTF:   "",
+		},
+		{
+			name:     "garbage clause body without recognized keys falls back to global",
+			settings: &mockSettings{data: map[string]string{"prefetch_sort": "new", "prefetch_sub_modes": "golang=foo:bar&baz:qux"}},
+			sub:      "golang",
+			wantSort: "new",
+			wantTF:   "",
+		},
+		{
+			name:     "unknown sort value passes through unchanged (no validation)",
+			settings: &mockSettings{data: map[string]string{"prefetch_sub_modes": "golang=sort:bogus"}},
+			sub:      "golang",
+			wantSort: "bogus",
+			wantTF:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Scheduler{settings: tt.settings}
+			got := s.resolveSubMode(tt.sub)
+			if got.Sort != tt.wantSort || got.Timeframe != tt.wantTF {
+				t.Errorf("resolveSubMode(%q) = {%q, %q}, want {%q, %q}",
+					tt.sub, got.Sort, got.Timeframe, tt.wantSort, tt.wantTF)
+			}
+		})
+	}
+}
+
+func TestTfSuffix(t *testing.T) {
+	tests := map[string]string{
+		"":     "",
+		"day":  "/day",
+		"week": "/week",
+		"all":  "/all",
+	}
+	for in, want := range tests {
+		if got := tfSuffix(in); got != want {
+			t.Errorf("tfSuffix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCursorKey(t *testing.T) {
+	tests := []struct {
+		name string
+		sub  string
+		mode subMode
+		want string
+	}{
+		{"no timeframe", "golang", subMode{Sort: "hot"}, "golang|hot"},
+		{"with timeframe", "golang", subMode{Sort: "top", Timeframe: "week"}, "golang|top|week"},
+		{"empty sub still keyed", "", subMode{Sort: "new"}, "|new"},
+		{"controversial + all", "rust", subMode{Sort: "controversial", Timeframe: "all"}, "rust|controversial|all"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cursorKey(tt.sub, tt.mode); got != tt.want {
+				t.Errorf("cursorKey(%q, %+v) = %q, want %q", tt.sub, tt.mode, got, tt.want)
+			}
+		})
 	}
 }

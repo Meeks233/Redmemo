@@ -47,7 +47,12 @@ templ settingsPage(d SettingsPageData) {
 
 templ settingsContent(d SettingsPageData) {
 	<div id="settings-wrapper">
-		@warningBanner(T(ctx, "settings.warning_label"), settingsWarnings(ctx, d))
+		@warningBanner(noticeBanner{
+			Kind:  "warning",
+			Icon:  "triangle-alert",
+			Label: T(ctx, "settings.warning_label"),
+			Items: settingsWarnings(ctx, d),
+		})
 		<div id="settings">
 			<div class="settings-column">
 				<form id="settings-form" action="/settings" method="POST">
@@ -243,15 +248,37 @@ templ settingsContent(d SettingsPageData) {
 						<legend>{ T(ctx, "settings.natural_prefetch") }</legend>
 						<div class="prefs-group">
 							<label for="enable_natural_prefetch">{ T(ctx, "settings.enable_np") }</label>
-							<input type="checkbox" id="enable_natural_prefetch" checked?={ d.Prefs.EnableNaturalPrefetch == "on" } onchange="togglePrefetch(this)"/>
+							<input type="checkbox" id="enable_natural_prefetch" checked?={ d.Prefs.EnableNaturalPrefetch == "on" && d.Prefs.PrefetchSubs != "" } onchange="togglePrefetch(this)"/>
 						</div>
-						<div class="prefetch-picker" id="prefetch_picker" style={ displayNoneIf(d.Prefs.EnableNaturalPrefetch != "on") }>
+						<div class="prefetch-picker" id="prefetch_picker" style={ displayNoneIf(d.Prefs.EnableNaturalPrefetch != "on" || d.Prefs.PrefetchSubs == "") }>
 							<div class="prefs-group">
 								<label for="prefetch_threshold">{ T(ctx, "settings.np_threshold") }</label>
 								<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value={ d.Prefs.PrefetchThreshold } style="width:60px" onchange="savePrefetchThreshold(this.value)"/>
 							</div>
+							<div class="prefs-group">
+								<label for="prefetch_sort">{ T(ctx, "settings.np_global_sort") }</label>
+								<select id="prefetch_sort" name="prefetch_sort" form="settings-form">
+									<option value="hot" selected?={ d.Prefs.PrefetchSort == "" || d.Prefs.PrefetchSort == "hot" }>{ T(ctx, "sort.hot") }</option>
+									<option value="new" selected?={ d.Prefs.PrefetchSort == "new" }>{ T(ctx, "sort.new") }</option>
+									<option value="top" selected?={ d.Prefs.PrefetchSort == "top" }>{ T(ctx, "sort.top") }</option>
+									<option value="rising" selected?={ d.Prefs.PrefetchSort == "rising" }>{ T(ctx, "sort.rising") }</option>
+									<option value="controversial" selected?={ d.Prefs.PrefetchSort == "controversial" }>{ T(ctx, "sort.controversial") }</option>
+								</select>
+							</div>
+							<div class="prefs-group">
+								<label for="prefetch_timeframe">{ T(ctx, "settings.np_global_timeframe") }</label>
+								<select id="prefetch_timeframe" name="prefetch_timeframe" form="settings-form">
+									<option value="hour" selected?={ d.Prefs.PrefetchTimeframe == "hour" }>{ T(ctx, "time.hour") }</option>
+									<option value="day" selected?={ d.Prefs.PrefetchTimeframe == "" || d.Prefs.PrefetchTimeframe == "day" }>{ T(ctx, "time.day") }</option>
+									<option value="week" selected?={ d.Prefs.PrefetchTimeframe == "week" }>{ T(ctx, "time.week") }</option>
+									<option value="month" selected?={ d.Prefs.PrefetchTimeframe == "month" }>{ T(ctx, "time.month") }</option>
+									<option value="year" selected?={ d.Prefs.PrefetchTimeframe == "year" }>{ T(ctx, "time.year") }</option>
+									<option value="all" selected?={ d.Prefs.PrefetchTimeframe == "all" }>{ T(ctx, "time.all") }</option>
+								</select>
+							</div>
 							<div class="sub-picker-search">
-								<input type="text" id="prefetch_sub_search" name="prefetch_subs" form="settings-form" value={ d.PrefetchQuery } placeholder={ T(ctx, "settings.np_filter_placeholder") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
+								<label for="prefetch_unified" title={ T(ctx, "settings.np_unified_title") }>{ T(ctx, "settings.np_unified") }</label>
+								<textarea id="prefetch_unified" name="prefetch_unified" form="settings-form" rows="2" placeholder={ T(ctx, "settings.np_unified_placeholder") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">{ d.PrefetchUnified }</textarea>
 							</div>
 							<div class="sub-picker-list" id="prefetch_sub_list"></div>
 						</div>
@@ -396,14 +423,15 @@ templ settingsContent(d SettingsPageData) {
 		// field-sizing:content — no JS height tracking) that is part of the settings
 		// form (form="settings-form") and submitted on Save. It accepts the full
 		// navbar search grammar; the Go backend parses, validates and normalizes it
-		// — there is no picker or capsule logic here. The NP field (#prefetch_sub_search,
-		// name="prefetch_subs", form="settings-form") is likewise part of the form and
-		// persisted on Save; it just keeps a lightweight subreddit suggestion list,
-		// where a pick appends "+name" to the simple a+b+c value. NPPicker.onChange
-		// (fired on blur and on each pick) only flags the form dirty so the Save bar
-		// appears — the actual persist happens through the normal form submit.
+		// — there is no picker or capsule logic here. The NP field (#prefetch_unified,
+		// name="prefetch_unified", form="settings-form") is likewise part of the form
+		// and persisted on Save; the backend splits the merged '+'-separated stream
+		// into prefetch_subs and prefetch_sub_modes on save. The picker just keeps a
+		// lightweight subreddit-suggestion list and appends bare "+name" entries;
+		// override clauses must be hand-typed. NPPicker.onChange (fired on blur and on
+		// each pick) only flags the form dirty so the Save bar appears.
 		var prefetchPicker = NPPicker({
-			inputId: 'prefetch_sub_search',
+			inputId: 'prefetch_unified',
 			listId: 'prefetch_sub_list',
 			onChange: function() { checkDirty(); }
 		});
@@ -436,7 +464,7 @@ templ settingsContent(d SettingsPageData) {
 		// The homepage filter and its disable toggle live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_sub_search', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
+		['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});

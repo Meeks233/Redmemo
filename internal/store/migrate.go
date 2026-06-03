@@ -515,6 +515,49 @@ var migrations = []string{
 	// every existing row. NOT NULL is safe because the default fills the backfill
 	// in one rewrite.
 	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS upstream_removed BOOLEAN NOT NULL DEFAULT FALSE;`,
+
+	// v27: unified ban/unavailable ledger for individual media URLs. A removed
+	// post can leave its media URLs serving 403/404 forever even when the post
+	// JSON itself is happily cached; without this table every poll on
+	// /api/audio_status (and every imageReload.js retry) re-spawns a fetch that
+	// re-hits the Reddit CDN, burning quota and inviting IP-level throttling.
+	// Threshold is enforced in the store layer (default 3): below it the
+	// fetcher keeps trying; at/above it marked_unavailable_at is stamped and
+	// the proxy short-circuits future requests with a placeholder until the
+	// user actively re-visits the owning post (handler.servePost calls Revive
+	// on every URL it can scrape from the post JSON, which clears the mark and
+	// re-allows one more attempt).
+	`CREATE TABLE IF NOT EXISTS media_unavailable (
+		canonical_key         TEXT PRIMARY KEY,
+		raw_url               TEXT NOT NULL,
+		host                  TEXT NOT NULL,
+		kind                  TEXT NOT NULL,
+		fail_count            INT  NOT NULL DEFAULT 0,
+		last_status           INT  NOT NULL DEFAULT 0,
+		last_error            TEXT,
+		reason                TEXT,
+		first_failed_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		last_attempt_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		marked_unavailable_at TIMESTAMPTZ,
+		revived_at            TIMESTAMPTZ
+	 );
+	 CREATE INDEX IF NOT EXISTS idx_media_unavailable_host   ON media_unavailable (host);
+	 CREATE INDEX IF NOT EXISTS idx_media_unavailable_marked ON media_unavailable (marked_unavailable_at)
+	    WHERE marked_unavailable_at IS NOT NULL;`,
+
+	// v28: two-tier ban state. marked_unavailable_at alone was ambiguous — the
+	// proxy treated every marked URL as "transiently bad, retry on next user
+	// visit" which is correct for a 503 burst but wrong for an asset we have
+	// proven is gone. dead_at is the terminal escalation: set the first time a
+	// previously-revived URL fails again (the user actively asked us to retry,
+	// Reddit said no again, that's the assertion the asset is dead). A dead
+	// row is permanently refused — Revive skips it and the proxy never spawns
+	// another fetch. The "uncertain" tier (marked but not dead) keeps the old
+	// question-mark placeholder + revive-on-visit; the "dead" tier flips to the
+	// "Sorry, we missed it…" X-icon card and removes all retry affordance.
+	`ALTER TABLE media_unavailable ADD COLUMN IF NOT EXISTS dead_at TIMESTAMPTZ;
+	 CREATE INDEX IF NOT EXISTS idx_media_unavailable_dead ON media_unavailable (dead_at)
+	    WHERE dead_at IS NOT NULL;`,
 }
 
 func RunMigrations(db *sql.DB) error {

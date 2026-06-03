@@ -25,12 +25,13 @@ import (
 )
 
 type Proxy struct {
-	rootPath    string
-	useNginx    bool
-	mediaStore  *store.MediaIndexStore
-	cache       *cache.Cache
-	httpClient  httpDoer
-	userAgentFn func() string
+	rootPath          string
+	useNginx          bool
+	mediaStore        *store.MediaIndexStore
+	unavailableStore  *store.MediaUnavailableStore
+	cache             *cache.Cache
+	httpClient        httpDoer
+	userAgentFn       func() string
 
 	// failMu guards failures, an in-memory note of URLs whose upstream fetch
 	// returned a terminal 404/410. Reddit's signed preview URLs (preview.redd.it
@@ -58,11 +59,12 @@ type httpDoer interface {
 // UAs from the same IP within seconds, defeating the single-identity model.
 // The injected closure is expected to block during the cold-start window
 // rather than fall back to a pool UA — see TokenHolder.WaitForUserAgent.
-func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, c *cache.Cache, userAgentFn func() string) *Proxy {
+func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, unavailableStore *store.MediaUnavailableStore, c *cache.Cache, userAgentFn func() string) *Proxy {
 	return &Proxy{
-		rootPath:   cfg.RootPath,
-		mediaStore: mediaStore,
-		cache:      c,
+		rootPath:         cfg.RootPath,
+		mediaStore:       mediaStore,
+		unavailableStore: unavailableStore,
+		cache:            c,
 		// Reddit's media CDNs (v.redd.it / i.redd.it) increasingly stall or
 		// reset connections whose TLS handshake doesn't look like a browser's.
 		// Use the same uTLS-spoofed transport every other Reddit-facing client
@@ -98,6 +100,24 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 	// on-demand request never races the prefetch L2 layer at the same file.
 	meta, err := p.ensureCached(r.Context(), originalURL)
 	if err != nil {
+		if err == errMediaUnavailable {
+			// Persistent ledger refused the fetch. Pick the placeholder by
+			// state: "?" for marked-but-revivable, "X / Sorry, we missed it"
+			// for terminal dead. Non-image consumers (direct nav, <video>)
+			// get the same SVG body — better than a stalled player or a
+			// 503 the browser surfaces as a broken-media icon.
+			p.serveUnavailableMarker(w, r, p.unavailableState(originalURL))
+			return
+		}
+		if err == errPermFailed {
+			// Upstream is 404/410 forever (expired signed CDN URL,
+			// external host gone). Treat as terminal so users see the
+			// honest "Sorry, we missed it" placeholder instead of a
+			// browser broken-image icon — same outcome as a dead ledger
+			// entry, without needing 3 failures to accumulate.
+			p.serveUnavailableMarker(w, r, store.StateDead)
+			return
+		}
 		log.Printf("media: serve failed for %s: %v", originalURL, err)
 		p.serveUnavailable(w, r, originalURL)
 		return
@@ -312,6 +332,10 @@ func (p *Proxy) IsFetching(originalURL string) bool {
 
 // ensureCached returns a valid cached media file for originalURL, fetching it
 // — deduplicated and concurrency-capped — only when it is not already on disk.
+// The media_unavailable ledger is consulted first: a URL marked unavailable
+// (typically the owning post was banned and the CDN now 403s every byte
+// request) short-circuits with errMediaUnavailable so the proxy stops hammering
+// Reddit until the user re-opens the post (handler revives the URL then).
 func (p *Proxy) ensureCached(ctx context.Context, originalURL string) (*store.MediaMeta, error) {
 	if meta := p.cachedMedia(originalURL); meta != nil {
 		return meta, nil
@@ -319,10 +343,71 @@ func (p *Proxy) ensureCached(ctx context.Context, originalURL string) (*store.Me
 	if p.isPermFailed(originalURL) {
 		return nil, errPermFailed
 	}
+	if p.isUnavailable(originalURL) {
+		return nil, errMediaUnavailable
+	}
 	return p.fetchOnce(ctx, originalURL)
 }
 
-var errPermFailed = fmt.Errorf("upstream permanently unavailable")
+var (
+	errPermFailed       = fmt.Errorf("upstream permanently unavailable")
+	errMediaUnavailable = fmt.Errorf("media marked unavailable in ledger")
+)
+
+// unavailableState consults the persistent ledger. Returns "alive" for the
+// no-record / not-marked case (proxy proceeds normally), "unavailable" for the
+// soft state (proxy refuses but a Revive may bring it back), or "dead" for the
+// terminal state (proxy refuses and no Revive can rescue it). A read error
+// logs and answers "alive" so a flaky DB never silently disables the entire
+// media path.
+func (p *Proxy) unavailableState(originalURL string) string {
+	if p.unavailableStore == nil {
+		return store.StateAlive
+	}
+	st, err := p.unavailableStore.State(originalURL)
+	if err != nil {
+		log.Printf("media: state lookup for %s: %v", originalURL, err)
+		return store.StateAlive
+	}
+	return st
+}
+
+// isUnavailable is a thin convenience over unavailableState for the many call
+// sites that only need a boolean. Both soft and terminal states refuse the
+// fetch — only the placeholder picker cares about the distinction.
+func (p *Proxy) isUnavailable(originalURL string) bool {
+	return p.unavailableState(originalURL) != store.StateAlive
+}
+
+// ReviveMedia clears the "unavailable" mark on a set of raw URLs so the proxy
+// will attempt them once more. Called by the post handler when a user opens
+// the owning post: the assumption is that an active visit is fresh signal we
+// should re-probe at most one more time before re-marking on the next failure.
+// Both bare URLs (preview/i.redd.it/...) and v.redd.it segment URLs are
+// accepted; the muxed:<url> alias is handled by the underlying canonical key
+// derivation, so callers don't need to pre-wrap.
+func (p *Proxy) ReviveMedia(rawURLs []string) {
+	if p.unavailableStore == nil || len(rawURLs) == 0 {
+		return
+	}
+	if err := p.unavailableStore.Revive(rawURLs); err != nil {
+		log.Printf("media: revive %d urls: %v", len(rawURLs), err)
+	}
+}
+
+// recordUnavailable bumps the failure counter on the persistent ledger, with
+// the project-standard threshold of 3. status==0 covers network errors. Safe
+// to call when the store is nil (tests).
+func (p *Proxy) recordUnavailable(originalURL string, status int, errMsg string) {
+	if p.unavailableStore == nil {
+		return
+	}
+	if _, _, err := p.unavailableStore.RecordFailure(
+		originalURL, "", status, errMsg, store.DefaultUnavailableThreshold,
+	); err != nil {
+		log.Printf("media: record unavailable for %s: %v", originalURL, err)
+	}
+}
 
 // markPermFailed records originalURL as known-bad so subsequent ensureCached /
 // MediaStatus calls fail fast instead of re-fetching a doomed CDN URL. Called
@@ -374,7 +459,13 @@ func (p *Proxy) fetchOnce(ctx context.Context, originalURL string) (*store.Media
 		call.meta = meta
 	} else {
 		fetchSem <- struct{}{}
-		workCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		// 10s ceiling per on-demand image fetch: an upstream that hasn't
+		// produced bytes by then is treated as unreachable, the failure
+		// feeds the unavailable ledger, and the page falls back to the
+		// "Sorry, we missed it" placeholder instead of leaving the
+		// imageReload spinner spinning for minutes against a dead host
+		// (expired external-preview signatures, gone imgur assets, etc.).
+		workCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		call.meta, call.err = p.Download(workCtx, originalURL)
 		cancel()
 		<-fetchSem
@@ -409,7 +500,21 @@ func (p *Proxy) MediaStatus(originalURL string) string {
 		return "ready"
 	}
 	if p.isPermFailed(originalURL) {
-		return "failed"
+		// Treat permanent 404/410 as terminal "dead" so imageReload.js
+		// reloads the slot and the proxy answers with the X-icon
+		// "Sorry, we missed it" placeholder. Returning "failed" here
+		// instead left the user staring at the browser's native broken-
+		// image icon — most visible on old posts whose external-preview
+		// signed URL has long since expired (e.g. embedded imgur links).
+		return "dead"
+	}
+	// "unavailable" = soft state (question-mark placeholder, revive on visit);
+	// "dead" = terminal (X-icon "Sorry, we missed it…", never retried).
+	switch p.unavailableState(originalURL) {
+	case store.StateUnavailable:
+		return "unavailable"
+	case store.StateDead:
+		return "dead"
 	}
 	p.startBackgroundDownload(originalURL)
 	return "pending"
@@ -422,6 +527,84 @@ func (p *Proxy) MediaStatus(originalURL string) string {
 // Firefox, and WebKit; SMIL is kept as a belt-and-suspenders fallback but on
 // a separate sub-element so the two don't both fight for the same transform.
 const loaderSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform-origin="12 12"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></g></svg>`
+
+// placeholderCardCSS bakes the exact tokens style.css resolves for
+// .media-unavailable-card (audioSync.js's <video> placeholder) into the
+// SVG so a standalone SVG-served-as-<img> looks the same as the card,
+// per theme. SVG-as-<img> can't inherit page CSS or read theme classes,
+// so the only variants we can honour are the two `prefers-color-scheme`
+// flavours — Tokyo Night (a .tokyoNight class) falls back to the dark
+// defaults, matching the audioSync card on the same page.
+//
+//   token        dark (default)   light
+//   --background #0f0f0f          #ddd
+//   --highlighted #333            white
+//   --accent     #d54455          #bb2b3b
+//   --text       white            black
+const placeholderCardCSS = `<style>
+.card-bg{fill:#0f0f0f;stroke:#333}
+.card-icon{stroke:#d54455;opacity:.75}
+.card-title{fill:#fff}
+.card-hint{fill:#fff;opacity:.7}
+@media (prefers-color-scheme: light){
+.card-bg{fill:#ddd;stroke:#fff}
+.card-icon{stroke:#bb2b3b}
+.card-title{fill:#000}
+.card-hint{fill:#000;opacity:.7}
+}
+</style>`
+
+// uncertainSVG (lucide circle-question-mark) is the SOFT placeholder served
+// while the URL is marked but not yet dead — we tried, failed N times, but
+// the user can still revive the row by reopening the post. Visually mirrors
+// the .media-unavailable-card audioSync.js uses for <video>: dashed border,
+// accent-coloured icon, 600-weight title, dimmer hint. Colours are baked from
+// the page's theme tokens (see placeholderCardCSS) because SVG-as-<img>
+// inherits no page CSS.
+const uncertainSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Media temporarily unavailable">
+` + placeholderCardCSS + `
+<rect class="card-bg" x="6" y="6" width="308" height="188" rx="6" ry="6" stroke-width="1" stroke-dasharray="4 3"/>
+<g class="card-icon" transform="translate(136 36) scale(2)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="12" cy="12" r="10"/>
+<path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+<path d="M12 17h.01"/>
+</g>
+<text class="card-title" x="160" y="148" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="16" font-weight="600">Media temporarily unavailable</text>
+<text class="card-hint" x="160" y="172" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="12">Reopen the post to retry</text>
+</svg>`
+
+// deadSVG (lucide X) is the TERMINAL placeholder: ledger says dead_at IS NOT
+// NULL, the URL has already burned one user-triggered retry, and we will never
+// hit Reddit for it again. Same card aesthetic as uncertainSVG, with the X
+// glyph and the honest "Sorry, we missed it" caption.
+const deadSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Sorry, we missed archiving this media">
+` + placeholderCardCSS + `
+<rect class="card-bg" x="6" y="6" width="308" height="188" rx="6" ry="6" stroke-width="1" stroke-dasharray="4 3"/>
+<g class="card-icon" transform="translate(136 36) scale(2)" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M18 6 6 18"/>
+<path d="m6 6 12 12"/>
+</g>
+<text class="card-title" x="160" y="148" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="16" font-weight="600">Sorry, we missed it…</text>
+<text class="card-hint" x="160" y="172" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="12">Reddit removed this before we could archive it</text>
+</svg>`
+
+// serveUnavailableMarker writes the right placeholder for the given ledger
+// state: uncertainSVG for "marked but revivable", deadSVG for "terminal".
+// 200 OK so <img> renders the SVG inline rather than triggering imageReload.js's
+// spinner; "no-store" so a later Revive doesn't get masked by a cached
+// placeholder. X-Media-State carries the state for client-side diagnostics.
+func (p *Proxy) serveUnavailableMarker(w http.ResponseWriter, r *http.Request, state string) {
+	body := uncertainSVG
+	if state == store.StateDead {
+		body = deadSVG
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("X-Media-State", state)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, body)
+}
 
 func serveLoader(w http.ResponseWriter, status int) {
 	w.Header().Set("Content-Type", "image/svg+xml")
@@ -497,6 +680,10 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 		if status == http.StatusNotFound || status == http.StatusGone {
 			p.markPermFailed(originalURL)
 		}
+		// 4xx/5xx and network errors all feed the persistent unavailable
+		// ledger: three strikes parks the URL until the user actively
+		// re-opens the owning post (handler.servePost revives).
+		p.recordUnavailable(originalURL, status, err.Error())
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 
@@ -746,5 +933,10 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 		(total >= 0 && offset >= total) || (total < 0 && n < mediaChunkSize) {
 		return
 	}
-	_, _, _, _ = p.streamRangedTo(r.Context(), targetURL, offset, conditional, w)
+	// Response headers are already committed; on failure the client gets a
+	// truncated body. Log so the truncation isn't silent — there's no clean
+	// abort path left.
+	if status, _, _, err := p.streamRangedTo(r.Context(), targetURL, offset, conditional, w); err != nil || (status != 0 && status != http.StatusOK && status != http.StatusPartialContent) {
+		log.Printf("proxy: ranged continuation failed offset=%d status=%d url=%s err=%v", offset, status, targetURL, err)
+	}
 }

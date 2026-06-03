@@ -1,21 +1,29 @@
-// NPPicker enhances the Natural-Prefetch filter field, whose value is the simple
-// "a+b+c" subreddit list (NOT the full search grammar — the homepage filter is a
-// plain backend-validated text box with no picker at all). The list below is a
-// subreddit-suggestion helper: clicking a result appends "+name" to the value,
-// so the user builds up suba+subb+subc by picking. Suggestions are sourced from
-// the locally-known subs (window._allSubs, seeded from the DB sub tables); a sub
-// not found locally can be probed upstream once via /api/probe-sub, so we are
-// neither always hitting Reddit nor limited to purely local names.
+// NPPicker enhances the Natural-Prefetch field. The merged textarea carries a
+// single '+'-separated stream where each clause is either a bare subreddit
+// name ("golang") or a per-sub override clause ("cats=sort:rising&time:day").
+// Clicking a suggestion appends "+name" as a bare clause; the user can then
+// hand-edit any clause to attach an override. Suggestions are sourced from the
+// locally-known subs (window._allSubs, seeded from the DB sub tables); a sub
+// not found locally can be probed upstream once via /api/probe-sub.
 //
-// The Go backend re-validates and normalizes whatever is submitted (dropping
-// dead/invalid subs), then echoes the accepted a+b+c form back on reload, so the
-// parsing here only needs to be good enough to drive the suggestion UI.
+// The Go backend re-validates and normalizes whatever is submitted (splitting
+// the unified stream back into prefetch_subs and prefetch_sub_modes, dropping
+// dead/invalid subs), then echoes the canonical merged form back on reload, so
+// the parsing here only needs to be good enough to drive the suggestion UI.
 function NPPicker(opts) {
 	var inputEl = document.getElementById(opts.inputId);
 	var listEl = document.getElementById(opts.listId);
 	var onChange = opts.onChange || function () {};
 
 	if (!inputEl || !listEl) return null;
+
+	// clauseSub strips any "=k:v..." override tail and the optional r/ prefix,
+	// returning the bare lowercase sub name (or '' if the clause is empty).
+	function clauseSub(raw) {
+		var eq = raw.indexOf('=');
+		if (eq >= 0) raw = raw.substring(0, eq);
+		return raw.replace(/^\/?r\//i, '').trim().toLowerCase();
+	}
 
 	function normalizeSub(raw) {
 		return raw.replace(/^\/?r\//i, '').trim().toLowerCase();
@@ -29,40 +37,48 @@ function NPPicker(opts) {
 	}
 
 	// trailingPartial is the fragment after the last '+' the caret is on, but only
-	// when it's an incomplete name. A trailing fragment that already matches a
-	// known sub counts as "finished", so the list falls back to top-sub picks the
-	// user can append.
+	// when it's an incomplete BARE name. A clause containing '=' is an override
+	// being typed — treat it as finished so the suggestion list reverts to top
+	// picks instead of trying to autocomplete the override grammar.
 	function trailingPartial() {
 		var parts = inputEl.value.split('+');
-		var n = normalizeSub(parts[parts.length - 1]);
+		var last = parts[parts.length - 1];
+		if (last.indexOf('=') >= 0) return '';
+		var n = normalizeSub(last);
 		return (n !== '' && !isKnownSub(n)) ? n : '';
 	}
 
-	// includedSet collects the names already committed to the value (every '+'
-	// token except a still-being-typed trailing partial) so they're hidden from
-	// the suggestion list.
+	// includedSet collects the sub names already committed to the value — both
+	// bare clauses and override clauses (which we reduce to their sub name) —
+	// so they're hidden from the suggestion list. A still-being-typed trailing
+	// bare partial doesn't count yet.
 	function includedSet() {
 		var set = {};
 		var parts = inputEl.value.split('+');
 		for (var i = 0; i < parts.length; i++) {
-			var n = normalizeSub(parts[i]);
-			if (i === parts.length - 1 && n !== '' && !isKnownSub(n)) continue;
+			var hasEq = parts[i].indexOf('=') >= 0;
+			var n = clauseSub(parts[i]);
+			if (!hasEq && i === parts.length - 1 && n !== '' && !isKnownSub(n)) continue;
 			if (n) set[n] = true;
 		}
 		return set;
 	}
 
-	// addSub merges name into the a+b+c value. A partial being typed is completed
-	// in place; otherwise name is appended as a new "+name" token.
+	// addSub merges name into the unified value. A bare partial being typed at
+	// the tail is completed in place; otherwise name is appended as a new bare
+	// "+name" token. Existing override clauses are preserved verbatim — the
+	// picker only ever adds a bare entry, the user can hand-attach overrides.
 	function addSub(name) {
 		var parts = inputEl.value.split('+');
-		var last = normalizeSub(parts[parts.length - 1]);
-		if (last !== '' && !isKnownSub(last)) {
-			parts[parts.length - 1] = name; // complete the partial
+		var lastRaw = parts[parts.length - 1];
+		var lastHasEq = lastRaw.indexOf('=') >= 0;
+		var last = normalizeSub(lastRaw);
+		if (!lastHasEq && last !== '' && !isKnownSub(last)) {
+			parts[parts.length - 1] = name; // complete the bare partial
 		} else if (last === '') {
 			parts[parts.length - 1] = name; // trailing '+' or empty box
 		} else {
-			parts.push(name); // trailing token is a finished sub → append another
+			parts.push(name); // trailing token is a finished clause → append another
 		}
 		inputEl.value = parts.filter(function (p) { return p.trim() !== ''; }).join('+');
 		onChange(inputEl.value);

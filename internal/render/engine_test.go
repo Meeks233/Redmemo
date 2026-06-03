@@ -54,8 +54,13 @@ func TestRenderError(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body := w.Body.String()
+	// All errors now route through the /fuckreddit design — the page renders
+	// the localized internal_error reason and the broken-heart icon.
 	if !strings.Contains(body, "Something went wrong") {
-		t.Errorf("body should contain error message, got %d bytes", len(body))
+		t.Errorf("body should contain the internal_error reason text, got %d bytes", len(body))
+	}
+	if !strings.Contains(body, "heart-broken") {
+		t.Error("body should contain the unified heart-broken SVG")
 	}
 	if !strings.Contains(body, "TestBrand") {
 		t.Errorf("body should contain brand name TestBrand")
@@ -70,8 +75,12 @@ func TestRenderError404(t *testing.T) {
 	if w.Result().StatusCode != 404 {
 		t.Errorf("status = %d, want 404", w.Result().StatusCode)
 	}
-	if !strings.Contains(w.Body.String(), "Not Found") {
-		t.Error("body should contain 'Not Found'")
+	body := w.Body.String()
+	if !strings.Contains(body, "heart-broken") {
+		t.Error("body should render the unified fuckreddit broken-heart design")
+	}
+	if !strings.Contains(body, "All sources exhausted") {
+		t.Error("body should render the fuckreddit 'exhausted' legend")
 	}
 }
 
