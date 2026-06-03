@@ -154,33 +154,25 @@ func filterValidSubsList(names []string) []string {
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 
-	var postCount, subCount int64
+	snap := h.stats.get(h)
+	postCount := snap.postCount
+	subCount := snap.subCount
 	var subStats []render.SubredditStatView
-	if h.postStore != nil {
-		postCount, _ = h.postStore.Count()
-		subCount, _ = h.postStore.SubredditCount()
-		if stats, err := h.postStore.SubredditStats(10, 10); err == nil {
-			for _, s := range stats {
-				subStats = append(subStats, render.SubredditStatView{
-					Name:      s.Name,
-					PostCount: s.PostCount,
-				})
-			}
-		}
+	for _, s := range snap.subStats {
+		subStats = append(subStats, render.SubredditStatView{
+			Name:      s.Name,
+			PostCount: s.PostCount,
+		})
 	}
-
-	var mediaCount, mediaSize int64
-	if h.mediaStore != nil {
-		mediaCount, mediaSize, _ = h.mediaStore.Stats()
-	}
+	mediaCount, mediaSize := snap.mediaCount, snap.mediaSize
 
 	// prefetch_subs holds a query in the unified search grammar; the configured
 	// subs are its sub: includes. Used only to surface per-sub stats below.
+	// h.siteDefaults already mirrors the settings table (refreshed on every
+	// save), so consult it instead of issuing another DB round-trip.
 	var prefetchSubs []string
-	if h.settingsStore != nil {
-		if v, ok, _ := h.settingsStore.Get("prefetch_subs"); ok && v != "" {
-			prefetchSubs = searchquery.Parse(v).WhiteSubs
-		}
+	if v := h.siteDefaults["prefetch_subs"]; v != "" {
+		prefetchSubs = searchquery.Parse(v).WhiteSubs
 	}
 
 	if h.postStore != nil && len(prefetchSubs) > 0 {
@@ -199,15 +191,8 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var archivedSubs []string
-	if h.postStore != nil {
-		archivedSubs, _ = h.postStore.DistinctSubreddits()
-	}
-
-	var liveSubs []string
-	if h.subStatusStore != nil {
-		liveSubs, _ = h.subStatusStore.ListLive()
-	}
+	archivedSubs := snap.distinctSubs
+	liveSubs := snap.liveSubs
 
 	selectedCounts := make(map[string]int)
 	var selectedNames []string
@@ -239,12 +224,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	prefetchQuery := searchquery.JoinSubs(prefetchSubs)
 
-	var archiveControl string
-	if h.settingsStore != nil {
-		if v, ok, _ := h.settingsStore.Get("archive_control"); ok {
-			archiveControl = v
-		}
-	}
+	archiveControl := h.siteDefaults["archive_control"]
 
 	data := render.SettingsPageData{
 		BasePage: render.BasePage{

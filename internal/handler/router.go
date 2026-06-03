@@ -46,6 +46,7 @@ type Handler struct {
 	cfg           *config.Config
 	siteDefaults  map[string]string
 	auth          *AuthManager
+	stats         statsCache
 }
 
 // WithAuth wires the settings auth gate. Optional — when nil the gate is

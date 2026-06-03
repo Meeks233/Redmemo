@@ -433,15 +433,11 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Archive stats
-	postCount, _ := h.postStore.Count()
-	subCount, _ := h.postStore.SubredditCount()
-	details = append(details, fmt.Sprintf("Archived posts: %d", postCount))
-	details = append(details, fmt.Sprintf("Archived subreddits: %d", subCount))
-
-	// Media stats
-	mediaCount, mediaSize, _ := h.mediaStore.Stats()
-	details = append(details, fmt.Sprintf("Cached media: %d files, %s", mediaCount, formatBytes(mediaSize)))
+	// Archive + media stats (shared TTL'd snapshot with /settings)
+	snap := h.stats.get(h)
+	details = append(details, fmt.Sprintf("Archived posts: %d", snap.postCount))
+	details = append(details, fmt.Sprintf("Archived subreddits: %d", snap.subCount))
+	details = append(details, fmt.Sprintf("Cached media: %d files, %s", snap.mediaCount, formatBytes(snap.mediaSize)))
 
 	// Config
 	details = append(details, fmt.Sprintf("Listen: %s", h.cfg.Server.Listen))
