@@ -90,6 +90,9 @@
   "post.archive_short": "archive",
   "post.download": "download",
   "post.download_short": "dl",
+  "post.time_machine": "Time Machine",
+  "post.time_machine_title": "Removed upstream — served from local archive",
+  "post.time_machine_notice": "Time Machine — this post was removed upstream and is served from RedMemo's local archive.",
 
   "poll.votes": "%v votes,",
 

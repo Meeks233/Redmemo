@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -25,7 +26,15 @@ func (h *Handler) handleUserPost(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id string) {
 	t := newReqTimer()
 	prefs := h.readPreferences(r)
+	// DB rows are keyed by reddit.Post.Permalink, which always ends in "/".
+	// The trailing-slash middleware strips that off the request URL before we
+	// arrive here, so Get(r.URL.Path) would never match an archived row.
+	// Re-append the slash so the upstream_removed gate and archive fallback
+	// actually find the stored copy.
 	urlPath := r.URL.Path
+	if !strings.HasSuffix(urlPath, "/") {
+		urlPath += "/"
+	}
 	commentSort := r.URL.Query().Get("sort")
 	if commentSort == "" {
 		commentSort = prefs.CommentSort
@@ -49,17 +58,22 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	}
 	t.mark("cache")
 
-	// 2. HR gate / OAuth quota
+	// 2. HR gate / OAuth quota. If a prior fetch already tagged this permalink
+	// upstream_removed=true we skip the upstream call entirely — there is
+	// nothing useful left to fetch and re-asking would just burn quota.
 	degrade, reason := h.shouldDegrade(r.Context())
-	if !degrade {
+	storedPost, _ := h.postStore.Get(urlPath)
+	if !degrade && (storedPost == nil || !storedPost.UpstreamRemoved) {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t, cacheKey) {
 			return
 		}
+		// renderPostFallback may have just flipped upstream_removed; re-read so
+		// the archive render below sees the Time Machine badge in this turn.
+		storedPost, _ = h.postStore.Get(urlPath)
 	}
 
 	// 3. Archive fallback. offline=true only when upstream actually failed
 	// (reason==""); when degraded, only the amber degraded banner shows.
-	storedPost, _ := h.postStore.Get(urlPath)
 	if storedPost != nil {
 		h.renderPostFromArchive(w, r, storedPost, prefs, commentSort, reason == "", reason, t, cacheKey)
 		return
@@ -72,6 +86,11 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {
 	existing, _ := h.postStore.Get(urlPath)
 	if existing != nil && time.Since(existing.LastUpdated) < 10*time.Minute {
+		return
+	}
+	// Removed-upstream is sticky: skip the background fetch so we never burn
+	// quota re-confirming a permalink Reddit will not give back.
+	if existing != nil && existing.UpstreamRemoved {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -119,12 +138,26 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		h.archiver.ArchivePost(&post, sub, "manual_refresh")
-		h.archiver.ArchiveComments(post.Permalink, comments)
-	}()
+	urlPath := "/r/" + sub + "/comments/" + id + "/"
+	// Removed upstream: do NOT spawn ArchivePost (it would no-op anyway thanks
+	// to its post.Removed guard) — instead synchronously flip upstream_removed
+	// on the existing row before invalidating the HTML cache, so the reload
+	// triggered by this 200 response goes straight to the archive render with
+	// the Time Machine badge instead of catching a stale cached page.
+	if post.Removed {
+		if existing, _ := h.postStore.Get(urlPath); existing != nil && !existing.UpstreamRemoved {
+			if err := h.postStore.MarkUpstreamRemoved(urlPath); err != nil {
+				log.Printf("handler: mark upstream removed %s: %v", urlPath, err)
+			}
+		}
+		go h.archiver.ArchiveComments(post.Permalink, comments)
+	} else {
+		go func() {
+			h.archiver.ArchivePost(&post, sub, "manual_refresh")
+			h.archiver.ArchiveComments(post.Permalink, comments)
+		}()
+	}
 
-	urlPath := "/r/" + sub + "/comments/" + id
 	// HTML cache keys now embed a prefs fingerprint; drop every variant under
 	// this URL path in one SCAN rather than enumerating known languages.
 	if err := h.cache.InvalidateHTMLPrefix(r.Context(), urlPath); err != nil {
@@ -167,6 +200,23 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	}
 	post, comments := res.post, res.comments
 
+	// If upstream now says the post is removed and we have a prior archive
+	// copy, flip the sticky verdict and bail out to the archive renderer in
+	// servePost — that path already shows the Time Machine badge from the
+	// stored JSON. With no prior archive there is nothing to fall back to, so
+	// we keep going and render the removed payload upstream gave us.
+	if post.Removed {
+		urlPath := "/r/" + sub + "/comments/" + id + "/"
+		if existing, _ := h.postStore.Get(urlPath); existing != nil {
+			if !existing.UpstreamRemoved {
+				if err := h.postStore.MarkUpstreamRemoved(urlPath); err != nil {
+					log.Printf("handler: mark upstream removed %s: %v", urlPath, err)
+				}
+			}
+			return false
+		}
+	}
+
 	if sp, _ := h.postStore.Get(post.Permalink); sp != nil {
 		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 	}
@@ -207,6 +257,13 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+	// The sticky upstream_removed verdict on the StoredPost row drives the
+	// Time Machine badge. Old archive JSON that pre-dates the Removed field
+	// keeps Removed=false in the JSON itself; the DB row is the source of
+	// truth here, so OR them together.
+	if sp.UpstreamRemoved {
+		post.Removed = true
+	}
 
 	var comments []reddit.Comment
 	stored, _ := h.commentStore.GetLatest(sp.URLPath)

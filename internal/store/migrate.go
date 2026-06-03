@@ -506,6 +506,15 @@ var migrations = []string{
 	// again and learns the real verdict. NOT NULL is safe because the default
 	// covers backfill in a single rewrite.
 	`ALTER TABLE sub_icons ADD COLUMN IF NOT EXISTS has_icon BOOLEAN NOT NULL DEFAULT TRUE;`,
+
+	// v26: sticky upstream-removed verdict on archived posts. Once Reddit reports
+	// a permalink as removed/deleted (removed_by_category set, selftext
+	// "[removed]"/"[deleted]", or author "[deleted]" with empty self-body) we
+	// flip upstream_removed=TRUE and stop overwriting the archived JSON or
+	// re-requesting that permalink. Default FALSE preserves prior behaviour for
+	// every existing row. NOT NULL is safe because the default fills the backfill
+	// in one rewrite.
+	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS upstream_removed BOOLEAN NOT NULL DEFAULT FALSE;`,
 }
 
 func RunMigrations(db *sql.DB) error {

@@ -113,9 +113,23 @@ func buildPost(d map[string]interface{}) Post {
 		bodyHTML = RewriteURLs(bodyHTML)
 	}
 
-	// Removed by moderator
-	if getString(d, "removed_by_category") == "moderator" {
-		bodyHTML = fmt.Sprintf(`<p>[Removed by Reddit] — <a href="https://www.unddit.com%s">view on Unddit</a></p>`, p.Permalink)
+	// Removed/deleted upstream — set p.Removed so the archive layer skips
+	// overwriting the local copy and the renderer shows the Time Machine
+	// badge. removed_by_category covers explicit mod/admin/spam removals; the
+	// selftext / author == "[deleted]" branches catch user-deleted posts and
+	// some legacy moderator removals where removed_by_category is missing.
+	if cat := getString(d, "removed_by_category"); cat != "" {
+		p.Removed = true
+		if cat == "moderator" {
+			bodyHTML = fmt.Sprintf(`<p>[Removed by Reddit] — <a href="https://www.unddit.com%s">view on Unddit</a></p>`, p.Permalink)
+		}
+	} else {
+		selftext := getString(d, "selftext")
+		if selftext == "[removed]" || selftext == "[deleted]" {
+			p.Removed = true
+		} else if p.Author.Name == "[deleted]" && getBool(d, "is_self") && selftext == "" {
+			p.Removed = true
+		}
 	}
 	p.Body = template.HTML(bodyHTML)
 
@@ -622,11 +636,15 @@ func buildComment(raw json.RawMessage, postLink, postAuthor string) Comment {
 	authorName := c.Author.Name
 
 	if authorName == "[deleted]" && strings.Contains(bodyHTML, "[removed]") {
+		c.Removed = true
 		bodyHTML = fmt.Sprintf(`<p>[removed] — <a href="https://www.unddit.com%s%s">view on Unddit</a></p>`,
 			postLink, c.ID)
 	} else if strings.Contains(bodyHTML, "[ Removed by Reddit ]") {
+		c.Removed = true
 		bodyHTML = fmt.Sprintf(`<p>[Removed by Reddit] — <a href="https://www.unddit.com%s%s">view on Unddit</a></p>`,
 			postLink, c.ID)
+	} else if authorName == "[deleted]" && strings.Contains(bodyHTML, "[deleted]") {
+		c.Removed = true
 	} else {
 		// Rewrite emotes if media_metadata present
 		if mm := getMap(d, "media_metadata"); mm != nil {

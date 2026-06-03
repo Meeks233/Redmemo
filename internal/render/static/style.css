@@ -431,6 +431,7 @@ figcaption {
 
 main {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     max-width: 1000px;
     padding: 10px 20px;
@@ -1798,6 +1799,31 @@ video.lazy-media:not([src]) {
 .archived {
     opacity: 0.5;
     font-style: italic;
+}
+
+/* Time Machine pill — theme-aware capsule rendered next to the post/comment
+   author so removed posts read as "archived from upstream" without claiming a
+   full banner row. Border/background tint trail the active accent so the badge
+   reads as native chrome under every palette. */
+.time-machine-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 6px;
+    margin-left: 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.time-machine-inline svg {
+    flex-shrink: 0;
+    color: var(--text);
 }
 
 .empty-state {

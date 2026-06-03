@@ -27,6 +27,9 @@ templ commentTree(c reddit.Comment) {
 					} else {
 						<span class={ "comment_author", c.Author.Distinguished }>u/[deleted]</span>
 					}
+					if c.Removed {
+						@timeMachineInline()
+					}
 					if len(c.Author.Flair.FlairParts) > 0 {
 						<small class="author_flair">@renderFlair(c.Author.Flair.FlairParts)</small>
 					}

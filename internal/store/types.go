@@ -16,6 +16,10 @@ type StoredPost struct {
 	LastUpdated  time.Time
 	Source       string // "redlib_proxy" | "oauth_fallback" | "prefetch" | "natural_prefetch"
 	MediaDone    bool
+	// UpstreamRemoved is sticky: once Reddit reports the post as removed/deleted
+	// we never overwrite the local JSON again. The post page renders the
+	// archived copy with a Time Machine badge and stops scheduling refetches.
+	UpstreamRemoved bool
 }
 
 type StoredComments struct {

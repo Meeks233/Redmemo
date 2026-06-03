@@ -12,9 +12,26 @@ import (
 	"github.com/redmemo/redmemo/internal/store"
 )
 
+// postRepo is the narrow slice of PostStore the archive service actually
+// reaches for. Defined here as an interface so the removed-overwrite guard can
+// be unit-tested with an in-memory fake — *store.PostStore satisfies it.
+type postRepo interface {
+	Save(*store.StoredPost) error
+	Get(string) (*store.StoredPost, error)
+	MarkUpstreamRemoved(string) error
+}
+
+// commentRepo is the narrow slice of CommentStore the archive service uses;
+// declared as an interface so the removed-merge guard can be unit-tested with
+// an in-memory fake — *store.CommentStore satisfies it.
+type commentRepo interface {
+	GetLatest(string) (*store.StoredComments, error)
+	Save(string, *store.StoredComments) error
+}
+
 type Service struct {
-	postStore      *store.PostStore
-	commentStore   *store.CommentStore
+	postStore      postRepo
+	commentStore   commentRepo
 	subStore       *store.SubredditStore
 	subStatusStore *store.SubStatusStore
 
@@ -106,6 +123,21 @@ func (s *Service) ArchivePost(post *reddit.Post, subreddit, source string) {
 		return
 	}
 
+	// Removed-by-Reddit: if upstream says the post is gone, never overwrite a
+	// previously-good archive copy. Flip the sticky upstream_removed verdict on
+	// the existing row so future fetches skip this permalink, then return. When
+	// there is no prior archive we simply discard — there is nothing useful in
+	// the removed payload (Body is "[Removed by Reddit]", media fields are
+	// usually wiped).
+	if post.Removed {
+		if existing, _ := s.postStore.Get(urlPath); existing != nil && !existing.UpstreamRemoved {
+			if err := s.postStore.MarkUpstreamRemoved(urlPath); err != nil {
+				log.Printf("archive: mark upstream removed %s: %v", urlPath, err)
+			}
+		}
+		return
+	}
+
 	if post.NSFW || post.Flags.NSFW {
 		s.markNSFWIfNeeded(sub)
 	}
@@ -138,6 +170,21 @@ func (s *Service) ArchiveComments(postURLPath string, comments []reddit.Comment)
 	if ctl := s.control.load(); ctl != nil {
 		if sub := subFromPermalink(postURLPath); sub != "" && !ctl.Allow(sub) {
 			return
+		}
+	}
+	// Removed-by-Reddit, comment edition: if the incoming tree contains any
+	// "[Removed]" tombstones, splice the previously-archived body/author back
+	// in by comment ID before writing. Mirrors the post-side guard at
+	// ArchivePost so a re-fetch of a thread whose comments have since been
+	// removed never overwrites the good local copy with tombstones. The
+	// Removed flag stays set so the renderer keeps showing the Time Machine
+	// badge.
+	if hasRemovedComment(comments) && s.commentStore != nil {
+		if prior, err := s.commentStore.GetLatest(postURLPath); err == nil && prior != nil && len(prior.JSONData) > 0 {
+			var priorTree []reddit.Comment
+			if json.Unmarshal(prior.JSONData, &priorTree) == nil {
+				mergeRemovedBodies(comments, indexAliveComments(priorTree))
+			}
 		}
 	}
 	data, err := json.Marshal(comments)
@@ -190,6 +237,57 @@ func subFromPermalink(p string) string {
 		return rest[:i]
 	}
 	return rest
+}
+
+// hasRemovedComment reports whether any node in the tree carries Removed=true.
+// Cheap pre-check so we only load the prior archived blob when there is
+// actually something to splice.
+func hasRemovedComment(cs []reddit.Comment) bool {
+	for i := range cs {
+		if cs[i].Removed {
+			return true
+		}
+		if hasRemovedComment(cs[i].Replies) {
+			return true
+		}
+	}
+	return false
+}
+
+// indexAliveComments flattens the prior archived tree into an ID → Comment map,
+// keeping only nodes whose own body wasn't already a tombstone. We restore
+// from the freshest non-removed snapshot, not from another tombstone.
+func indexAliveComments(cs []reddit.Comment) map[string]reddit.Comment {
+	m := map[string]reddit.Comment{}
+	var walk func([]reddit.Comment)
+	walk = func(arr []reddit.Comment) {
+		for i := range arr {
+			if arr[i].Kind == "t1" && arr[i].ID != "" && !arr[i].Removed {
+				m[arr[i].ID] = arr[i]
+			}
+			walk(arr[i].Replies)
+		}
+	}
+	walk(cs)
+	return m
+}
+
+// mergeRemovedBodies walks the incoming tree and, for every Removed node whose
+// ID matches a previously-archived alive copy, restores Body and Author so the
+// new row reads like the old one. Removed stays true so the renderer keeps the
+// Time Machine badge — the body is preserved, the tombstone signal is not.
+func mergeRemovedBodies(cs []reddit.Comment, prior map[string]reddit.Comment) {
+	for i := range cs {
+		if cs[i].Removed && cs[i].ID != "" {
+			if p, ok := prior[cs[i].ID]; ok {
+				cs[i].Body = p.Body
+				cs[i].Author = p.Author
+			}
+		}
+		if len(cs[i].Replies) > 0 {
+			mergeRemovedBodies(cs[i].Replies, prior)
+		}
+	}
 }
 
 func countComments(comments []reddit.Comment) int {

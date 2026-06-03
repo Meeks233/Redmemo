@@ -27,11 +27,13 @@ func (s *PostStore) Get(urlPath string) (*StoredPost, error) {
 	p := &StoredPost{}
 	err := s.db.QueryRow(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source, media_done
+		       author, score, created_utc, first_seen, last_updated, source, media_done,
+		       upstream_removed
 		FROM posts WHERE url_path = $1`, urlPath,
 	).Scan(
 		&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
 		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
+		&p.UpstreamRemoved,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -40,6 +42,22 @@ func (s *PostStore) Get(urlPath string) (*StoredPost, error) {
 		return nil, fmt.Errorf("get post: %w", err)
 	}
 	return p, nil
+}
+
+// MarkUpstreamRemoved flips the sticky upstream_removed verdict for a permalink.
+// It is a no-op when the row is missing — the archive layer calls this only
+// after confirming the row exists, so a row that disappeared between the read
+// and write is treated as already-gone. last_updated bumps so the post page's
+// freshness display reflects when we last *checked* upstream, even though we
+// did not overwrite the JSON.
+func (s *PostStore) MarkUpstreamRemoved(urlPath string) error {
+	_, err := s.db.Exec(`
+		UPDATE posts SET upstream_removed = TRUE, last_updated = NOW()
+		WHERE url_path = $1`, urlPath)
+	if err != nil {
+		return fmt.Errorf("mark upstream removed: %w", err)
+	}
+	return nil
 }
 
 func (s *PostStore) Save(post *StoredPost) error {

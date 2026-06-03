@@ -32,6 +32,11 @@ type Post struct {
 	NSFW            bool    `json:"over_18"`
 	OutURL          *string // url_overridden_by_dest
 	WSURL           string  `json:"websocket_url"`
+	// Removed is set when Reddit's response marks the post as removed/deleted
+	// (removed_by_category set, or selftext == "[removed]"/"[deleted]"). The
+	// archive layer uses it to skip overwriting a previously-good local copy,
+	// and the renderer uses it to show the Time Machine badge.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // Comment represents a Reddit comment with recursive replies.
@@ -55,6 +60,11 @@ type Comment struct {
 	IsFiltered  bool
 	MoreCount   int64 // child count when kind=="more"
 	Prefs       Preferences
+	// Removed is set when this comment's body was removed/deleted upstream
+	// ("[removed]", "[ Removed by Reddit ]" or author=="[deleted]" with empty
+	// body). The renderer shows a Time Machine badge so the local row stays
+	// visible while flagging that the upstream copy is gone.
+	Removed bool
 }
 
 // Author represents a post or comment author.

@@ -90,6 +90,9 @@
   "post.archive_short": "存档",
   "post.download": "下载",
   "post.download_short": "下载",
+  "post.time_machine": "时光机",
+  "post.time_machine_title": "上游已删除 — 由本地存档提供",
+  "post.time_machine_notice": "时光机 — 此帖已被上游删除，正由 RedMemo 本地存档提供。",
 
   "poll.votes": "%v 票,",
 

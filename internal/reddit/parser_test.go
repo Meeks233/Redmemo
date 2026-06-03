@@ -403,3 +403,81 @@ func TestParsePost_Awards(t *testing.T) {
 		t.Errorf("Award count = %d", post.Awards[0].Count)
 	}
 }
+
+// Post removed/deleted detection is what the archive layer keys off to skip
+// overwriting a previously-good local copy. Cover the four signals Reddit
+// uses in the wild: removed_by_category, selftext sentinel, deleted-author
+// self-post with empty body, and the "still alive" baseline.
+func TestParsePost_RemovedDetection(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{
+			name: "removed_by_category=moderator flips Removed",
+			data: `{"kind":"t3","data":{"id":"p1","title":"x","is_self":true,"removed_by_category":"moderator","created_utc":1700000000}}`,
+			want: true,
+		},
+		{
+			name: "removed_by_category=deleted flips Removed",
+			data: `{"kind":"t3","data":{"id":"p2","title":"x","is_self":true,"removed_by_category":"deleted","created_utc":1700000000}}`,
+			want: true,
+		},
+		{
+			name: "selftext=[removed] without category flips Removed",
+			data: `{"kind":"t3","data":{"id":"p3","title":"x","is_self":true,"selftext":"[removed]","created_utc":1700000000}}`,
+			want: true,
+		},
+		{
+			name: "selftext=[deleted] flips Removed",
+			data: `{"kind":"t3","data":{"id":"p4","title":"x","is_self":true,"selftext":"[deleted]","created_utc":1700000000}}`,
+			want: true,
+		},
+		{
+			name: "author=[deleted] self-post with empty body flips Removed",
+			data: `{"kind":"t3","data":{"id":"p5","title":"x","is_self":true,"author":"[deleted]","selftext":"","created_utc":1700000000}}`,
+			want: true,
+		},
+		{
+			name: "alive post stays Removed=false",
+			data: `{"kind":"t3","data":{"id":"p6","title":"x","is_self":true,"selftext":"hello world","author":"alice","created_utc":1700000000}}`,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			post, err := ParsePost(json.RawMessage(tc.data))
+			if err != nil {
+				t.Fatalf("ParsePost: %v", err)
+			}
+			if post.Removed != tc.want {
+				t.Errorf("Removed = %v, want %v", post.Removed, tc.want)
+			}
+		})
+	}
+}
+
+// Comment removal: the two sentinel-body branches must set Comment.Removed so
+// the comment renderer can attach a Time Machine badge without making a second
+// pass over the body string.
+func TestParseComments_RemovedDetection(t *testing.T) {
+	data := []byte(`{"kind":"Listing","data":{"children":[
+		{"kind":"t1","data":{"id":"c1","author":"[deleted]","body_html":"&lt;p&gt;[removed]&lt;/p&gt;","created_utc":1700000000}},
+		{"kind":"t1","data":{"id":"c2","author":"someone","body_html":"&lt;p&gt;[ Removed by Reddit ]&lt;/p&gt;","created_utc":1700000000}},
+		{"kind":"t1","data":{"id":"c3","author":"alice","body_html":"&lt;p&gt;hello&lt;/p&gt;","created_utc":1700000000}}
+	]}}`)
+	comments := ParseComments(data, "/r/test/comments/abc/", "op")
+	if len(comments) != 3 {
+		t.Fatalf("expected 3 comments, got %d", len(comments))
+	}
+	if !comments[0].Removed {
+		t.Errorf("c1 (deleted+[removed] body) Removed=false")
+	}
+	if !comments[1].Removed {
+		t.Errorf("c2 ([ Removed by Reddit ] body) Removed=false")
+	}
+	if comments[2].Removed {
+		t.Errorf("c3 (normal comment) Removed=true")
+	}
+}
