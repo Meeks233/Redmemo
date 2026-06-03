@@ -222,14 +222,14 @@ func (h *Handler) renderHomepagePartial(w http.ResponseWriter, posts []reddit.Po
 func (h *Handler) handleSubreddit(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	prefs := h.readPreferences(r)
-	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs, 25)
+	h.serveSubreddit(w, r, sub, prefs.PostSort, prefs, 5)
 }
 
 func (h *Handler) handleSubredditSort(w http.ResponseWriter, r *http.Request) {
 	sub := r.PathValue("sub")
 	sort := r.PathValue("sort")
 	prefs := h.readPreferences(r)
-	h.serveSubreddit(w, r, sub, sort, prefs, 25)
+	h.serveSubreddit(w, r, sub, sort, prefs, 5)
 }
 
 func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, sort string, prefs reddit.Preferences, limit int) {

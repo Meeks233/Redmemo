@@ -17,6 +17,7 @@
 - 🔐 **Gated** — `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
 - 🦫 **Go + templ** — server-side rendered; no JS framework, no client hydration, no client-side state.
 - 🔎 **Search** — e621-style unified grammar across local archive (`sub:`, `rating:`, `score:>1000`, `flair:`, …) — see the [Search & URL Reference](docs/Search-Reference.md).
+- 💍 **Budget-aware** — sub/search pages target small per-upstream-call page sizes, a live navbar ring shows the remaining budget for the current window, and the HR layer auto-throttles into the archive when it runs low — see the [Budget Design](docs/Budget-Design.md).
 
 ## TL;DR deploy
 
@@ -73,6 +74,7 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 - **[Persistence Layer](docs/Persistence.md)** — Postgres tables + media dedup
 - **[Natural Prefetch](docs/Natural-Prefetch.md)** — passive background crawler
 - **[HR Rate-Limit](docs/HR-Rate-Limit.md)** — global three-tier cap
+- **[Budget Design](docs/Budget-Design.md)** — 5-per-call page size, navbar ring, auto-throttle
 - **[Configuration Reference](docs/Configuration.md)** — every `REDMEMO_*` env var
 - **[Default User Settings](docs/Default-User-Settings.md)** — `REDMEMO_DEFAULT_*` overrides
 - **[Search & URL Reference](docs/Search-Reference.md)** — e621-style unified grammar
@@ -84,6 +86,10 @@ RedMemo would not exist without:
 - **[Redlib](https://github.com/redlib-org/redlib)** — the entire front-end (templates, styles, themes, route shape, user-settings model) descends from Redlib. A reference copy lives in `_redlib_ref/`.
 - **[Libreddit](https://github.com/libreddit/libreddit)** — the original alternative front-end Redlib was forked from, and the ultimate source of the UI everyone recognises.
 - **[Lucide](https://lucide.dev)** — a large portion of the SVG iconography (toolbar glyphs, status badges, archive-hub markers) is reused verbatim or with minor edits from the Lucide icon set (ISC), itself partly descended from [Feather](https://github.com/feathericons/feather) (MIT, © Cole Bemis).
+
+## Disclaimer
+
+RedMemo is an open-source, self-hosted tool. It is **not** affiliated with, endorsed by, or sponsored by Reddit, Inc. — "Reddit" is a trademark of Reddit, Inc. and is referenced here only descriptively. The project does not run or list public instances; if you choose to expose your instance to the public internet, you assume responsibility for compliance with the laws and platform terms that apply to your deployment. Rights-holders with concerns about material in *this source repository* can find a contact and takedown procedure in **[DISCLAIMER.md](DISCLAIMER.md)**.
 
 ## License
 

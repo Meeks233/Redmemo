@@ -13,6 +13,7 @@ User-facing handbook for RedMemo. The repo-root [`README.md`](../README.md) is t
 - [Persistence Layer](Persistence.md) — Postgres tables + content-addressed media store
 - [Natural Prefetch (NP)](Natural-Prefetch.md) — passive background crawler (ASCII state machine)
 - [HR Rate-Limit Layer](HR-Rate-Limit.md) — three-tier global cap shared via Redis
+- [Budget Design](Budget-Design.md) — 5-per-call page size, navbar quota ring, auto-throttle vs Redlib's 25-per-call drain
 
 ## Configuration
 

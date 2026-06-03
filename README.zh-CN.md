@@ -17,6 +17,7 @@
 - 🔐 **门禁** —— `/settings` 由预共享服务端密钥 + TOTP 把守,按 IP 三次错锁定。
 - 🦫 **Go + templ** —— 服务端渲染;无 JS 框架,无客户端水合,无客户端状态。
 - 🔎 **搜索** —— e621 风格的统一语法,通查本地存档(`sub:`、`rating:`、`score:>1000`、`flair:` …) —— 详见 [搜索与 URL 参考](docs/Search-Reference.md)。
+- 💍 **额度感知** —— 单次进入 sub / 搜索的上游请求只抓小批次(默认目标 5 条,远少于早期前端的 25 条)。导航栏自带一圈动态 SVG ring,实时显示当前窗口的剩余额度;额度紧张时由 HR 层自动限流并降级到本地存档 —— 详见 [额度设计](docs/Budget-Design.md)。
 
 ## TL;DR 部署
 
@@ -73,6 +74,7 @@ RedMemo 只监听 `:8080` —— 请自行准备一个 TLS 终止的反向代理
 - **[Persistence Layer](docs/Persistence.md)** —— Postgres 表 + 媒体去重
 - **[Natural Prefetch](docs/Natural-Prefetch.md)** —— 被动后台爬取
 - **[HR Rate-Limit](docs/HR-Rate-Limit.md)** —— 全局三层限速
+- **[Budget Design](docs/Budget-Design.md)** —— 单次 5 条的页大小、导航栏动态 ring、额度自动限流
 - **[Configuration Reference](docs/Configuration.md)** —— 全部 `REDMEMO_*` 环境变量
 - **[Default User Settings](docs/Default-User-Settings.md)** —— `REDMEMO_DEFAULT_*` 默认值覆盖
 - **[Search & URL Reference](docs/Search-Reference.md)** —— e621 风格的统一语法
@@ -84,6 +86,10 @@ RedMemo 只监听 `:8080` —— 请自行准备一个 TLS 终止的反向代理
 - **[Redlib](https://github.com/redlib-org/redlib)** —— 整个前端(模板、样式、主题、路由形态、用户设置模型)均承自 Redlib。`_redlib_ref/` 下保留了一份参考副本。
 - **[Libreddit](https://github.com/libreddit/libreddit)** —— Redlib 的源头,也是大家熟悉的这套 UI 的最终起点。
 - **[Lucide](https://lucide.dev)** —— 相当一部分 SVG 图标(工具栏字符、状态徽章、存档中心标记)直接或微调后取自 Lucide 图标集(ISC),Lucide 自身部分源于 [Feather](https://github.com/feathericons/feather)(MIT,© Cole Bemis)。
+
+## 免责声明
+
+RedMemo 是一款开源、自托管工具。它与 Reddit, Inc. **不存在**任何关联、背书或赞助关系 —— "Reddit" 是 Reddit, Inc. 的商标,本仓库中的引用仅作描述性用途。项目不运营、不列出任何公共实例;若你选择将自己的实例暴露在公网,你需自行承担其部署所适用的法律与平台条款的合规责任。权利人对*本源代码仓库*中具体材料的诉求,可参见 **[DISCLAIMER.md](DISCLAIMER.md)** 中的联系与下架流程。
 
 ## 许可证
 
