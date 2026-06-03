@@ -184,8 +184,9 @@
   "archive_search.no_results": "No archived posts match your search.",
 
   "settings.page_title": "%s Settings",
-  "settings.bypass_warn": "Warning: REDMEMO_AUTH_BYPASS is on — the TOTP gate is OFF and anyone with network reach can change instance settings. Only acceptable on a trusted homelab behind an outer auth layer.",
-  "settings.debug_warn_pre": "Warning: Debug page is ",
+  "settings.warning_label": "Warning",
+  "settings.bypass_warn": "REDMEMO_AUTH_BYPASS is on — the TOTP gate is OFF and anyone with network reach can change instance settings. Only acceptable on a trusted homelab behind an outer auth layer.",
+  "settings.debug_warn_pre": "Debug page is ",
   "settings.debug_warn_link": "available",
   "settings.debug_warn_post": "!",
   "settings.appearance": "Appearance",
@@ -264,7 +265,7 @@
   "settings.np_modal_body": "Enabling this may cause your request quota to deplete rapidly. Make sure you know what you are doing.",
   "settings.debug_modal_title": "Enable debug page?",
   "settings.debug_modal_body": "Enabling this on a public network may expose instance diagnostics and private information.",
-  "settings.upstream_warn": "Warning: initiative upstream access is enabled. On a public deployment this may rapidly exhaust your Reddit session-token quota and get your IP blacklisted upstream.",
+  "settings.upstream_warn": "initiative upstream access is enabled. On a public deployment this may rapidly exhaust your Reddit session-token quota and get your IP blacklisted upstream.",
   "settings.upstream_modal_title": "Allow initiative upstream access?",
   "settings.upstream_modal_body": "Turning this protection off lets user actions reach Reddit directly. On a public deployment, sudden bursts of upstream traffic can exhaust your session-token quota in minutes and cause Reddit to blacklist this instance's IP.",
 

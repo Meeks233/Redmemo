@@ -10,6 +10,15 @@ import (
 // so the templ template body stays expression-level.
 func itoa(n int) string { return strconv.Itoa(n) }
 
+// WarningItem is one row inside a warningBanner. Pre is required; Link/Href/Post
+// are optional and render an inline anchor between Pre and Post when Link != "".
+type WarningItem struct {
+	Pre  string
+	Link string
+	Href string
+	Post string
+}
+
 // partials.templ holds the shared presentational components (banners, flair,
 // search box, poll, listing card) as typed templ components. Every page renders
 // through templ now; the old html/template partials.html has been removed.
@@ -270,4 +279,32 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>{ post.Comments[0] } { commentsWord(post.Comments[1]) }</a>
 		</div>
 	</div>
+}
+
+// warningBanner renders a single bordered notice block listing one or more
+// WarningItems. The left rail shows a triangle icon that scales with the box
+// height and the localized "Warning" label below it; each item is rendered as
+// a bulleted row on the right. Renders nothing when items is empty.
+templ warningBanner(label string, items []WarningItem) {
+	if len(items) > 0 {
+		<div class="warning-banner">
+			<div class="warning-banner__rail">
+				<svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+				<span class="warning-banner__label">{ label }</span>
+			</div>
+			<ul class="warning-banner__list">
+				for _, it := range items {
+					<li class="warning-banner__item">
+						<span class="warning-banner__bullet" aria-hidden="true">•</span>
+						<span class="warning-banner__text">
+							{ it.Pre }
+							if it.Link != "" {
+								<a href={ templ.SafeURL(it.Href) }>{ it.Link }</a>{ it.Post }
+							}
+						</span>
+					</li>
+				}
+			</ul>
+		</div>
+	}
 }

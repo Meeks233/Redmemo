@@ -128,7 +128,7 @@ func TestDecorateArchiveSubSEO(t *testing.T) {
 		Sub:        "golang",
 		TotalPosts: 4242,
 	}
-	h.decorateArchiveSubSEO(d)
+	h.decorateArchiveSubSEO(d, 0, 25)
 	if !d.Indexable {
 		t.Error("expected Indexable=true")
 	}

@@ -466,7 +466,7 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 		Interval:   prefs.ScrollInterval,
 	}
 
-	h.decorateArchiveSubSEO(&data)
+	h.decorateArchiveSubSEO(&data, offset, archivePageSize)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.renderer.RenderArchive(w, data); err != nil {

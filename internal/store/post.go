@@ -682,8 +682,9 @@ func (s *PostStore) SubredditCounts(names []string) (map[string]int, error) {
 }
 
 type ArchivedSub struct {
-	Name      string
-	PostCount int64
+	Name        string
+	PostCount   int64
+	LastUpdated time.Time
 }
 
 func (s *PostStore) scanArchivedSubs(rows *sql.Rows) ([]ArchivedSub, error) {
@@ -691,8 +692,12 @@ func (s *PostStore) scanArchivedSubs(rows *sql.Rows) ([]ArchivedSub, error) {
 	var subs []ArchivedSub
 	for rows.Next() {
 		var a ArchivedSub
-		if err := rows.Scan(&a.Name, &a.PostCount); err != nil {
+		var lu sql.NullTime
+		if err := rows.Scan(&a.Name, &a.PostCount, &lu); err != nil {
 			return nil, fmt.Errorf("scan archived sub: %w", err)
+		}
+		if lu.Valid {
+			a.LastUpdated = lu.Time
 		}
 		subs = append(subs, a)
 	}
@@ -703,7 +708,7 @@ func (s *PostStore) scanArchivedSubs(rows *sql.Rows) ([]ArchivedSub, error) {
 // ordered by most-recent archive activity first.
 func (s *PostStore) ArchivedSubsByNew(minPosts int) ([]ArchivedSub, error) {
 	rows, err := s.db.Query(`
-		SELECT subreddit, COUNT(*) AS cnt
+		SELECT subreddit, COUNT(*) AS cnt, MAX(last_updated) AS lu
 		FROM posts
 		GROUP BY subreddit
 		HAVING COUNT(*) > $1
@@ -718,7 +723,7 @@ func (s *PostStore) ArchivedSubsByNew(minPosts int) ([]ArchivedSub, error) {
 // ordered by post count descending.
 func (s *PostStore) ArchivedSubsByTop(minPosts int) ([]ArchivedSub, error) {
 	rows, err := s.db.Query(`
-		SELECT subreddit, COUNT(*) AS cnt
+		SELECT subreddit, COUNT(*) AS cnt, MAX(last_updated) AS lu
 		FROM posts
 		GROUP BY subreddit
 		HAVING COUNT(*) > $1
@@ -760,7 +765,7 @@ func (s *PostStore) DetectNSFWForSubs(names []string) (map[string]bool, error) {
 // ArchivedSubsAlphabetical returns all archived subs sorted alphabetically (case-insensitive).
 func (s *PostStore) ArchivedSubsAlphabetical() ([]ArchivedSub, error) {
 	rows, err := s.db.Query(`
-		SELECT subreddit, COUNT(*) AS cnt
+		SELECT subreddit, COUNT(*) AS cnt, MAX(last_updated) AS lu
 		FROM posts
 		GROUP BY subreddit
 		ORDER BY LOWER(subreddit) ASC`)

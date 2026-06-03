@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/redmemo/redmemo/internal/render"
 )
@@ -102,8 +103,10 @@ func (h *Handler) decorateArchiveHubSEO(d *render.ArchiveHubPageData, subs []str
 }
 
 // decorateArchiveSubSEO stamps a per-sub archive page with indexability + a
-// sub-specific meta description + a CollectionPage JSON-LD block.
-func (h *Handler) decorateArchiveSubSEO(d *render.ArchivePageData) {
+// sub-specific meta description + a CollectionPage JSON-LD block. offset is the
+// current pagination offset (0 on the canonical landing) and pageSize is the
+// per-page batch size; together they drive rel="prev"/"next" link emission.
+func (h *Handler) decorateArchiveSubSEO(d *render.ArchivePageData, offset, pageSize int) {
 	if !h.indexingAllowed() {
 		return
 	}
@@ -112,7 +115,7 @@ func (h *Handler) decorateArchiveSubSEO(d *render.ArchivePageData) {
 		"r/%s archive on %s — %d posts mirrored locally for offline browsing.",
 		d.Sub, d.BrandName, d.TotalPosts,
 	)
-	d.HeadExtraHTML = h.archiveSubHeadExtra(d.BrandName, d.Sub, d.MetaDescription, d.TotalPosts)
+	d.HeadExtraHTML = h.archiveSubHeadExtra(d.BrandName, d.Sub, d.MetaDescription, d.TotalPosts, offset, pageSize)
 }
 
 func (h *Handler) archiveHubDescription(brand string, subs []string) string {
@@ -146,6 +149,20 @@ func (h *Handler) archiveHubHeadExtra(brand, desc string, subs []string) string 
 		fmt.Fprintf(&b, "<link rel=\"canonical\" href=\"%s\"/>", html.EscapeString(pageURL))
 	}
 	writeOpenGraph(&b, brand+" — archived subreddits", desc, pageURL, host, "website")
+
+	homeURL := "/"
+	if host != "" {
+		homeURL = host + "/"
+	}
+	breadcrumbs := map[string]any{
+		"@context": "https://schema.org",
+		"@type":    "BreadcrumbList",
+		"itemListElement": []map[string]any{
+			{"@type": "ListItem", "position": 1, "name": brand, "item": homeURL},
+			{"@type": "ListItem", "position": 2, "name": "Archive", "item": pageURL},
+		},
+	}
+	writeJSONLD(&b, breadcrumbs)
 
 	// CollectionPage + ItemList — tells Google "this URL collects these
 	// subreddit pages", and each ListItem points back at the per-sub archive
@@ -183,23 +200,68 @@ func (h *Handler) archiveHubHeadExtra(brand, desc string, subs []string) string 
 	return b.String()
 }
 
-func (h *Handler) archiveSubHeadExtra(brand, sub, desc string, total int64) string {
+func (h *Handler) archiveSubHeadExtra(brand, sub, desc string, total int64, offset, pageSize int) string {
 	host := h.canonicalHost()
-	pageURL := host + "/archive/r/" + sub
+	subPath := "/archive/r/" + sub
+	pageURL := host + subPath
 	if host == "" {
-		pageURL = "/archive/r/" + sub
+		pageURL = subPath
 	}
 
 	var b strings.Builder
+	// The canonical always points at the offset=0 landing — paginated views
+	// are duplicates of the same collection and should consolidate signals
+	// onto the root.
 	if host != "" {
 		fmt.Fprintf(&b, "<link rel=\"canonical\" href=\"%s\"/>", html.EscapeString(pageURL))
 	}
+
+	// rel="prev"/"next" hint crawlers to walk pagination as a single series.
+	abs := func(path string) string {
+		if host == "" {
+			return path
+		}
+		return host + path
+	}
+	if pageSize > 0 {
+		if offset >= pageSize {
+			prevOff := offset - pageSize
+			prev := subPath
+			if prevOff > 0 {
+				prev = fmt.Sprintf("%s?offset=%d", subPath, prevOff)
+			}
+			fmt.Fprintf(&b, "<link rel=\"prev\" href=\"%s\"/>", html.EscapeString(abs(prev)))
+		}
+		if int64(offset+pageSize) < total {
+			next := fmt.Sprintf("%s?offset=%d", subPath, offset+pageSize)
+			fmt.Fprintf(&b, "<link rel=\"next\" href=\"%s\"/>", html.EscapeString(abs(next)))
+		}
+	}
+
 	writeOpenGraph(&b, "r/"+sub+" — "+brand+" archive", desc, pageURL, host, "website")
 
 	hubURL := "/archive"
 	if host != "" {
 		hubURL = host + "/archive"
 	}
+
+	// BreadcrumbList renders the Home › Archive › r/sub trail in Google's
+	// SERP snippet — high-impact for click-through on long-tail queries.
+	homeURL := "/"
+	if host != "" {
+		homeURL = host + "/"
+	}
+	breadcrumbs := map[string]any{
+		"@context": "https://schema.org",
+		"@type":    "BreadcrumbList",
+		"itemListElement": []map[string]any{
+			{"@type": "ListItem", "position": 1, "name": brand, "item": homeURL},
+			{"@type": "ListItem", "position": 2, "name": "Archive", "item": hubURL},
+			{"@type": "ListItem", "position": 3, "name": "r/" + sub, "item": pageURL},
+		},
+	}
+	writeJSONLD(&b, breadcrumbs)
+
 	jsonld := map[string]any{
 		"@context":    "https://schema.org",
 		"@type":       "CollectionPage",
@@ -212,10 +274,10 @@ func (h *Handler) archiveSubHeadExtra(brand, sub, desc string, total int64) stri
 			"url":   hubURL,
 		},
 		"mainEntity": map[string]any{
-			"@type":            "ItemList",
-			"name":             "Archived posts from r/" + sub,
-			"numberOfItems":    total,
-			"itemListOrder":    "https://schema.org/ItemListOrderDescending",
+			"@type":         "ItemList",
+			"name":          "Archived posts from r/" + sub,
+			"numberOfItems": total,
+			"itemListOrder": "https://schema.org/ItemListOrderDescending",
 		},
 	}
 	writeJSONLD(&b, jsonld)
@@ -255,9 +317,10 @@ func writeJSONLD(b *strings.Builder, payload any) {
 // sitemapURL is the standard sitemaps.org <url> shape; rendered via
 // encoding/xml so loc/changefreq/priority get properly escaped.
 type sitemapURL struct {
-	Loc        string  `xml:"loc"`
-	ChangeFreq string  `xml:"changefreq,omitempty"`
-	Priority   string  `xml:"priority,omitempty"`
+	Loc        string `xml:"loc"`
+	LastMod    string `xml:"lastmod,omitempty"`
+	ChangeFreq string `xml:"changefreq,omitempty"`
+	Priority   string `xml:"priority,omitempty"`
 }
 
 type sitemapURLSet struct {
@@ -283,6 +346,7 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 		return host + path
 	}
 
+	var hubLastMod string
 	urls := []sitemapURL{
 		{Loc: abs("/archive"), ChangeFreq: "hourly", Priority: "1.0"},
 		{Loc: abs("/archive?sort=top"), ChangeFreq: "daily", Priority: "0.8"},
@@ -300,16 +364,33 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 		// Priority decays with rank so Google has a useful signal about
 		// which subs are this instance's bulk vs long-tail. Top sub = 0.9,
 		// floors at 0.3.
+		var maxLU time.Time
 		for i, s := range subs {
 			pri := 0.9 - float64(i)*0.01
 			if pri < 0.3 {
 				pri = 0.3
 			}
+			lm := ""
+			if !s.LastUpdated.IsZero() {
+				lm = s.LastUpdated.UTC().Format("2006-01-02")
+				if s.LastUpdated.After(maxLU) {
+					maxLU = s.LastUpdated
+				}
+			}
 			urls = append(urls, sitemapURL{
 				Loc:        abs("/archive/r/" + s.Name),
+				LastMod:    lm,
 				ChangeFreq: "daily",
 				Priority:   fmt.Sprintf("%.1f", pri),
 			})
+		}
+		if !maxLU.IsZero() {
+			hubLastMod = maxLU.UTC().Format("2006-01-02")
+		}
+	}
+	if hubLastMod != "" {
+		for i := range urls[:3] {
+			urls[i].LastMod = hubLastMod
 		}
 	}
 

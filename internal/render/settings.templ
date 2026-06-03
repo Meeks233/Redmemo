@@ -1,11 +1,37 @@
 package render
 
-import "github.com/redmemo/redmemo/internal/reddit"
+import (
+	"context"
+
+	"github.com/redmemo/redmemo/internal/reddit"
+)
 
 // settings.templ ports templates/settings.html — the preferences page. Most
 // controls are plain form fields bound to d.Prefs; the homepage/prefetch sub
 // pickers are progressively enhanced by subPicker.js, whose seed data is handed
 // over through @templ.JSONScript islands rather than inlined string literals.
+
+// settingsWarnings collects the active operator-facing warnings for the page
+// top, so warningBanner can render them all inside one box. Add new entries
+// here instead of stamping a fresh banner div in the template.
+func settingsWarnings(ctx context.Context, d SettingsPageData) []WarningItem {
+	var items []WarningItem
+	if d.AuthBypass {
+		items = append(items, WarningItem{Pre: T(ctx, "settings.bypass_warn")})
+	}
+	if d.Prefs.EnableDebug == "on" {
+		items = append(items, WarningItem{
+			Pre:  T(ctx, "settings.debug_warn_pre"),
+			Link: T(ctx, "settings.debug_warn_link"),
+			Href: "/debug",
+			Post: T(ctx, "settings.debug_warn_post"),
+		})
+	}
+	if d.Prefs.DisableInitiativeUpstreamAccess != "on" {
+		items = append(items, WarningItem{Pre: T(ctx, "settings.upstream_warn")})
+	}
+	return items
+}
 
 templ settingsTitle(d SettingsPageData) {
 	{ T(ctx, "settings.page_title", d.BrandName) }
@@ -21,24 +47,7 @@ templ settingsPage(d SettingsPageData) {
 
 templ settingsContent(d SettingsPageData) {
 	<div id="settings-wrapper">
-		if d.AuthBypass {
-			<div class="debug-banner">
-				<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
-				<span>{ T(ctx, "settings.bypass_warn") }</span>
-			</div>
-		}
-		if d.Prefs.EnableDebug == "on" {
-			<div class="debug-banner">
-				<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
-				<span>{ T(ctx, "settings.debug_warn_pre") }<a href="/debug">{ T(ctx, "settings.debug_warn_link") }</a>{ T(ctx, "settings.debug_warn_post") }</span>
-			</div>
-		}
-		if d.Prefs.DisableInitiativeUpstreamAccess != "on" {
-			<div class="debug-banner">
-				<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
-				<span>{ T(ctx, "settings.upstream_warn") }</span>
-			</div>
-		}
+		@warningBanner(T(ctx, "settings.warning_label"), settingsWarnings(ctx, d))
 		<div id="settings">
 			<div class="settings-column">
 				<form id="settings-form" action="/settings" method="POST">

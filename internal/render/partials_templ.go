@@ -1712,4 +1712,89 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 	})
 }
 
+// WarningItem is one row inside a warningBanner. Pre is required; Link/Href/Post
+// are optional and render an inline anchor between Pre and Post when Link != "".
+type WarningItem struct {
+	Pre  string
+	Link string
+	Href string
+	Post string
+}
+
+// warningBanner renders a single bordered notice block listing one or more
+// WarningItems. The left rail shows a triangle icon that scales with the box
+// height and the localized "Warning" label below it; each item is rendered as
+// a bulleted row on the right. Renders nothing when items is empty.
+func warningBanner(label string, items []WarningItem) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_VarWB0 := templ.GetChildren(ctx)
+		if templ_7745c5c3_VarWB0 == nil {
+			templ_7745c5c3_VarWB0 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		if len(items) > 0 {
+			if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`<div class="warning-banner"><div class="warning-banner__rail"><svg class="warning-banner__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" preserveAspectRatio="xMidYMid meet"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><span class="warning-banner__label">`); templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(label)); templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`</span></div><ul class="warning-banner__list">`); templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, it := range items {
+				if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`<li class="warning-banner__item"><span class="warning-banner__bullet" aria-hidden="true">•</span><span class="warning-banner__text">`); templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(it.Pre)); templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if it.Link != "" {
+					var templ_7745c5c3_VarWBHref templ.SafeURL = templ.SafeURL(it.Href)
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`<a href="`); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_VarWBHref))); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`">`); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(it.Link)); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`</a>`); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(it.Post)); templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`</span></li>`); templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			if _, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`</ul></div>`); templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		_ = templ_7745c5c3_VarWB0
+		return nil
+	})
+}
+
 var _ = templruntime.GeneratedTemplate
