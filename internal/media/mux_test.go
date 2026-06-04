@@ -20,19 +20,31 @@ func TestIsMuxableVideoSegment(t *testing.T) {
 		{"https://v.redd.it/abc123/DASH_720.mp4", true},
 		{"https://v.redd.it/abc123/DASH_1080.mp4?source=fallback", true},
 		{"https://v.redd.it/abc123/CMAF_240.mp4?a=1&b=2", true},
+		// 2019-era uploads: bare segment names, no .mp4 extension. Their DASH
+		// manifest references `<BaseURL>DASH_720</BaseURL>` directly.
+		{"DASH_720", true},
+		{"DASH_240", true},
+		{"CMAF_480", true},
+		{"https://v.redd.it/y7nhn25qior31/DASH_720", true},
+		{"https://v.redd.it/y7nhn25qior31/DASH_720?source=fallback", true},
 		// audio segments are NOT video segments — no bare \d+ after the prefix
 		{"DASH_AUDIO_128.mp4", false},
 		{"CMAF_AUDIO_64.mp4", false},
 		{"DASH_audio.mp4", false},
+		{"DASH_AUDIO_128", false},
+		{"DASH_audio", false},
+		{"audio", false},
 		// wrong container / playlist
 		{"DASH_720.webm", false},
 		{"HLSPlaylist.m3u8", false},
 		{"DASH_720.mp4.part", false},
 		// case sensitive
 		{"dash_720.mp4", false},
+		{"dash_720", false},
 		// missing prefix / digits
 		{"720.mp4", false},
 		{"DASH_.mp4", false},
+		{"DASH_", false},
 		{"", false},
 	}
 	for _, tc := range cases {

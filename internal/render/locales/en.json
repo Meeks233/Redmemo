@@ -107,6 +107,7 @@
   "comments.search_placeholder": "Search comments",
   "comments.containing": "Comments containing \"%s\"",
   "comments.all": "All comments",
+  "comments.load_more": "Load 5 more comments",
   "comments.view_all": "View all comments",
   "comments.show_parent": "Show parent comments",
 

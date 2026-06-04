@@ -17,8 +17,13 @@
 (function () {
     "use strict";
 
-    // /vid/<id>/(DASH|CMAF)_<height>.mp4 — the muxable video-only segment.
-    var MUXABLE = /\/vid\/[^/]+\/(?:DASH|CMAF)_\d+\.mp4(?:\?|$)/;
+    // /vid/<id>/(DASH|CMAF)_<height>[.mp4] — the muxable video-only segment.
+    // .mp4 is optional: 2019-era Reddit uploads serve the segments bare (e.g.
+    // /vid/y7nhn25qior31/DASH_720?source=fallback) with audio at the sibling
+    // /vid/<id>/audio path. Server-side IsMuxableVideoSegment matches both
+    // shapes; this client regex must match the same set or audioSync.js skips
+    // the video entirely and the "Loading audio…" notice never appears.
+    var MUXABLE = /\/vid\/[^/]+\/(?:DASH|CMAF)_\d+(?:\.mp4)?(?:\?|$)/;
 
     var POLL_MS = 2000;
     var MAX_POLLS = 150; // ~5 min ceiling
@@ -29,8 +34,45 @@
     // ms) is enough; anything tighter is audible as a stutter.
     var SYNC_DRIFT_S = 0.18;
 
+    // If the companion <audio> only reaches `canplay` after the silent <video>
+    // has been on screen for more than this many seconds, rewind both back to
+    // 0 so the viewer gets the clip from the start with sound. Inside the
+    // window, just letting sync land where it lands is less disruptive than a
+    // surprise rewind.
+    var LATE_AUDIO_REWIND_S = 3;
+
+    // Maximum silent <video> playback time before audioSync.js parks playback
+    // to yield wire bandwidth to the still-loading companion <audio>. With a
+    // 5 MB/s global media bandwidth budget (see internal/media/bwlimit.go) and
+    // an 11–60s video at 2–8 Mbps, continuous buffering steals the upstream
+    // slot the (tiny) audio file needs to finish — pushing the rewind window
+    // out so far that the user watches a third of the clip silently before
+    // sound lands. Pausing at this threshold lets audio land in a couple of
+    // seconds, then the canplay handler — or applyReady once the muxed file
+    // is in — rewinds to 0 and resumes.
+    var AUDIO_WAIT_PAUSE_S = 6;
+
     var tracked = ("WeakSet" in window) ? new WeakSet() : null;
     var trackedList = [];
+
+    // Viewport gating: without it every muxable video on the page runs a
+    // 2s-interval polling loop AND keeps a hidden <audio> companion buffering
+    // its full track for up to 5 minutes, regardless of whether the post is on
+    // screen. On an infinite-scroll feed that piles up to dozens of concurrent
+    // fetch chains and audio decoders — enough to freeze the browser by ~15
+    // videos. Mirrors imageReload.js's visible-gated poll pattern.
+    var visObserver = ("IntersectionObserver" in window)
+        ? new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                var v = entry.target;
+                if (entry.isIntersecting) {
+                    if (v._audioSyncResume) v._audioSyncResume();
+                } else {
+                    if (v._audioSyncPause) v._audioSyncPause();
+                }
+            });
+        }, { rootMargin: "300px 0px" })
+        : null;
 
     function isTracked(video) {
         return tracked ? tracked.has(video) : trackedList.indexOf(video) !== -1;
@@ -83,6 +125,58 @@
         // have no audio (clearNotice on "silent").
         var audioEl = null;
         var syncListeners = null;
+        // Viewport-gated poll loop state. `visible` is the latest IO verdict;
+        // `pollTimer` is the live setTimeout handle (so a pause can cancel it);
+        // `pollPaused` means the poll loop parked itself because the video
+        // scrolled off-screen and onIntersect will restart it. `done` shuts the
+        // whole machine down for terminal states.
+        var visible = visObserver ? false : true;
+        var pollTimer = null;
+        // pollPaused tracks "the loop wants to run but is parked waiting for
+        // visibility". It must agree with `visible` at init: with an IO present
+        // we start unseen, so the loop IS parked from t=0 — otherwise the IO's
+        // first isIntersecting=true delivery sees pollPaused=false and the
+        // resume gate refuses to kick off polling. Result: a video that
+        // autoplays (play → started=true) before the IO callback yields
+        // deadlocks — neither path ever calls poll(), and the "Loading audio…"
+        // notice + companion <audio> never attach until the user scrolls the
+        // post out and back in.
+        var pollPaused = visObserver ? true : false;
+        var done = false;
+        // Focus gating, narrowed. With N videos visible at once (search
+        // listing shows 5 per page), kicking the heavy /api/audio_track
+        // companion fetch for all of them races the server's muxSem in
+        // parallel — the bottom video (often the smallest file) lands audio
+        // bytes first instead of the focused one.
+        //
+        // The earlier fix gated the WHOLE poll loop on play, but that left
+        // non-centermost visible videos with `started=false` forever:
+        // videoAutoplay only plays the centermost, the others never receive
+        // a `play` event, and their /api/audio_status poll never starts. So
+        // applyReady never fires for them either, and the viewer sees the
+        // silent fallback indefinitely — exactly the "only the first video
+        // gets the loading badge" report.
+        //
+        // Split the two concerns: the cheap status poll runs for any visible
+        // video (status JSON, no muxSem cost); the expensive companion
+        // <audio> only attaches once the video has actually played. The
+        // notice ("Loading video…") shows on either path so the viewer sees
+        // progress on every visible clip.
+        var played = false;
+        // Once the companion <audio> reaches `canplay` the viewer is
+        // already hearing sound from this video. A later "unavailable"
+        // verdict from /api/audio_status is the persistent ledger flapping
+        // mid-mux (e.g. a parallel L5 retry tripping the failure counter);
+        // it must not yank the working playback and overlay the
+        // question-mark card. Only "dead" terminates audible playback.
+        var companionLive = false;
+        // audioWaitArmed: one-shot guard. After the bandwidth-yield pause
+        // fires once, we don't fight a user who explicitly resumes silent
+        // playback — they've made their choice.
+        // pausedForAudio: set when *we* paused the video, so the canplay
+        // handler knows it owes a safePlay to resume what we interrupted.
+        var audioWaitArmed = true;
+        var pausedForAudio = false;
         function attachAudioCompanion() {
             if (audioEl) return;
             audioEl = document.createElement("audio");
@@ -133,6 +227,18 @@
                 // mute control silences the companion in lockstep.
                 audioEl.muted = video.muted;
             }
+            // The <video> failing to decode (corrupt mp4, fallback source
+            // 404, MSE/codec refusal) renders the browser's broken-media
+            // glyph but does NOT pause the element — paused stays false and
+            // no "pause" event fires, so syncPause never runs. Without an
+            // explicit error hook the companion <audio> (an independent
+            // stream off /api/audio_track) keeps playing under the corrupt
+            // placeholder, which is jarring. Tear the companion down so
+            // sound dies with the picture.
+            function syncError() {
+                if (audioEl) { audioEl.pause(); }
+                detachAudioCompanion();
+            }
 
             syncListeners = {
                 play: syncPlay,
@@ -145,6 +251,7 @@
                 playing: syncPlay,
                 ended: syncPause,
                 volumechange: syncVolume,
+                error: syncError,
             };
             for (var ev in syncListeners) {
                 video.addEventListener(ev, syncListeners[ev]);
@@ -158,11 +265,62 @@
             // poller stays alive so applyReady can later swap to the single
             // muxed mp4, but it no longer needs UI to announce that.
             audioEl.addEventListener("canplay", function () {
+                companionLive = true;
                 if (notice && notice.parentNode) {
                     notice.parentNode.removeChild(notice);
                 }
                 notice = null;
+                // Late-arriving audio: companion didn't buffer fast enough,
+                // so the silent <video> has already been playing for more
+                // than LATE_AUDIO_REWIND_S. Cutting sound in mid-clip is
+                // jarring ("why is there suddenly audio?") and the viewer
+                // missed the opening. Rewind to 0 so the clip plays once
+                // properly with sound. Below the threshold the normal
+                // syncPlay+nudge path lines audio up in place — no rewind
+                // needed for a clip that just barely started.
+                if (!video.ended &&
+                    (video.currentTime || 0) > LATE_AUDIO_REWIND_S) {
+                    try { video.currentTime = 0; }
+                    catch (e) { /* seeking not ready — ignore */ }
+                    try { audioEl.currentTime = 0; }
+                    catch (e) { /* ignore */ }
+                    // If the viewer had it playing, keep it playing from
+                    // the new position so they don't have to click again.
+                    // Also resume when *we* parked it via the audio-wait
+                    // watchdog below — the whole point of that pause was to
+                    // hand control back here. syncPlay (wired into the
+                    // video's `play` listener) restarts the companion in
+                    // lockstep.
+                    if (!video.paused || pausedForAudio) { safePlay(video); }
+                }
+                pausedForAudio = false;
             });
+
+            // Bandwidth-yield watchdog: with the companion still buffering,
+            // letting the silent <video> race past AUDIO_WAIT_PAUSE_S burns
+            // the wire that audio needs to finish. Park playback at the
+            // threshold so audio can land in a couple of seconds; the canplay
+            // handler above rewinds and resumes. One-shot — once disarmed
+            // (whether by canplay or by us pausing), we don't fight a user
+            // who explicitly hits play on the silent video.
+            function audioWaitWatchdog() {
+                if (!audioWaitArmed || companionLive || done) return;
+                if (video.paused || video.ended) return;
+                if ((video.currentTime || 0) >= AUDIO_WAIT_PAUSE_S) {
+                    audioWaitArmed = false;
+                    pausedForAudio = true;
+                    try { video.pause(); } catch (e) { /* ignore */ }
+                    if (notice) {
+                        var t = notice.querySelector(".audio-sync-text");
+                        if (t) { t.textContent = "Waiting for audio…"; }
+                    }
+                }
+            }
+            video.addEventListener("timeupdate", audioWaitWatchdog);
+            // Once audio is buffered (companionLive) the canplay handler
+            // tears the notice down and we no longer need the watchdog —
+            // but keep the listener installed; it's a cheap guard and
+            // self-disables on the companionLive check.
 
             (video.parentNode || document.body).appendChild(audioEl);
 
@@ -225,12 +383,31 @@
         function applyReady() {
             // No notice means the video was already muxed when the page
             // loaded — it is playing the audio copy already, nothing to swap.
+            // Edge: the bandwidth-yield watchdog may have parked playback
+            // earlier, then the viewer scrolled the post off-screen which
+            // ran detachAudioCompanion (clearing audioEl) and clearNotice'd
+            // anything visible. By the time ready lands, both are nil but
+            // the video is still paused for an audio reason we promised to
+            // unpause once audio was in. Honor that, then early-return.
             if (!notice && !audioEl) {
+                if (pausedForAudio && !video.ended) {
+                    pausedForAudio = false;
+                    var p = video.play();
+                    if (p && p.catch) { p.catch(function () {}); }
+                }
                 return;
             }
 
             var resumeAt = video.currentTime || 0;
-            var wasPlaying = !video.paused && !video.ended;
+            // wasPlaying treats a JS-induced pause (pausedForAudio — see
+            // audioWaitWatchdog) as "the viewer wanted this playing". Without
+            // the OR clause, a video parked by the bandwidth-yield watchdog
+            // stays paused forever after the muxed copy lands: the viewer
+            // explicitly hit play, we explicitly paused them, and the swap
+            // owes that play back. The companion-canplay path already does
+            // the same; this is the muxed-file analogue.
+            var wasPlaying = (!video.paused && !video.ended) || pausedForAudio;
+            pausedForAudio = false;
             // The muxed file carries its own audio track. Reset the <video>
             // back to the template's chosen sound mode (defaultMuted reflects
             // the "Mute all" / "Mute NSFW" preferences) so the swap doesn't
@@ -352,51 +529,128 @@
         }
 
         function poll() {
+            pollTimer = null;
+            if (done) return;
+            // Park the loop while off-screen — onIntersect will resume it.
+            if (!visible) { pollPaused = true; return; }
+            pollPaused = false;
             fetch("/api/audio_status?src=" + encodeURIComponent(src), { cache: "no-store" })
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) {
+                    if (done) return;
                     if (data.state === "ready") {
+                        done = true;
                         applyReady();
                         return;
                     }
                     if (data.state === "silent" || data.state === "unsupported") {
+                        done = true;
                         clearNotice();
                         return;
                     }
                     if (data.state === "unavailable") {
-                        // Soft state: refused N times but the user reopening
-                        // the post can still revive. Question-mark card +
-                        // hint to retry.
+                        // Soft refusal from the persistent ledger. If the
+                        // companion is already playing audible bytes the
+                        // viewer's experience is fine — the ledger flap is
+                        // an internal mux retry, not user-facing breakage.
+                        // Keep polling: either the mux completes ("ready")
+                        // or escalates to terminal "dead".
+                        if (companionLive) {
+                            polls++;
+                            if (polls < MAX_POLLS && visible) {
+                                pollTimer = setTimeout(poll, POLL_MS);
+                            } else if (polls < MAX_POLLS) {
+                                pollPaused = true;
+                            }
+                            return;
+                        }
+                        done = true;
                         clearNotice();
                         showUncertain();
                         return;
                     }
                     if (data.state === "dead") {
-                        // Terminal: the URL already burned a user-triggered
-                        // retry and Reddit said no again. No more requests
-                        // ever; "Sorry, we missed it" with the X glyph.
+                        done = true;
                         clearNotice();
                         showDead();
                         return;
                     }
-                    // pending — attach the companion (idempotent) so audio
-                    // bytes start landing in parallel with the video.
-                    attachAudioCompanion();
+                    // pending — show the notice for any visible video, but
+                    // only attach the heavy companion <audio> for ones that
+                    // actually played (focus gate, see `played` comment).
+                    if (played) {
+                        attachAudioCompanion();
+                    }
                     showPending();
                     polls++;
-                    if (polls < MAX_POLLS) {
-                        setTimeout(poll, POLL_MS);
+                    if (polls < MAX_POLLS && visible) {
+                        pollTimer = setTimeout(poll, POLL_MS);
+                    } else if (polls < MAX_POLLS) {
+                        pollPaused = true;
                     }
                 })
                 .catch(function () {
+                    if (done) return;
                     polls++;
-                    if (polls < MAX_POLLS) {
-                        setTimeout(poll, POLL_MS * 2);
+                    if (polls < MAX_POLLS && visible) {
+                        pollTimer = setTimeout(poll, POLL_MS * 2);
+                    } else if (polls < MAX_POLLS) {
+                        pollPaused = true;
                     }
                 });
         }
 
-        poll();
+        // IntersectionObserver hooks: when the post scrolls off-screen, cancel
+        // the next poll tick AND tear the companion <audio> down. Letting it
+        // "coast" (the earlier behavior) accumulated one preload="auto" audio
+        // element per video the user had ever scrolled past — on a 25-post
+        // search page of video hits that's 25 parallel audio buffers plus 25
+        // sets of sync event listeners, enough to freeze the browser as the
+        // page loads and IO fires for many videos at once. The next pending
+        // poll re-attaches the companion when the video scrolls back into view.
+        video._audioSyncPause = function () {
+            if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            pollPaused = true;
+            visible = false;
+            detachAudioCompanion();
+            companionLive = false;
+        };
+        video._audioSyncResume = function () {
+            visible = true;
+            if (done) return;
+            // Kick off (or resume) polling whenever this video becomes
+            // visible and no tick is already in flight. The status poll runs
+            // for every visible muxable video — the focus gate now lives on
+            // companion attach, not on the poll loop.
+            if (!pollTimer) {
+                pollPaused = false;
+                poll();
+            }
+        };
+
+        // `play` flips the focus gate so the companion <audio> can attach on
+        // the next pending poll — autoplay hands focus to the centermost
+        // clip first, so its companion wins the muxSem race over the rest.
+        // If the poll loop already saw "pending" before play (visible but
+        // unfocused), we don't have a notice yet either; the next tick will
+        // both attach the companion and post the notice in lockstep.
+        function onPlay() {
+            if (done) return;
+            played = true;
+        }
+        video.addEventListener("play", onPlay);
+        if (!video.paused && !video.ended) {
+            onPlay();
+        }
+
+        // Bootstrap polling for the non-IO fallback path (visible defaults to
+        // true above). With IO present, the first isIntersecting callback
+        // calls _audioSyncResume which starts the loop.
+        if (!visObserver && visible) {
+            poll();
+        }
+
+        if (visObserver) visObserver.observe(video);
     }
 
     // consider starts tracking a <video> once it has a real muxable src.

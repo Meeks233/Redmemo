@@ -615,7 +615,7 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 
 			label := fmt.Sprintf("L1 r/%s [%s%s] round %d/%d listing (after=%q)", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1, maxRoundsPerCycle, cursor)
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
-				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
+				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
 				s.recordUpstream(ctx)
 				// Token() returns nil for three distinct reasons; ErrNoTokenAvailable
 				// collapses them. Disambiguate before reacting:
@@ -663,12 +663,12 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 							}
 							return
 						}
-						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
+						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
 						s.recordUpstream(ctx)
 					} else {
 						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
 						if s.tokenWaiter.WaitForToken(ctx) {
-							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, pageSize)
+							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
 							s.recordUpstream(ctx)
 						}
 					}

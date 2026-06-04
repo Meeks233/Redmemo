@@ -102,7 +102,7 @@ func (c *PublicClient) fetch(ctx context.Context, path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]Post, string, string, error) {
+func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after, before string, limit int) ([]Post, string, string, error) {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -116,6 +116,9 @@ func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after s
 	if after != "" {
 		path += "&after=" + after
 	}
+	if before != "" {
+		path += "&before=" + before
+	}
 	data, err := c.fetch(ctx, path)
 	if err != nil {
 		return nil, "", "", err
@@ -124,10 +127,17 @@ func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after s
 }
 
 func (c *PublicClient) FetchPost(ctx context.Context, sub, id, commentSort string) (Post, []Comment, error) {
+	return c.FetchPostLimited(ctx, sub, id, commentSort, 0)
+}
+
+func (c *PublicClient) FetchPostLimited(ctx context.Context, sub, id, commentSort string, limit int) (Post, []Comment, error) {
 	if commentSort == "" {
 		commentSort = "confidence"
 	}
 	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&sort=%s", sub, id, commentSort)
+	if limit > 0 {
+		path += fmt.Sprintf("&limit=%d", limit)
+	}
 	data, err := c.fetch(ctx, path)
 	if err != nil {
 		return Post{}, nil, err
@@ -135,7 +145,7 @@ func (c *PublicClient) FetchPost(ctx context.Context, sub, id, commentSort strin
 	return ParsePostPage(data)
 }
 
-func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, after string, limit int) ([]Post, []Subreddit, string, error) {
+func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, after, before string, limit int) ([]Post, []Subreddit, string, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
@@ -157,12 +167,15 @@ func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, aft
 	if after != "" {
 		path += "&after=" + url.QueryEscape(after)
 	}
+	if before != "" {
+		path += "&before=" + url.QueryEscape(before)
+	}
 	data, err := c.fetch(ctx, path)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", "", err
 	}
-	posts, subs, _, afterCursor, err := ParseSearchResults(data)
-	return posts, subs, afterCursor, err
+	posts, subs, beforeCursor, afterCursor, err := ParseSearchResults(data)
+	return posts, subs, beforeCursor, afterCursor, err
 }
 
 func (c *PublicClient) FetchUser(ctx context.Context, username, listing, sort, after string) (User, []Post, []Comment, error) {

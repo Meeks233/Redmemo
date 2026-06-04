@@ -133,11 +133,16 @@ func (f *fakeRedditClient) FetchPost(_ context.Context, _, _, _ string) (reddit.
 	return f.post, f.comments, f.err
 }
 
-func (f *fakeRedditClient) FetchSubreddit(context.Context, string, string, string, string, int) ([]reddit.Post, string, string, error) {
+func (f *fakeRedditClient) FetchPostLimited(_ context.Context, _, _, _ string, _ int) (reddit.Post, []reddit.Comment, error) {
+	atomic.AddInt32(&f.fetchCalls, 1)
+	return f.post, f.comments, f.err
+}
+
+func (f *fakeRedditClient) FetchSubreddit(context.Context, string, string, string, string, string, int) ([]reddit.Post, string, string, error) {
 	return nil, "", "", nil
 }
-func (f *fakeRedditClient) FetchSearch(context.Context, string, string, string, string, string, int) ([]reddit.Post, []reddit.Subreddit, string, error) {
-	return nil, nil, "", nil
+func (f *fakeRedditClient) FetchSearch(context.Context, string, string, string, string, string, string, int) ([]reddit.Post, []reddit.Subreddit, string, string, error) {
+	return nil, nil, "", "", nil
 }
 func (f *fakeRedditClient) FetchSubredditAbout(context.Context, string) (reddit.Subreddit, error) {
 	return reddit.Subreddit{}, nil

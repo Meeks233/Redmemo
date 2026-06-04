@@ -652,6 +652,7 @@ func buildComment(raw json.RawMessage, postLink, postAuthor string) Comment {
 		}
 	}
 	bodyHTML = RewriteURLs(bodyHTML)
+	bodyHTML = EmbedCommentImages(bodyHTML)
 	c.Body = template.HTML(bodyHTML)
 
 	// Collapsed

@@ -38,6 +38,9 @@ var (
 //     and stays quiet.
 //   - 503 Service Unavailable: audio CDN is transiently unreachable.
 func (p *Proxy) ServeSeparateAudio(w http.ResponseWriter, r *http.Request, videoURL string) {
+	// Tag this request as audio at a fresh generation so its bytes preempt
+	// any in-flight video bytes for older requests at the priority gate.
+	r = r.WithContext(WithPriority(r.Context(), Priority{Gen: NextGen(), Kind: KindAudio}))
 	key := audioTrackKey(videoURL)
 
 	// Fast path: the mux pipeline has previously concluded this video has no

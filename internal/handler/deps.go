@@ -55,8 +55,9 @@ type htmlCache interface {
 
 type redditClient interface {
 	FetchPost(ctx context.Context, sub, id, commentSort string) (reddit.Post, []reddit.Comment, error)
-	FetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]reddit.Post, string, string, error)
-	FetchSearch(ctx context.Context, query, sub, sort, t, after string, limit int) ([]reddit.Post, []reddit.Subreddit, string, error)
+	FetchPostLimited(ctx context.Context, sub, id, commentSort string, limit int) (reddit.Post, []reddit.Comment, error)
+	FetchSubreddit(ctx context.Context, sub, sort, t, after, before string, limit int) ([]reddit.Post, string, string, error)
+	FetchSearch(ctx context.Context, query, sub, sort, t, after, before string, limit int) ([]reddit.Post, []reddit.Subreddit, string, string, error)
 	FetchSubredditAbout(ctx context.Context, sub string) (reddit.Subreddit, error)
 	FetchUser(ctx context.Context, username, listing, sort, after string) (reddit.User, []reddit.Post, []reddit.Comment, error)
 }

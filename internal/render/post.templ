@@ -97,17 +97,20 @@ templ postContent(d PostPageData) {
 					{ T(ctx, "comments.containing", d.CommentQuery) }&nbsp;|&nbsp;<a id="allCommentsLink" href={ templ.SafeURL(d.URLWithoutQuery) }>{ T(ctx, "comments.all") }</a>
 				}
 			</div>
-			for _, c := range d.Comments {
-				<div class="thread">
-					if d.SingleThread {
-						<p class="thread_nav"><a href={ templ.SafeURL(d.Post.Permalink) }>{ T(ctx, "comments.view_all") }</a></p>
-						if c.ParentKind == "t1" {
-							<p class="thread_nav"><a href="?context=9999">{ T(ctx, "comments.show_parent") }</a></p>
+			<div id="commentList">
+				for _, c := range d.Comments {
+					<div class="thread">
+						if d.SingleThread {
+							<p class="thread_nav"><a href={ templ.SafeURL(d.Post.Permalink) }>{ T(ctx, "comments.view_all") }</a></p>
+							if c.ParentKind == "t1" {
+								<p class="thread_nav"><a href="?context=9999">{ T(ctx, "comments.show_parent") }</a></p>
+							}
 						}
-					}
-					@commentTree(c)
-				</div>
-			}
+						@commentTree(c)
+					</div>
+				}
+			</div>
+			@loadMoreComments(d)
 		}
 	</div>
 }
@@ -329,4 +332,58 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 			<p>{ i64(post.UpvoteRatio) }%<span id="upvoted">{ " " + T(ctx, "post.upvoted") }</span></p>
 		</div>
 	</div>
+}
+
+// loadMoreComments renders the per-page "load 5 more" affordance under the
+// truncated initial comment list. The post handler caps the first upstream
+// fetch at 5 top-level comments to keep idle browsing cheap; each click of
+// this button bumps the upstream limit by another 5 and appends just the
+// newly-revealed comments to #commentList (no full-page reload).
+templ loadMoreComments(d PostPageData) {
+	if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline {
+		<div id="loadMoreCommentsWrap" style="text-align:center;margin:20px 0;">
+			<button id="loadMoreCommentsBtn" data-sub={ d.Post.Community } data-postid={ d.Post.ID } data-sort={ d.Sort } data-loaded="5" data-step="5">
+				{ T(ctx, "comments.load_more") }
+			</button>
+			<span id="loadMoreCommentsStatus" style="margin-left:8px;color:var(--muted)"></span>
+		</div>
+		<script>
+		(function(){
+			var btn = document.getElementById('loadMoreCommentsBtn');
+			if (!btn) return;
+			var list = document.getElementById('commentList');
+			var status = document.getElementById('loadMoreCommentsStatus');
+			btn.addEventListener('click', function(){
+				if (btn.disabled) return;
+				btn.disabled = true;
+				status.textContent = '...';
+				var loaded = parseInt(btn.dataset.loaded, 10) || 0;
+				var step = parseInt(btn.dataset.step, 10) || 5;
+				var url = '/api/comments/' + btn.dataset.sub + '/' + btn.dataset.postid +
+					'?sort=' + encodeURIComponent(btn.dataset.sort || '') +
+					'&loaded=' + loaded + '&step=' + step;
+				fetch(url).then(function(r){
+					var reason = r.headers.get('X-Degraded');
+					if (reason) { status.textContent = reason; btn.disabled = false; return null; }
+					return r.text().then(function(html){ return {html: html, hasMore: r.headers.get('X-Has-More'), added: parseInt(r.headers.get('X-Added'), 10) || 0}; });
+				}).then(function(res){
+					if (res === null) return;
+					if (res.added > 0 && res.html.trim()) {
+						var tmp = document.createElement('div');
+						tmp.innerHTML = res.html;
+						while (tmp.firstChild) list.appendChild(tmp.firstChild);
+						btn.dataset.loaded = (loaded + res.added);
+					}
+					if (res.hasMore === '1' && res.added > 0) {
+						status.textContent = '';
+						btn.disabled = false;
+					} else {
+						var wrap = document.getElementById('loadMoreCommentsWrap');
+						if (wrap) wrap.remove();
+					}
+				}).catch(function(){ status.textContent = 'error'; btn.disabled = false; });
+			});
+		})();
+		</script>
+	}
 }

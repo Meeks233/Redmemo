@@ -18,7 +18,15 @@ import (
 )
 
 var (
-	muxableSegment = regexp.MustCompile(`^(?:DASH|CMAF)_\d+\.mp4$`)
+	// muxableSegment matches Reddit's video-only DASH/CMAF segment names.
+	// `.mp4` is optional: 2024+ uploads use `CMAF_480.mp4`, but 2019-era
+	// uploads serve the same segments bare (no extension) — e.g. the DASH
+	// manifest for those still references `<BaseURL>DASH_720</BaseURL>` with
+	// the matching `<BaseURL>audio</BaseURL>` sibling. Without the optional
+	// `.mp4`, ServeMuxed would skip mux entirely for legacy clips and the
+	// viewer would get a silent video despite the audio track being a sibling
+	// request away.
+	muxableSegment = regexp.MustCompile(`^(?:DASH|CMAF)_\d+(?:\.mp4)?$`)
 
 	muxKeyPrefix = "muxed:"
 
@@ -123,6 +131,10 @@ func fileOnDisk(meta *store.MediaMeta) bool {
 // page reload re-requests and upgrades to audio — while the mux runs in the
 // background. The page's audioSync.js surfaces that progress to the viewer.
 func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL string) {
+	// Tag every fresh muxed-video request as video at a new generation. Audio
+	// for the same video is separately requested via ServeSeparateAudio at the
+	// same gen window, so audio bytes preempt these video bytes (KindAudio < KindVideo).
+	r = r.WithContext(WithPriority(r.Context(), Priority{Gen: NextGen(), Kind: KindVideo}))
 	// Persistent ledger gate. Render the placeholder picked by state — the
 	// soft question-mark for marked URLs (user reopening the post still
 	// revives), the X "Sorry, we missed it" for dead URLs (terminal, no more

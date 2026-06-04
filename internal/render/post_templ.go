@@ -472,6 +472,10 @@ func postContent(d PostPageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 320, "<div id=\"commentList\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 			for _, c := range d.Comments {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"thread\">")
 				if templ_7745c5c3_Err != nil {
@@ -536,6 +540,14 @@ func postContent(d PostPageData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 391, "</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = loadMoreComments(d).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
 			}
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div>")
@@ -2072,6 +2084,107 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "</span></p></div></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+// loadMoreComments emits the "Load all comments" button under the truncated
+// initial 5-comment list, plus the inline JS that fetches the partial and
+// swaps it into #commentList. Hidden on permalink threads, while a comment-
+// query filter is active, and on the archive-only offline render — none of
+// those want an upstream re-fetch.
+func loadMoreComments(d PostPageData) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		if d.SingleThread || d.CommentQuery != "" || d.IsOffline {
+			return nil
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`<div id="loadMoreCommentsWrap" style="text-align:center;margin:20px 0;"><button id="loadMoreCommentsBtn" data-sub="`)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(d.Post.Community))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`" data-postid="`)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(d.Post.ID))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`" data-sort="`)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(d.Sort))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`" data-loaded="5" data-step="5">`)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(T(ctx, "comments.load_more")))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(`</button> <span id="loadMoreCommentsStatus" style="margin-left:8px;color:var(--muted)"></span></div><script>
+(function(){
+  var btn = document.getElementById('loadMoreCommentsBtn');
+  if (!btn) return;
+  var list = document.getElementById('commentList');
+  var status = document.getElementById('loadMoreCommentsStatus');
+  btn.addEventListener('click', function(){
+    if (btn.disabled) return;
+    btn.disabled = true;
+    status.textContent = '...';
+    var loaded = parseInt(btn.dataset.loaded, 10) || 0;
+    var step = parseInt(btn.dataset.step, 10) || 5;
+    var url = '/api/comments/' + btn.dataset.sub + '/' + btn.dataset.postid +
+      '?sort=' + encodeURIComponent(btn.dataset.sort || '') +
+      '&loaded=' + loaded + '&step=' + step;
+    fetch(url).then(function(r){
+      var reason = r.headers.get('X-Degraded');
+      if (reason) { status.textContent = reason; btn.disabled = false; return null; }
+      return r.text().then(function(html){ return {html: html, hasMore: r.headers.get('X-Has-More'), added: parseInt(r.headers.get('X-Added'), 10) || 0}; });
+    }).then(function(res){
+      if (res === null) return;
+      if (res.added > 0 && res.html.trim()) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = res.html;
+        while (tmp.firstChild) list.appendChild(tmp.firstChild);
+        btn.dataset.loaded = (loaded + res.added);
+      }
+      if (res.hasMore === '1' && res.added > 0) {
+        status.textContent = '';
+        btn.disabled = false;
+      } else {
+        var wrap = document.getElementById('loadMoreCommentsWrap');
+        if (wrap) wrap.remove();
+      }
+    }).catch(function(){ status.textContent = 'error'; btn.disabled = false; });
+  });
+})();
+</script>`)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

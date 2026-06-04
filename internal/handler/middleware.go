@@ -95,7 +95,7 @@ var prefDefaults = map[string]string{
 	"remove_default_feeds":            "off",
 	"fetch_sub_about":                 "off",
 	"disable_visit_reddit_confirmation": "off",
-	"comment_sort": "new",
+	"comment_sort": "confidence",
 	"post_sort":    "new",
 	"enable_debug":            "off",
 	"enable_natural_prefetch": "off",

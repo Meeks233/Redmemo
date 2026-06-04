@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -175,6 +176,107 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"ok":true}`)
 }
 
+// handleLoadMoreComments serves a "fetch N more top-level comments" partial.
+// It re-fetches the post with a growing `limit` (each click bumps it by 5),
+// then returns ONLY the slice the caller didn't already have, so the client
+// appends instead of replaces — preserving any expanded reply state above.
+// X-Has-More is "1" while Reddit kept returning more comments at the new
+// limit, "0" once we've reached the end (server hides the button on 0).
+// Uses the same HR/OAuth gate as a normal post fetch.
+func (h *Handler) handleLoadMoreComments(w http.ResponseWriter, r *http.Request) {
+	sub := r.PathValue("sub")
+	id := r.PathValue("id")
+	commentSort := r.URL.Query().Get("sort")
+	prefs := h.readPreferences(r)
+	if commentSort == "" {
+		commentSort = prefs.CommentSort
+	}
+
+	// loaded = how many top-level comments the client already shows.
+	// step   = how many extra to reveal on this click (capped server-side).
+	loaded := 0
+	if v := r.URL.Query().Get("loaded"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 500 {
+			loaded = n
+		}
+	}
+	step := 5
+	if v := r.URL.Query().Get("step"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 25 {
+			step = n
+		}
+	}
+	limit := loaded + step
+
+	if degrade, reason := h.shouldDegrade(r.Context()); degrade {
+		w.Header().Set("X-Degraded", reason)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	post, comments, err := h.redditCli.FetchPostLimited(r.Context(), sub, id, commentSort, limit)
+	h.recordUpstream(r.Context())
+	if err != nil {
+		log.Printf("handler: load more comments %s/%s: %v", sub, id, err)
+		w.Header().Set("X-Degraded", "upstream_error")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	go func() {
+		h.archiver.ArchivePost(&post, sub, "comments_loadmore")
+		h.archiver.ArchiveComments(post.Permalink, comments)
+	}()
+
+	// Reddit may tack a trailing "more" placeholder onto the comment listing
+	// at the requested limit; strip those before computing slice math so the
+	// `loaded` counter stays aligned with actual rendered top-level threads.
+	real := make([]reddit.Comment, 0, len(comments))
+	for _, c := range comments {
+		if c.Kind == "more" {
+			continue
+		}
+		real = append(real, c)
+	}
+
+	hasMore := "0"
+	if len(real) > limit-step { // we got at least one new comment past the previous window
+		// "more" exists when Reddit still has comments beyond what we asked for.
+		// We can't tell directly without inspecting the trailing-more, but if
+		// real == limit AND a more placeholder was present, there are more.
+		if len(real) >= limit {
+			for _, c := range comments {
+				if c.Kind == "more" {
+					hasMore = "1"
+					break
+				}
+			}
+		}
+	}
+
+	// Slice off what the client already has so we append, not replace.
+	slice := real
+	if loaded < len(real) {
+		slice = real[loaded:]
+	} else {
+		slice = nil
+	}
+
+	// Drop the cached partial page so the next full reload picks up the new
+	// comments instead of the 5-comment snapshot.
+	urlPath := "/r/" + sub + "/comments/" + id + "/"
+	if err := h.cache.InvalidateHTMLPrefix(r.Context(), urlPath); err != nil {
+		log.Printf("handler: invalidate html prefix %s: %v", urlPath, err)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Has-More", hasMore)
+	w.Header().Set("X-Added", strconv.Itoa(len(slice)))
+	if err := h.renderer.RenderCommentList(w, slice, prefs); err != nil {
+		log.Printf("handler: render load-more comments: %v", err)
+	}
+}
+
 func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences, t *reqTimer, cacheKey string) bool {
 	// Coalesce concurrent identical post fetches so a viral post under
 	// simultaneous load only burns one OAuth quota unit. recordUpstream and
@@ -185,9 +287,14 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		comments []reddit.Comment
 		err      error
 	}
+	// Initial page view fetches only the first few top-level comments to keep
+	// the OAuth quota cost of casual browsing low. The "Load all comments"
+	// button below the thread re-fetches without the cap when the visitor
+	// actually wants them.
+	const initialCommentLimit = 5
 	flightKey := "post|" + sub + "|" + id + "|" + commentSort
 	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
-		post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
+		post, comments, err := h.redditCli.FetchPostLimited(r.Context(), sub, id, commentSort, initialCommentLimit)
 		h.recordUpstream(r.Context())
 		res := &postFetchResult{post: post, comments: comments, err: err}
 		if err != nil {

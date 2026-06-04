@@ -94,31 +94,72 @@ func (b *tokenBucket) waitN(ctx context.Context, n int) error {
 	return nil
 }
 
-// limitedWriter throttles writes through the global CDN bucket. Each Write is
-// gated on tokens for its full length, so combined throughput across every
-// concurrent media fetch converges on cdnBandwidthLimit.
+// prioChunkSize caps the bytes a single Write services before re-checking the
+// priority gate. Keeping this small (32 KiB) means a freshly-arrived high-prio
+// download preempts in-flight low-prio writers within one chunk's worth of
+// shaping latency, instead of waiting out a multi-MiB io.Copy slice.
+const prioChunkSize = 32 << 10
+
+// limitedWriter throttles writes through the global CDN bucket AND the
+// priority gate. Each Write blocks until it owns the current top priority and
+// then reserves token-bucket bandwidth; combined throughput across every
+// concurrent media fetch converges on cdnBandwidthLimit, but newer / audio
+// downloads preempt older / video ones byte-for-byte.
 type limitedWriter struct {
-	ctx context.Context
-	w   io.Writer
-	b   *tokenBucket
+	ctx   context.Context
+	w     io.Writer
+	b     *tokenBucket
+	gate  *prioGate
+	p     Priority
+	regID int64
 }
 
+// newLimitedWriter wraps w so every byte is paced through the global CDN
+// limiter and ordered through the global priority gate. The returned writer
+// must be released via release() once the download finishes so its priority
+// slot doesn't pin the gate open.
 func newLimitedWriter(ctx context.Context, w io.Writer) *limitedWriter {
-	return &limitedWriter{ctx: ctx, w: w, b: cdnLimiter}
+	p := PriorityFromContext(ctx)
+	lw := &limitedWriter{ctx: ctx, w: w, b: cdnLimiter, gate: globalGate, p: p}
+	lw.regID = globalGate.register(p)
+	return lw
+}
+
+// release drops this writer's slot from the priority gate. Safe to call
+// multiple times; further Writes still work but always lose ties.
+func (l *limitedWriter) release() {
+	if l.gate != nil && l.regID != 0 {
+		l.gate.unregister(l.regID)
+		l.regID = 0
+	}
 }
 
 func (l *limitedWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return l.w.Write(p)
 	}
-	// Cap a single wait at one bucket-full so a huge buffer doesn't sleep
-	// for many seconds in one go; io.Copy will loop with the remainder.
-	chunk := len(p)
-	if chunk > cdnBandwidthLimit {
-		chunk = cdnBandwidthLimit
+	// Consume the entire buffer, but in small slices so a newer /
+	// higher-priority writer arriving mid-Write preempts us at the next
+	// chunk boundary instead of after the whole buffer drains.
+	total := 0
+	for total < len(p) {
+		chunk := len(p) - total
+		if chunk > prioChunkSize {
+			chunk = prioChunkSize
+		}
+		if l.gate != nil {
+			if err := l.gate.wait(l.ctx, l.p); err != nil {
+				return total, err
+			}
+		}
+		if err := l.b.waitN(l.ctx, chunk); err != nil {
+			return total, err
+		}
+		n, err := l.w.Write(p[total : total+chunk])
+		total += n
+		if err != nil {
+			return total, err
+		}
 	}
-	if err := l.b.waitN(l.ctx, chunk); err != nil {
-		return 0, err
-	}
-	return l.w.Write(p[:chunk])
+	return total, nil
 }

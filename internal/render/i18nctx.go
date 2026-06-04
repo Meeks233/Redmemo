@@ -147,6 +147,35 @@ func searchLocalQS(query, sort string) string {
 	return v.Encode()
 }
 
+// searchPageHref builds a Prev/Next link for the search results footer. Same
+// shape as the subreddit page's footer links: keeps the existing query/sort/
+// timeframe and swaps in the cursor as `?before=` or `?after=`. `cursorKind`
+// is "before" or "after".
+func searchPageHref(sub, query, sort, timeframe, cursor, cursorKind string) string {
+	v := url.Values{}
+	if query != "" {
+		v.Set("q", query)
+	}
+	if sort != "" {
+		v.Set("sort", sort)
+	}
+	if timeframe != "" {
+		v.Set("t", timeframe)
+	}
+	if cursor != "" {
+		v.Set(cursorKind, cursor)
+	}
+	base := "/search"
+	if sub != "" {
+		base = "/r/" + sub + "/search"
+	}
+	qs := v.Encode()
+	if qs == "" {
+		return base
+	}
+	return base + "?" + qs
+}
+
 // u64p formats a *uint64 poll vote count; nil becomes "" so the markup matches
 // the old `{{ .VoteCount }}` on an open poll.
 func u64p(p *uint64) string {

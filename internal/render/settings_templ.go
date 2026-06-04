@@ -605,7 +605,30 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</label> <select name=\"comment_sort\" id=\"comment_sort\"><option value=\"new\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</label> <select name=\"comment_sort\" id=\"comment_sort\"><option value=\"confidence\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if d.Prefs.CommentSort == "confidence" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, " selected")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, ">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_VarConf string
+		templ_7745c5c3_VarConf, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "sort.confidence"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 131, Col: 92}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_VarConf))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "</option><option value=\"new\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2201,92 +2224,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 233, "</td></tr></tbody></table>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if len(d.SubredditStats) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, "<table><thead><tr><th>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var117 string
-			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.th_archived_sub"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 358, Col: 59}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 235, "</th><th>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var118 string
-			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.th_posts"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 358, Col: 99}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 236, "</th></tr></thead> <tbody>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, s := range d.SubredditStats {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "<tr><td><a href=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var119 templ.SafeURL
-				templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/archive/r/" + s.Name))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 362, Col: 62}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "\">r/")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var120 string
-				templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(s.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 362, Col: 75}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, "</a></td><td>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var121 string
-				templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(i64(s.PostCount))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 363, Col: 33}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "</td></tr>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, "</tbody></table>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, "</fieldset></div></div></div></div><script src=\"/subPicker.js\"></script><script>\n\t\t(function () {\n\t\t\tvar theme = document.getElementById('theme');\n\t\t\tvar rows = document.getElementById('auto-theme-rows');\n\t\t\tif (!theme || !rows) return;\n\t\t\ttheme.addEventListener('change', function () {\n\t\t\t\trows.hidden = theme.value !== 'auto';\n\t\t\t});\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 233, "</td></tr></tbody></table></fieldset></div></div></div></div><script src=\"/subPicker.js\"></script><script>\n\t\t(function () {\n\t\t\tvar theme = document.getElementById('theme');\n\t\t\tvar rows = document.getElementById('auto-theme-rows');\n\t\t\tif (!theme || !rows) return;\n\t\t\ttheme.addEventListener('change', function () {\n\t\t\t\trows.hidden = theme.value !== 'auto';\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2306,16 +2244,133 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, "<script>\n\t\t// Sub-picker seed data arrives via JSONScript islands (above) rather than\n\t\t// inlined literals. _allSubs starts from the archived subs, gains any live\n\t\t// subs not already present, inherits post counts from the top-subs table,\n\t\t// and is finally reconciled against the selected-count map.\n\t\twindow._allSubs = (JSON.parse(document.getElementById('settings-archived-subs').textContent) || []).map(function(n) { return { name: n, posts: 0 }; });\n\t\twindow._topSubs = JSON.parse(document.getElementById('settings-top-subs').textContent) || [];\n\t\t(function() {\n\t\t\tvar seen = {};\n\t\t\twindow._allSubs.forEach(function(s) { seen[s.name] = true; });\n\t\t\t(JSON.parse(document.getElementById('settings-live-subs').textContent) || []).forEach(function(n) {\n\t\t\t\tif (!seen[n]) { window._allSubs.push({ name: n, posts: 0 }); seen[n] = true; }\n\t\t\t});\n\t\t\twindow._allSubs.forEach(function(s) {\n\t\t\t\tfor (var i = 0; i < window._topSubs.length; i++) {\n\t\t\t\t\tif (window._topSubs[i].name === s.name) { s.posts = window._topSubs[i].posts; break; }\n\t\t\t\t}\n\t\t\t});\n\t\t\tvar _selCounts = JSON.parse(document.getElementById('settings-selected-counts').textContent) || {};\n\t\t\tfor (var _sc in _selCounts) {\n\t\t\t\tvar _found = false;\n\t\t\t\tfor (var _i = 0; _i < window._allSubs.length; _i++) {\n\t\t\t\t\tif (window._allSubs[_i].name === _sc) {\n\t\t\t\t\t\tif (_selCounts[_sc] > window._allSubs[_i].posts) window._allSubs[_i].posts = _selCounts[_sc];\n\t\t\t\t\t\t_found = true; break;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (!_found) window._allSubs.push({ name: _sc, posts: _selCounts[_sc] });\n\t\t\t}\n\t\t\twindow._allSubs.sort(function(a, b) { return b.posts - a.posts; });\n\t\t})();\n\n\t\t// The homepage filter is now a native auto-growing <textarea> (#front_page_subs,\n\t\t// field-sizing:content — no JS height tracking) that is part of the settings\n\t\t// form (form=\"settings-form\") and submitted on Save. It accepts the full\n\t\t// navbar search grammar; the Go backend parses, validates and normalizes it\n\t\t// — there is no picker or capsule logic here. The NP field (#prefetch_unified,\n\t\t// name=\"prefetch_unified\", form=\"settings-form\") is likewise part of the form\n\t\t// and persisted on Save; the backend splits the merged '+'-separated stream\n\t\t// into prefetch_subs and prefetch_sub_modes on save. The picker just keeps a\n\t\t// lightweight subreddit-suggestion list and appends bare \"+name\" entries;\n\t\t// override clauses must be hand-typed. NPPicker.onChange (fired on blur and on\n\t\t// each pick) only flags the form dirty so the Save bar appears.\n\t\tvar prefetchPicker = NPPicker({\n\t\t\tinputId: 'prefetch_unified',\n\t\t\tlistId: 'prefetch_sub_list',\n\t\t\tonChange: function() { checkDirty(); }\n\t\t});\n\n\t\t// \"Disable homepage\" collapses just the query box; the toggle itself stays\n\t\t// visible so it can be turned back on. The actual disable (redirect to\n\t\t// /archive) is applied by the backend when the form is saved.\n\t\tfunction toggleHomepage(cb) {\n\t\t\tdocument.getElementById('homepage_query_row').style.display = cb.checked ? 'none' : '';\n\t\t}\n\n\t\tvar saveBar = document.getElementById('save-bar');\n\t\tvar form = document.querySelector('#settings form');\n\n\t\tfunction serializeForm() {\n\t\t\tvar parts = [];\n\t\t\tnew FormData(form).forEach(function(v, k) { parts.push(k + '=' + v); });\n\t\t\treturn parts.join('&');\n\t\t}\n\n\t\tvar initialSerialized = serializeForm();\n\n\t\tfunction checkDirty() {\n\t\t\tsaveBar.classList.toggle('visible', serializeForm() !== initialSerialized);\n\t\t}\n\n\t\tform.addEventListener('change', checkDirty);\n\t\tform.addEventListener('input', checkDirty);\n\n\t\t// The homepage filter and its disable toggle live outside the <form> element\n\t\t// (associated via form=\"settings-form\"), so their events don't bubble to it\n\t\t// — wire them up directly. FormData(form) still includes them on serialize.\n\t\t['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {\n\t\t\tvar el = document.getElementById(id);\n\t\t\tif (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }\n\t\t});\n\n\t\tfunction togglePrefetch(cb) {\n\t\t\tif (cb.checked) {\n\t\t\t\tcb.checked = false;\n\t\t\t\tdocument.getElementById('prefetch-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tdocument.getElementById('prefetch_picker').style.display = 'none';\n\t\t\t\tsubmitPrefetchSetting('off');\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmPrefetch() {\n\t\t\tdocument.getElementById('prefetch-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('enable_natural_prefetch').checked = true;\n\t\t\tdocument.getElementById('prefetch_picker').style.display = '';\n\t\t\tsubmitPrefetchSetting('on');\n\t\t\tif (prefetchPicker) prefetchPicker.render();\n\t\t}\n\n\t\tfunction cancelPrefetch() {\n\t\t\tdocument.getElementById('prefetch-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction submitPrefetchSetting(val) {\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('enable_natural_prefetch', val);\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)});\n\t\t}\n\n\t\tfunction savePrefetchThreshold(val) {\n\t\t\tvar n = parseInt(val, 10);\n\t\t\tif (isNaN(n) || n < 1 || n > 99) return;\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('prefetch_threshold', String(n));\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)});\n\t\t}\n\n\t\tfunction toggleUpstream(cb) {\n\t\t\t// Checking the box turns ON the protection (no upstream traffic) — safe,\n\t\t\t// apply immediately. Unchecking re-enables upstream access; on a public\n\t\t\t// deployment that can burn through the session-token quota and get the\n\t\t\t// instance's IP blacklisted, so confirm before allowing it.\n\t\t\tif (!cb.checked) {\n\t\t\t\tcb.checked = true;\n\t\t\t\tdocument.getElementById('upstream-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tcheckDirty();\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmUpstream() {\n\t\t\tdocument.getElementById('upstream-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('disable_initiative_upstream_access').checked = false;\n\t\t\tcheckDirty();\n\t\t}\n\n\t\tfunction cancelUpstream() {\n\t\t\tdocument.getElementById('upstream-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction toggleDebug(cb) {\n\t\t\tif (cb.checked) {\n\t\t\t\tcb.checked = false;\n\t\t\t\tdocument.getElementById('debug-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tsubmitDebugSetting('off');\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmDebug() {\n\t\t\tdocument.getElementById('debug-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('enable_debug').checked = true;\n\t\t\tsubmitDebugSetting('on');\n\t\t}\n\n\t\tfunction cancelDebug() {\n\t\t\tdocument.getElementById('debug-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction submitDebugSetting(val) {\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('enable_debug', val);\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)})\n\t\t\t\t.then(function() { location.reload(); });\n\t\t}\n\t</script><div class=\"modal-overlay\" id=\"prefetch-modal\" onclick=\"if(event.target===this)cancelPrefetch()\"><div class=\"modal-box\"><h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, "<script>\n\t\t// Sub-picker seed data arrives via JSONScript islands (above) rather than\n\t\t// inlined literals. _allSubs starts from the archived subs, gains any live\n\t\t// subs not already present, inherits post counts from the top-subs table,\n\t\t// and is finally reconciled against the selected-count map.\n\t\twindow._allSubs = (JSON.parse(document.getElementById('settings-archived-subs').textContent) || []).map(function(n) { return { name: n, posts: 0 }; });\n\t\twindow._topSubs = JSON.parse(document.getElementById('settings-top-subs').textContent) || [];\n\t\t(function() {\n\t\t\tvar seen = {};\n\t\t\twindow._allSubs.forEach(function(s) { seen[s.name] = true; });\n\t\t\t(JSON.parse(document.getElementById('settings-live-subs').textContent) || []).forEach(function(n) {\n\t\t\t\tif (!seen[n]) { window._allSubs.push({ name: n, posts: 0 }); seen[n] = true; }\n\t\t\t});\n\t\t\twindow._allSubs.forEach(function(s) {\n\t\t\t\tfor (var i = 0; i < window._topSubs.length; i++) {\n\t\t\t\t\tif (window._topSubs[i].name === s.name) { s.posts = window._topSubs[i].posts; break; }\n\t\t\t\t}\n\t\t\t});\n\t\t\tvar _selCounts = JSON.parse(document.getElementById('settings-selected-counts').textContent) || {};\n\t\t\tfor (var _sc in _selCounts) {\n\t\t\t\tvar _found = false;\n\t\t\t\tfor (var _i = 0; _i < window._allSubs.length; _i++) {\n\t\t\t\t\tif (window._allSubs[_i].name === _sc) {\n\t\t\t\t\t\tif (_selCounts[_sc] > window._allSubs[_i].posts) window._allSubs[_i].posts = _selCounts[_sc];\n\t\t\t\t\t\t_found = true; break;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (!_found) window._allSubs.push({ name: _sc, posts: _selCounts[_sc] });\n\t\t\t}\n\t\t\twindow._allSubs.sort(function(a, b) { return b.posts - a.posts; });\n\t\t})();\n\n\t\t// The homepage filter is now a native auto-growing <textarea> (#front_page_subs,\n\t\t// field-sizing:content — no JS height tracking) that is part of the settings\n\t\t// form (form=\"settings-form\") and submitted on Save. It accepts the full\n\t\t// navbar search grammar; the Go backend parses, validates and normalizes it\n\t\t// — there is no picker or capsule logic here. The NP field (#prefetch_unified,\n\t\t// name=\"prefetch_unified\", form=\"settings-form\") is likewise part of the form\n\t\t// and persisted on Save; the backend splits the merged '+'-separated stream\n\t\t// into prefetch_subs and prefetch_sub_modes on save. The picker just keeps a\n\t\t// lightweight subreddit-suggestion list and appends bare \"+name\" entries;\n\t\t// override clauses must be hand-typed. NPPicker.onChange (fired on blur and on\n\t\t// each pick) only flags the form dirty so the Save bar appears.\n\t\tvar prefetchPicker = NPPicker({\n\t\t\tinputId: 'prefetch_unified',\n\t\t\tlistId: 'prefetch_sub_list',\n\t\t\tonChange: function() { checkDirty(); }\n\t\t});\n\n\t\t// \"Disable homepage\" collapses just the query box; the toggle itself stays\n\t\t// visible so it can be turned back on. The actual disable (redirect to\n\t\t// /archive) is applied by the backend when the form is saved.\n\t\tfunction toggleHomepage(cb) {\n\t\t\tdocument.getElementById('homepage_query_row').style.display = cb.checked ? 'none' : '';\n\t\t}\n\n\t\tvar saveBar = document.getElementById('save-bar');\n\t\tvar form = document.querySelector('#settings form');\n\n\t\tfunction serializeForm() {\n\t\t\tvar parts = [];\n\t\t\tnew FormData(form).forEach(function(v, k) { parts.push(k + '=' + v); });\n\t\t\treturn parts.join('&');\n\t\t}\n\n\t\tvar initialSerialized = serializeForm();\n\n\t\tfunction checkDirty() {\n\t\t\tsaveBar.classList.toggle('visible', serializeForm() !== initialSerialized);\n\t\t}\n\n\t\tform.addEventListener('change', checkDirty);\n\t\tform.addEventListener('input', checkDirty);\n\n\t\t// The homepage filter and its disable toggle live outside the <form> element\n\t\t// (associated via form=\"settings-form\"), so their events don't bubble to it\n\t\t// — wire them up directly. FormData(form) still includes them on serialize.\n\t\t['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {\n\t\t\tvar el = document.getElementById(id);\n\t\t\tif (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }\n\t\t});\n\n\t\tfunction togglePrefetch(cb) {\n\t\t\tif (cb.checked) {\n\t\t\t\tcb.checked = false;\n\t\t\t\tdocument.getElementById('prefetch-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tdocument.getElementById('prefetch_picker').style.display = 'none';\n\t\t\t\tsubmitPrefetchSetting('off');\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmPrefetch() {\n\t\t\tdocument.getElementById('prefetch-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('enable_natural_prefetch').checked = true;\n\t\t\tdocument.getElementById('prefetch_picker').style.display = '';\n\t\t\tsubmitPrefetchSetting('on');\n\t\t\tif (prefetchPicker) prefetchPicker.render();\n\t\t}\n\n\t\tfunction cancelPrefetch() {\n\t\t\tdocument.getElementById('prefetch-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction submitPrefetchSetting(val) {\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('enable_natural_prefetch', val);\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)});\n\t\t}\n\n\t\tfunction savePrefetchThreshold(val) {\n\t\t\tvar n = parseInt(val, 10);\n\t\t\tif (isNaN(n) || n < 1 || n > 99) return;\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('prefetch_threshold', String(n));\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)});\n\t\t}\n\n\t\tfunction toggleUpstream(cb) {\n\t\t\t// Checking the box turns ON the protection (no upstream traffic) — safe,\n\t\t\t// apply immediately. Unchecking re-enables upstream access; on a public\n\t\t\t// deployment that can burn through the session-token quota and get the\n\t\t\t// instance's IP blacklisted, so confirm before allowing it.\n\t\t\tif (!cb.checked) {\n\t\t\t\tcb.checked = true;\n\t\t\t\tdocument.getElementById('upstream-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tcheckDirty();\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmUpstream() {\n\t\t\tdocument.getElementById('upstream-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('disable_initiative_upstream_access').checked = false;\n\t\t\tcheckDirty();\n\t\t}\n\n\t\tfunction cancelUpstream() {\n\t\t\tdocument.getElementById('upstream-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction toggleDebug(cb) {\n\t\t\tif (cb.checked) {\n\t\t\t\tcb.checked = false;\n\t\t\t\tdocument.getElementById('debug-modal').classList.add('visible');\n\t\t\t} else {\n\t\t\t\tsubmitDebugSetting('off');\n\t\t\t}\n\t\t}\n\n\t\tfunction confirmDebug() {\n\t\t\tdocument.getElementById('debug-modal').classList.remove('visible');\n\t\t\tdocument.getElementById('enable_debug').checked = true;\n\t\t\tsubmitDebugSetting('on');\n\t\t}\n\n\t\tfunction cancelDebug() {\n\t\t\tdocument.getElementById('debug-modal').classList.remove('visible');\n\t\t}\n\n\t\tfunction submitDebugSetting(val) {\n\t\t\tvar fd = new FormData();\n\t\t\tfd.append('enable_debug', val);\n\t\t\tfetch('/settings', {method:'POST', body: new URLSearchParams(fd)})\n\t\t\t\t.then(function() { location.reload(); });\n\t\t}\n\t</script><div class=\"modal-overlay\" id=\"prefetch-modal\" onclick=\"if(event.target===this)cancelPrefetch()\"><div class=\"modal-box\"><h2>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var117 string
+		templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.np_modal_title"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 546, Col: 42}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 235, "</h2><p>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var118 string
+		templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.np_modal_body"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 547, Col: 40}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 236, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelPrefetch()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var119 string
+		templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.cancel"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 549, Col: 87}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "</button> <button class=\"modal-confirm\" onclick=\"confirmPrefetch()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var120 string
+		templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.accept_risk"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 550, Col: 94}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "</button></div></div></div><div class=\"modal-overlay\" id=\"upstream-modal\" onclick=\"if(event.target===this)cancelUpstream()\"><div class=\"modal-box\"><h2>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var121 string
+		templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.upstream_modal_title"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 556, Col: 48}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, "</h2><p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var122 string
-		templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.np_modal_title"))
+		templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.upstream_modal_body"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 559, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 557, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "</p><p>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var123 string
+		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.confirm_continue"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 558, Col: 43}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelUpstream()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var124 string
+		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.cancel"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 560, Col: 87}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, "</button> <button class=\"modal-confirm\" onclick=\"confirmUpstream()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var125 string
+		templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.accept_risk"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 561, Col: 94}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, "</button></div></div></div><div class=\"modal-overlay\" id=\"debug-modal\" onclick=\"if(event.target===this)cancelDebug()\"><div class=\"modal-box\"><h2>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var126 string
+		templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.debug_modal_title"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 567, Col: 45}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2323,172 +2378,55 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var123 string
-		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.np_modal_body"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 560, Col: 40}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelPrefetch()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var124 string
-		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.cancel"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 562, Col: 87}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, "</button> <button class=\"modal-confirm\" onclick=\"confirmPrefetch()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var125 string
-		templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.accept_risk"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 563, Col: 94}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, "</button></div></div></div><div class=\"modal-overlay\" id=\"upstream-modal\" onclick=\"if(event.target===this)cancelUpstream()\"><div class=\"modal-box\"><h2>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var126 string
-		templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.upstream_modal_title"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 569, Col: 48}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, "</h2><p>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		var templ_7745c5c3_Var127 string
-		templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.upstream_modal_body"))
+		templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.debug_modal_body"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 570, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 568, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var127))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 249, "</p><p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, "</p><p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var128 string
 		templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.confirm_continue"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 571, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 569, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var128))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 250, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelUpstream()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelDebug()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var129 string
 		templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.cancel"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 573, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 571, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 251, "</button> <button class=\"modal-confirm\" onclick=\"confirmUpstream()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, "</button> <button class=\"modal-confirm\" onclick=\"confirmDebug()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var130 string
 		templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.accept_risk"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 574, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 572, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 252, "</button></div></div></div><div class=\"modal-overlay\" id=\"debug-modal\" onclick=\"if(event.target===this)cancelDebug()\"><div class=\"modal-box\"><h2>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var131 string
-		templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.debug_modal_title"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 580, Col: 45}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var131))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 253, "</h2><p>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var132 string
-		templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.debug_modal_body"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 581, Col: 43}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 254, "</p><p>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var133 string
-		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.confirm_continue"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 582, Col: 43}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 255, "</p><div class=\"modal-actions\"><button class=\"modal-cancel\" onclick=\"cancelDebug()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var134 string
-		templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.cancel"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 584, Col: 84}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 256, "</button> <button class=\"modal-confirm\" onclick=\"confirmDebug()\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var135 string
-		templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "settings.accept_risk"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 585, Col: 91}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 257, "</button></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, "</button></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

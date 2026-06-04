@@ -256,6 +256,27 @@ func RewriteURLs(html string) string {
 	return s
 }
 
+// commentImageAutolinkRe matches markdown auto-links to image proxy paths
+// (text == href), the canonical form Reddit emits for an image pasted or
+// uploaded into a comment body. Must run AFTER RewriteURLs so the hrefs are
+// already local. Backreferences aren't available in RE2; the text-equals-href
+// check is enforced in EmbedCommentImages.
+var commentImageAutolinkRe = regexp.MustCompile(`<a href="(/(?:preview/(?:pre|external-pre)|img)/[^"]+)">([^<]+)</a>`)
+
+// EmbedCommentImages turns comment-body auto-linked image URLs into inline
+// <img> tags, so a comment whose entire body is one preview.redd.it link
+// actually renders the image. Anchors whose visible text differs from the
+// href are left alone — those are user-written labels, not auto-links.
+func EmbedCommentImages(body string) string {
+	return commentImageAutolinkRe.ReplaceAllStringFunc(body, func(match string) string {
+		m := commentImageAutolinkRe.FindStringSubmatch(match)
+		if len(m) != 3 || m[1] != m[2] {
+			return match
+		}
+		return fmt.Sprintf(`<a href="%s" target="_blank" rel="nofollow noopener" class="comment_image"><img loading="lazy" alt="Comment image" src="%s"></a>`, m[1], m[1])
+	})
+}
+
 // RewriteEmotes rewrites emote references in comment body HTML using media_metadata.
 // mediaMetadata is the raw JSON media_metadata object from Reddit.
 // body is the body_html content.

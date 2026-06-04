@@ -23,18 +23,18 @@ func (h *Handler) notifyUserRequest() {
 	}
 }
 
-func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]reddit.Post, string, string, error) {
+func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, t, after, before string, limit int) ([]reddit.Post, string, string, error) {
 	if h.oauthHolder.HasAvailableTokens() {
-		posts, before, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, t, after, limit)
+		posts, beforeCur, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, t, after, before, limit)
 		h.recordUpstream(ctx)
 		if err == nil {
 			h.notifyUserRequest()
-			return posts, before, after, nil
+			return posts, beforeCur, after, nil
 		}
 	}
-	posts, before, afterCur, err := h.publicCli.FetchSubreddit(ctx, sub, sort, t, after, limit)
+	posts, beforeCur, afterCur, err := h.publicCli.FetchSubreddit(ctx, sub, sort, t, after, before, limit)
 	h.recordUpstream(ctx)
-	return posts, before, afterCur, err
+	return posts, beforeCur, afterCur, err
 }
 
 func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (reddit.Post, []reddit.Comment, error) {

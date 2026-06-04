@@ -342,7 +342,7 @@ func TestFetchSubreddit_Success(t *testing.T) {
 		w.Write([]byte(listing))
 	}))
 
-	posts, before, after, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", 25)
+	posts, before, after, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", "", 25)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestFetchSubreddit_PropagatesError(t *testing.T) {
 		w.Write([]byte(`{"message":"slow down"}`))
 	}))
 
-	_, _, _, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", 25)
+	_, _, _, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", "", 25)
 	if err != ErrRateLimited {
 		t.Fatalf("err = %v, want ErrRateLimited", err)
 	}
@@ -470,7 +470,7 @@ func TestClient_ConcurrentFetch(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < iters; i++ {
 				sub := subs[(g+i)%len(subs)]
-				if _, _, _, err := c.FetchSubreddit(context.Background(), sub, "hot", "", "", 25); err != nil {
+				if _, _, _, err := c.FetchSubreddit(context.Background(), sub, "hot", "", "", "", 25); err != nil {
 					t.Errorf("FetchSubreddit(%s): %v", sub, err)
 					return
 				}

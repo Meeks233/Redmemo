@@ -113,94 +113,15 @@ templ searchContent(d SearchPageData) {
 		}
 		if d.IsLocalOnly && len(d.Posts) > 0 {
 				@localInfiniteLoader(searchEndpoint(d.Sub), searchLocalQS(d.Params.Query, d.Params.Sort), d.PageSize, len(d.Posts), d.Interval)
-			} else if d.Params.Type != "sr_user" && d.Params.After != "" {
-			<footer id="search_more_footer">
-				<button
-					type="button"
-					id="search_load_more"
-					class="load-more-btn"
-					data-q={ d.Params.Query }
-					data-sub={ d.Sub }
-					data-sort={ d.Params.Sort }
-					data-t={ d.Params.Timeframe }
-					data-after={ d.Params.After }
-					data-label={ T(ctx, "loadmore.label") }
-					data-loading={ T(ctx, "loadmore.loading") }
-					data-quota={ T(ctx, "loadmore.quota") }
-					data-no-more={ T(ctx, "loadmore.no_more") }
-					data-empty={ T(ctx, "loadmore.empty") }
-					data-failed={ T(ctx, "loadmore.failed") }
-					accesskey="N"
-				>
-					<span class="load-more-spinner" aria-hidden="true">
-						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"></path><path d="m16.2 7.8 2.9-2.9"></path><path d="M18 12h4"></path><path d="m16.2 16.2 2.9 2.9"></path><path d="M12 18v4"></path><path d="m4.9 19.1 2.9-2.9"></path><path d="M2 12h4"></path><path d="m4.9 4.9 2.9 2.9"></path></svg>
-					</span>
-					<span class="load-more-label">{ T(ctx, "loadmore.label") }</span>
-				</button>
-				<span id="search_more_msg" class="listing_warn" style="display:none"></span>
+			} else if d.Params.Type != "sr_user" && (d.Ends[0] != "" || d.Ends[1] != "") {
+			<footer>
+				if d.Ends[0] != "" {
+					<a href={ templ.SafeURL(searchPageHref(d.Sub, d.Params.Query, d.Params.Sort, d.Params.Timeframe, d.Ends[0], "before")) } accesskey="P">{ T(ctx, "nav.prev") }</a>
+				}
+				if d.Ends[1] != "" {
+					<a href={ templ.SafeURL(searchPageHref(d.Sub, d.Params.Query, d.Params.Sort, d.Params.Timeframe, d.Ends[1], "after")) } accesskey="N">{ T(ctx, "nav.next") }</a>
+				}
 			</footer>
-			<script>
-				(function() {
-					var btn = document.getElementById('search_load_more');
-					var msg = document.getElementById('search_more_msg');
-					var results = document.getElementById('posts');
-					var miss = document.getElementById('search_miss_state');
-					var hint = document.getElementById('search_miss_hint');
-					if (!btn || !results) return;
-					var label = btn.querySelector('.load-more-label');
-					var loading = false;
-					function finish(text) { msg.textContent = text; msg.style.display = ''; btn.style.display = 'none'; }
-					function reset() { btn.classList.remove('loading'); btn.disabled = false; label.textContent = btn.dataset.label; loading = false; }
-					function showMiss() { if (miss) miss.hidden = false; }
-					function hideMiss() { if (miss) miss.hidden = true; }
-					btn.addEventListener('click', function() {
-						if (loading) return;
-						loading = true;
-						btn.disabled = true;
-						btn.classList.add('loading');
-						label.textContent = btn.dataset.loading;
-						msg.style.display = 'none';
-						var d = btn.dataset;
-						var base = d.sub ? '/r/' + encodeURIComponent(d.sub) + '/search' : '/search';
-						var url = base + '?partial=1'
-							+ '&q=' + encodeURIComponent(d.q)
-							+ '&sort=' + encodeURIComponent(d.sort || '')
-							+ '&t=' + encodeURIComponent(d.t || '')
-							+ '&after=' + encodeURIComponent(d.after || '');
-						fetch(url).then(function(r) {
-							var degraded = r.headers.get('X-Degraded');
-							var next = r.headers.get('X-Next-After') || '';
-							return r.text().then(function(html) { return { degraded: degraded, next: next, html: html }; });
-						}).then(function(res) {
-							if (res.degraded) { finish(btn.dataset.quota); return; }
-							var hasHtml = !!res.html.trim();
-							if (hasHtml) {
-								var tmp = document.createElement('div');
-								tmp.innerHTML = res.html;
-								while (tmp.firstChild) results.appendChild(tmp.firstChild);
-								hideMiss();
-							}
-							// Reddit still has more pages: keep paging even when this
-							// page matched nothing after local filtering. A page that
-							// filtered down to zero is a graceful miss, not the end.
-							if (res.next) {
-								btn.dataset.after = res.next;
-								if (!hasHtml) showMiss();
-								reset();
-								return;
-							}
-							// No further cursor: upstream is genuinely exhausted.
-							if (hasHtml) {
-								finish(btn.dataset.noMore);
-							} else {
-								showMiss();
-								if (hint) hint.textContent = btn.dataset.empty;
-								btn.style.display = 'none';
-							}
-						}).catch(function() { msg.textContent = btn.dataset.failed; msg.style.display = ''; reset(); });
-					});
-				})();
-			</script>
 		}
 	</div>
 }

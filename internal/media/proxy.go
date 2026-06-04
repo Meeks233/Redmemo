@@ -67,17 +67,27 @@ func NewProxy(cfg config.MediaConfig, mediaStore *store.MediaIndexStore, unavail
 		cache:            c,
 		// Reddit's media CDNs (v.redd.it / i.redd.it) increasingly stall or
 		// reset connections whose TLS handshake doesn't look like a browser's.
-		// Use the same uTLS-spoofed transport every other Reddit-facing client
-		// uses — without it v.redd.it video/audio segment fetches hang until
-		// they time out. The 3-minute ceiling covers large 1080p clips; the old
+		// Use the same uTLS-spoofed TLS handshake every other Reddit-facing
+		// client uses — without it v.redd.it video/audio segment fetches hang
+		// until they time out. The MEDIA variant of the spoof keeps the
+		// ClientHello byte-identical but inflates the HTTP/2 flow-control
+		// windows to 64 MiB stream / 256 MiB connection so a single multi-MiB
+		// Range response (or a viewport full of concurrent video downloads
+		// sharing one h2 conn) never gets RST_STREAM'd with FLOW_CONTROL_ERROR
+		// mid-body — the "1s then corrupt" symptom on direct-link/fallback
+		// video URLs. The 3-minute ceiling covers large 1080p clips; the old
 		// 60s cap aborted them mid-download even when the mux context allowed
 		// longer.
-		httpClient:  transport.NewSpoofedClient(3 * time.Minute),
+		httpClient:  transport.NewMediaSpoofedClient(3 * time.Minute),
 		userAgentFn: userAgentFn,
 	}
 }
 
 func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
+	// Every freshly-arrived media request gets a new generation so it preempts
+	// older in-flight downloads at the global priority gate. Images/video go in
+	// at video tier; standalone audio uses ServeSeparateAudio which tags audio.
+	r = r.WithContext(WithPriority(r.Context(), Priority{Gen: NextGen(), Kind: KindVideo}))
 	originalURL := html.UnescapeString(r.URL.Query().Get("url"))
 	if originalURL == "" {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
@@ -680,10 +690,17 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 		if status == http.StatusNotFound || status == http.StatusGone {
 			p.markPermFailed(originalURL)
 		}
-		// 4xx/5xx and network errors all feed the persistent unavailable
-		// ledger: three strikes parks the URL until the user actively
-		// re-opens the owning post (handler.servePost revives).
-		p.recordUnavailable(originalURL, status, err.Error())
+		// Only feed the persistent unavailable ledger when the failure
+		// actually points at upstream: a 4xx/5xx response, or a transport
+		// error before any response (status==0). A successful 2xx that
+		// errors mid-body is OUR failure — the bandwidth limiter / 10s
+		// ceiling clipped a stream that Reddit was happily serving — and
+		// recording it as an availability strike entombs perfectly alive
+		// videos under the "Sorry, we missed it" placeholder.
+		isUpstreamFailure := status == 0 || status >= 400
+		if isUpstreamFailure {
+			p.recordUnavailable(originalURL, status, err.Error())
+		}
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 
@@ -821,15 +838,40 @@ func (p *Proxy) getRangeWith(ctx context.Context, url string, start int64, extra
 // chunks until the content ends. It returns the first chunk's status code and
 // header (so callers can read Content-Type / total size) plus the bytes
 // written. A non-2xx first response returns its status with a non-nil error.
+//
+// Mid-body errors after the first chunk's status has been observed are retried
+// in place: the caller's response headers may already be committed (see
+// reverseProxy), so silently aborting at byte N would deliver a truncated body
+// the browser surfaces as "corrupt mp4" 1 second into playback. Each chunk's
+// own Range fetch is re-attempted streamReadRetries times before bubbling the
+// error up.
 func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, extra fhttp.Header, w io.Writer) (status int, hdr fhttp.Header, written int64, err error) {
-	// Throttle every CDN byte through the global media bandwidth bucket —
-	// see bwlimit.go. Wrapping at this single chokepoint covers Download,
-	// reverseProxy, and the mux audio/video probes uniformly.
-	w = newLimitedWriter(ctx, w)
+	// Throttle every CDN byte through the global media bandwidth bucket AND
+	// the priority gate — see bwlimit.go / prio.go. Wrapping at this single
+	// chokepoint covers Download, reverseProxy, and the mux audio/video
+	// probes uniformly; release() unparks lower-priority waiters once we're
+	// done.
+	lw := newLimitedWriter(ctx, w)
+	defer lw.release()
+	w = lw
 	offset := start
 	total := int64(-1)
+	bodyRetries := 0
 	for {
-		resp, derr := p.getRangeWith(ctx, url, offset, extra)
+		var (
+			resp *fhttp.Response
+			derr error
+		)
+		// Open one chunk's Range request, retrying transport errors (h2
+		// FLOW_CONTROL_ERROR / RST_STREAM / dropped keep-alive) so a single
+		// flaky connection doesn't trash a multi-chunk download.
+		for attempt := 0; ; attempt++ {
+			resp, derr = p.getRangeWith(ctx, url, offset, extra)
+			if derr == nil || attempt >= streamReadRetries || ctx.Err() != nil {
+				break
+			}
+			time.Sleep(streamReadRetryDelay)
+		}
 		if derr != nil {
 			return status, hdr, written, derr
 		}
@@ -845,7 +887,20 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 		n, cerr := io.Copy(w, resp.Body)
 		resp.Body.Close()
 		written += n
+		offset += n
 		if cerr != nil {
+			// Mid-body stream error. If we have a known total and haven't
+			// reached it yet, re-issue the Range from the new offset. n bytes
+			// already shipped to w are fine; the retry resumes after them.
+			// Without this, a single h2 FLOW_CONTROL_ERROR / RST_STREAM hands
+			// the browser a truncated mp4 that plays for 1s then shows the
+			// broken-media glyph.
+			if total > 0 && offset < total && bodyRetries < streamReadRetries && ctx.Err() == nil {
+				bodyRetries++
+				log.Printf("media: stream truncated at %d/%d for %s: %v; retrying (%d/%d)", offset, total, url, cerr, bodyRetries, streamReadRetries)
+				time.Sleep(streamReadRetryDelay)
+				continue
+			}
 			return status, hdr, written, cerr
 		}
 		// 200 means the server ignored Range and sent the whole body in one
@@ -853,7 +908,6 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 		if status == http.StatusOK {
 			return status, hdr, written, nil
 		}
-		offset += n
 		switch {
 		case n == 0:
 			return status, hdr, written, nil
@@ -864,6 +918,15 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 		}
 	}
 }
+
+// streamReadRetries / streamReadRetryDelay bound how aggressively
+// streamRangedTo recovers from transient h2 stream errors mid-body. Two extra
+// attempts per chunk covers the typical FLOW_CONTROL_ERROR / RST_STREAM blip
+// without letting a permanently-broken upstream hang the request.
+const (
+	streamReadRetries    = 2
+	streamReadRetryDelay = 250 * time.Millisecond
+)
 
 // reverseProxy streams targetURL straight through to the client, fetching it
 // from the CDN in flow-control-safe chunks (see streamRangedTo) while presenting

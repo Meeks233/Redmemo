@@ -80,10 +80,11 @@ func muxFragmentedMP4(videoPath, audioPath, outPath string) error {
 	}
 	defer out.Close()
 
-	// ftyp: copy the video's ftyp verbatim — its brands already advertise an
-	// MP4 profile every standard player accepts. The output is progressive, so
-	// no fragmentation-specific brand is required.
-	if err := copyFtyp(out, vr); err != nil {
+	// ftyp: emit a fresh progressive-MP4 ftyp. The source DASH/CMAF segment's
+	// ftyp carries `dash`/`cmfc` brands; some browsers pick those up and try to
+	// parse our output as fragmented MP4, stalling at ~4 s when they fail to
+	// find a moof. See writeProgressiveFtyp for the rationale.
+	if err := writeProgressiveFtyp(out); err != nil {
 		return fmt.Errorf("write ftyp: %w", err)
 	}
 
@@ -124,6 +125,13 @@ type trackInfo struct {
 	trexSampleDur   uint32
 	trexSampleSize  uint32
 	trexSampleFlags uint32
+	// tkhdWidth / tkhdHeight carry the source's per-track display dimensions
+	// in 16.16 fixed-point. The output tkhd MUST copy these — emitting a
+	// video tkhd with width/height = 0 makes Chrome render the <video> as a
+	// zero-pixel box even when the avc1 sample entry has the correct frame
+	// size, which matches the "video downloads but doesn't show" symptom.
+	tkhdWidth  uint32
+	tkhdHeight uint32
 }
 
 // sampleInfo names one decoded sample's location in the SOURCE file plus its
@@ -162,7 +170,8 @@ func readTrackInfo(r io.ReadSeeker) (*trackInfo, error) {
 	if err != nil || len(tkhds) == 0 {
 		return nil, fmt.Errorf("tkhd missing: %w", err)
 	}
-	originalTrackID := tkhds[0].Payload.(*mp4.Tkhd).TrackID
+	srcTkhd := tkhds[0].Payload.(*mp4.Tkhd)
+	originalTrackID := srcTkhd.TrackID
 
 	mdhds, err := mp4.ExtractBoxWithPayload(r, trak, mp4.BoxPath{mp4.BoxTypeMdia(), mp4.BoxTypeMdhd()})
 	if err != nil || len(mdhds) == 0 {
@@ -194,6 +203,8 @@ func readTrackInfo(r io.ReadSeeker) (*trackInfo, error) {
 		mediaTimescale: mdhd.Timescale,
 		movieTimescale: movieTS,
 		mediaLanguage:  lang,
+		tkhdWidth:      srcTkhd.Width,
+		tkhdHeight:     srcTkhd.Height,
 	}
 	if len(stsds) > 0 {
 		info.stsdBox = stsds[0]
@@ -404,17 +415,36 @@ func parseMoofIntoSamples(r io.ReadSeeker, moof *mp4.BoxInfo, trexDefs map[uint3
 	return &fragSamples{samples: samples}, nil
 }
 
-// copyFtyp finds the video source's ftyp box and writes it verbatim to out.
-func copyFtyp(out *os.File, vr io.ReadSeeker) error {
-	ftyps, err := mp4.ExtractBox(vr, nil, mp4.BoxPath{mp4.BoxTypeFtyp()})
-	if err != nil {
-		return err
+// writeProgressiveFtyp emits a fresh ftyp advertising progressive-MP4 brands
+// only. Copying the source DASH/CMAF segment's ftyp verbatim drags along the
+// `dash`/`cmfc` brands, and major browsers (Chrome/Edge confirmed) switch to
+// fragmented-MP4 / MSE parsing on those brands — they then hunt for moof boxes
+// after the first mdat and stall at the first chunk boundary (~4s of video)
+// when none exist, because our output is progressive (mdat + tail moov). The
+// brand set below mirrors what `ffmpeg -movflags +faststart` writes for plain
+// AVC+AAC: `mp42` major, with `isom`/`mp41`/`mp42`/`avc1` compatibles. No
+// `dash`, no `cmfc`, no `iso5/6` — every desktop and mobile player treats this
+// as a progressive AVC/AAC container.
+func writeProgressiveFtyp(out *os.File) error {
+	const header = 8 // size(4) + type(4)
+	brands := [][]byte{
+		[]byte("isom"),
+		[]byte("mp41"),
+		[]byte("mp42"),
+		[]byte("avc1"),
 	}
-	if len(ftyps) == 0 {
-		return errors.New("video missing ftyp")
+	body := make([]byte, 0, 8+4*len(brands))
+	body = append(body, []byte("mp42")...)        // major_brand
+	body = append(body, 0x00, 0x00, 0x00, 0x00)   // minor_version
+	for _, b := range brands {
+		body = append(body, b...)
 	}
-	w := mp4.NewWriter(out)
-	return w.CopyBox(vr, ftyps[0])
+	box := make([]byte, header+len(body))
+	binary.BigEndian.PutUint32(box[0:4], uint32(header+len(body)))
+	copy(box[4:8], []byte("ftyp"))
+	copy(box[8:], body)
+	_, err := out.Write(box)
+	return err
 }
 
 // writeMdat emits a single large (64-bit) mdat holding all sample bytes,
@@ -577,11 +607,18 @@ func writeTrak(w *mp4.Writer, src io.ReadSeeker, info *trackInfo,
 	}
 
 	// tkhd: enabled+in-movie+in-preview flags, duration in movie timescale.
+	// Width/Height in 16.16 fixed-point come from the source's tkhd — a video
+	// track with width=0/height=0 makes Chrome render the <video> element as
+	// a zero-pixel box even though the avc1 sample entry has the correct
+	// frame size. Audio tracks legitimately carry 0/0 here, which the source
+	// already does, so the verbatim copy is correct for both handlers.
 	tkhd := &mp4.Tkhd{
 		TrackID:    info.trackID,
 		DurationV0: uint32(dur),
 		Volume:     0x0100,
 		Matrix:     [9]int32{0x00010000, 0, 0, 0, 0x00010000, 0, 0, 0, 0x40000000},
+		Width:      info.tkhdWidth,
+		Height:     info.tkhdHeight,
 	}
 	tkhd.SetFlags(0x000007) // track_enabled | track_in_movie | track_in_preview
 	if err := writeBox(w, tkhd); err != nil {

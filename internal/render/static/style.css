@@ -1783,6 +1783,20 @@ video.lazy-media:not([src]) {
     color: var(--accent);
 }
 
+.comment_body a.comment_image {
+    display: inline-block;
+    text-decoration: none;
+    margin: 4px 0;
+}
+
+.comment_body a.comment_image img {
+    max-width: 100%;
+    max-height: 480px;
+    height: auto;
+    border-radius: 4px;
+    display: block;
+}
+
 .comment_body_filtered {
     opacity: 0.4;
     font-weight: normal;

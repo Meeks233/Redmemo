@@ -128,6 +128,7 @@ templ settingsContent(d SettingsPageData) {
 							<div class="prefs-group">
 								<label for="comment_sort">{ T(ctx, "settings.comment_sort") }</label>
 								<select name="comment_sort" id="comment_sort">
+									<option value="confidence" selected?={ d.Prefs.CommentSort == "confidence" }>{ T(ctx, "sort.confidence") }</option>
 									<option value="new" selected?={ d.Prefs.CommentSort == "new" }>{ T(ctx, "sort.new") }</option>
 									<option value="new_archive" selected?={ d.Prefs.CommentSort == "new_archive" }>{ T(ctx, "sort.archive") }</option>
 									<option value="top" selected?={ d.Prefs.CommentSort == "top" }>{ T(ctx, "sort.top") }</option>
@@ -353,19 +354,6 @@ templ settingsContent(d SettingsPageData) {
 								</tr>
 							</tbody>
 						</table>
-						if len(d.SubredditStats) > 0 {
-							<table>
-								<thead><tr><th>{ T(ctx, "settings.th_archived_sub") }</th><th>{ T(ctx, "settings.th_posts") }</th></tr></thead>
-								<tbody>
-									for _, s := range d.SubredditStats {
-										<tr>
-											<td><a href={ templ.SafeURL("/archive/r/" + s.Name) }>r/{ s.Name }</a></td>
-											<td>{ i64(s.PostCount) }</td>
-										</tr>
-									}
-								</tbody>
-							</table>
-						}
 					</fieldset>
 				</div>
 			</div>

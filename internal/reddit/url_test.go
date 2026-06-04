@@ -237,6 +237,31 @@ func TestRewriteEmotes(t *testing.T) {
 	}
 }
 
+func TestEmbedCommentImages(t *testing.T) {
+	body := `<p><a href="/preview/pre/abc.jpeg?width=720&amp;s=xyz">/preview/pre/abc.jpeg?width=720&amp;s=xyz</a></p>`
+	got := EmbedCommentImages(body)
+	if !strings.Contains(got, "<img") || !strings.Contains(got, `src="/preview/pre/abc.jpeg?width=720&amp;s=xyz"`) {
+		t.Errorf("auto-linked image should embed <img>, got: %q", got)
+	}
+}
+
+func TestEmbedCommentImages_NonAutoLink(t *testing.T) {
+	// Text differs from href — user-written label, leave alone.
+	body := `<a href="/preview/pre/abc.jpeg?s=1">click here</a>`
+	got := EmbedCommentImages(body)
+	if got != body {
+		t.Errorf("user-labeled anchor should be untouched, got: %q", got)
+	}
+}
+
+func TestEmbedCommentImages_IRedditImg(t *testing.T) {
+	body := `<a href="/img/foo.png">/img/foo.png</a>`
+	got := EmbedCommentImages(body)
+	if !strings.Contains(got, `<img loading="lazy"`) {
+		t.Errorf("i.redd.it img auto-link should be embedded, got: %q", got)
+	}
+}
+
 func TestRewriteEmotes_Empty(t *testing.T) {
 	result := RewriteEmotes(nil, "no emotes here")
 	if result != "no emotes here" {

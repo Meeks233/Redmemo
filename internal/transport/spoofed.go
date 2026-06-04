@@ -18,8 +18,27 @@ import (
 // call site. Extra options (e.g. WithNotFollowRedirects) are appended last so
 // callers can override the defaults.
 func NewSpoofedClient(timeout time.Duration, opts ...tls_client.HttpClientOption) tls_client.HttpClient {
+	return newClientWithProfile(redditClientProfile(), timeout, opts...)
+}
+
+// NewMediaSpoofedClient builds a tls-client tuned for v.redd.it / i.redd.it CDN
+// fetches. TLS ClientHello stays byte-identical to the API client so any
+// fingerprint-driven CDN gating still passes, but the HTTP/2 flow-control
+// windows are blown up by 16× so a single multi-MiB media stream — or a page
+// full of concurrent video downloads sharing one h2 connection — never
+// exhausts the shared connection-level window and gets RST_STREAM'd with
+// FLOW_CONTROL_ERROR mid-body (the "1s then corrupt" symptom). The Akamai h2
+// SETTINGS fingerprint diverges from the captured app profile, but the CDN
+// origin (Fastly) does not fingerprint h2 SETTINGS the way oauth.reddit.com's
+// Akamai edge does; verified against captures of the real app, which itself
+// varies these windows by build.
+func NewMediaSpoofedClient(timeout time.Duration, opts ...tls_client.HttpClientOption) tls_client.HttpClient {
+	return newClientWithProfile(mediaClientProfile(), timeout, opts...)
+}
+
+func newClientWithProfile(profile profiles.ClientProfile, timeout time.Duration, opts ...tls_client.HttpClientOption) tls_client.HttpClient {
 	base := []tls_client.HttpClientOption{
-		tls_client.WithClientProfile(redditClientProfile()),
+		tls_client.WithClientProfile(profile),
 		tls_client.WithTimeoutSeconds(int(timeout.Seconds())),
 	}
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), append(base, opts...)...)
@@ -60,6 +79,45 @@ func redditClientProfile() profiles.ClientProfile {
 		0,                       // streamID
 		false,                   // allowHTTP
 		nil, nil, 0, nil, false, // HTTP/3 — unused
+	)
+}
+
+// mediaClientProfile reuses the API client's TLS ClientHello (same JA3/JA4)
+// but inflates the HTTP/2 flow-control windows so v.redd.it CDN media streams
+// don't asphyxiate at the 16 MiB connection ceiling.
+//
+// Akamai h2: 4:67108864|268435455|0|m,p,a,s
+//
+//   - SETTINGS INITIAL_WINDOW_SIZE = 64 MiB. fhttp/http2 mirrors this into
+//     `cc.streamFlow` so a single Range response can carry up to 64 MiB before
+//     a WINDOW_UPDATE is required (and auto-replenish fires every ~16 KiB).
+//   - connectionFlow = (2^28-1) ≈ 256 MiB. The post-SETTINGS WINDOW_UPDATE the
+//     client sends on the connection right after the preface, which sets the
+//     ceiling for "bytes outstanding across ALL streams on this conn before
+//     conn-level replenish". Auto-replenish triggers at half (~128 MiB) — high
+//     enough that a viewport full of muxable videos won't drain it.
+func mediaClientProfile() profiles.ClientProfile {
+	return profiles.NewClientProfile(
+		tls.ClientHelloID{
+			Client:  "RedMemoRedditAndroidMedia",
+			Version: "1",
+			SpecFactory: func() (tls.ClientHelloSpec, error) {
+				return redditClientHelloSpec(), nil
+			},
+		},
+		map[http2.SettingID]uint32{
+			http2.SettingInitialWindowSize: 67108864, // 64 MiB
+		},
+		[]http2.SettingID{
+			http2.SettingInitialWindowSize,
+		},
+		[]string{":method", ":path", ":authority", ":scheme"},
+		268435455, // connectionFlow — 2^28 - 1 (~256 MiB)
+		nil,
+		&http2.PriorityParam{},
+		0,
+		false,
+		nil, nil, 0, nil, false,
 	)
 }
 

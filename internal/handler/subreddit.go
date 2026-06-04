@@ -256,7 +256,8 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 
 	urlPath := r.URL.Path
 	after := r.URL.Query().Get("after")
-	cacheKey := htmlCacheKey(urlPath, "after="+after, prefs)
+	before := r.URL.Query().Get("before")
+	cacheKey := htmlCacheKey(urlPath, "after="+after+"&before="+before, prefs)
 
 	// 1. Cache — keyed by full prefs fingerprint so theme/NSFW/page_limit/lang
 	// changes never bleed across visitors. See handlePost for the long form.
@@ -275,7 +276,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	// 2. HR gate / OAuth quota. On degrade, skip upstream and fall through.
 	degrade, reason := h.shouldDegrade(r.Context())
 	if !degrade {
-		if h.renderSubredditFallback(w, r, sub, sort, t, after, prefs, limit, cacheKey) {
+		if h.renderSubredditFallback(w, r, sub, sort, t, after, before, prefs, limit, cacheKey) {
 			return
 		}
 	}
@@ -293,7 +294,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	h.serveDegradeMiss(w, r, reason)
 }
 
-func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, t, after string, prefs reddit.Preferences, limit int, cacheKey string) bool {
+func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request, sub, sort, t, after, before string, prefs reddit.Preferences, limit int, cacheKey string) bool {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -308,11 +309,11 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		after        string
 		err          error
 	}
-	flightKey := "sub|" + sub + "|" + sort + "|" + t + "|" + after + "|" + strconv.Itoa(limit)
+	flightKey := "sub|" + sub + "|" + sort + "|" + t + "|" + after + "|" + before + "|" + strconv.Itoa(limit)
 	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
-		posts, before, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, t, after, limit)
+		posts, beforeCursor, afterCursor, err := h.redditCli.FetchSubreddit(r.Context(), sub, sort, t, after, before, limit)
 		h.recordUpstream(r.Context())
-		res := &subFetchResult{posts: posts, before: before, after: afterCursor, err: err}
+		res := &subFetchResult{posts: posts, before: beforeCursor, after: afterCursor, err: err}
 		if err != nil {
 			if h.subStatusStore != nil {
 				h.subStatusStore.RecordFailure(sub, err.Error())
@@ -332,7 +333,14 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		log.Printf("handler: fallback fetch subreddit %s: %v", sub, res.err)
 		return false
 	}
-	posts, before, afterCursor := res.posts, res.before, res.after
+	posts, afterCursor := res.posts, res.after
+	// Reddit usually returns a null `before` even after a forward-paginated
+	// request, so res.before is unreliable for the Prev link. Mirror redlib:
+	// the Prev cursor for *this* page is whatever the user arrived with as
+	// `?after=` — i.e. the id of the last post on the page they came from.
+	// Clicking Prev navigates to `?before=<that>` so Reddit returns the prior
+	// page anchored just before that post.
+	prevCursor := after
 
 	// Active visit: cached if fresh, else fetch + persist (60-day TTL).
 	// Gated by the fetch_sub_about preference — when off (default), the HR
@@ -357,7 +365,7 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 		Sub:                subInfo,
 		Posts:              posts,
 		Sort:               [2]string{sort, t},
-		Ends:               [2]string{before, afterCursor},
+		Ends:               [2]string{prevCursor, afterCursor},
 		NoPosts:            len(posts) == 0,
 		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
 	}

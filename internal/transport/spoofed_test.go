@@ -15,6 +15,27 @@ func TestNewSpoofedClient(t *testing.T) {
 	}
 }
 
+func TestNewMediaSpoofedClient(t *testing.T) {
+	c := NewMediaSpoofedClient(7 * time.Second)
+	if c == nil {
+		t.Fatal("NewMediaSpoofedClient returned nil")
+	}
+}
+
+// TestMediaClientProfile pins the inflated h2 windows that keep multi-MiB
+// v.redd.it segment streams from being RST_STREAM'd at the 16 MiB ceiling.
+func TestMediaClientProfile(t *testing.T) {
+	p := mediaClientProfile()
+
+	settings := p.GetSettings()
+	if v, ok := settings[http2.SettingInitialWindowSize]; !ok || v != 67108864 {
+		t.Errorf("INITIAL_WINDOW_SIZE = %d (present=%v), want 67108864 (64 MiB)", v, ok)
+	}
+	if cf := p.GetConnectionFlow(); cf != 268435455 {
+		t.Errorf("connectionFlow = %d, want 268435455 (~256 MiB)", cf)
+	}
+}
+
 // TestRedditClientProfile pins the OkHttp HTTP/2 fingerprint that closes the
 // h2 gap: Akamai 4:16777216|16711681|0|m,p,a,s.
 func TestRedditClientProfile(t *testing.T) {

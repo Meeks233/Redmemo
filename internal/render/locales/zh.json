@@ -107,6 +107,7 @@
   "comments.search_placeholder": "搜索评论",
   "comments.containing": "包含「%s」的评论",
   "comments.all": "全部评论",
+  "comments.load_more": "再加载 5 条评论",
   "comments.view_all": "查看全部评论",
   "comments.show_parent": "显示父级评论",
 

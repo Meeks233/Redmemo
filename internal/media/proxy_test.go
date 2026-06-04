@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,6 +72,73 @@ func TestStreamRangedTo_ReassemblesAcrossChunks(t *testing.T) {
 	}
 	if (*ranges)[0] != "bytes=0-999" {
 		t.Errorf("first range = %q, want bytes=0-999", (*ranges)[0])
+	}
+}
+
+// TestStreamRangedTo_RetriesMidBodyTruncation simulates an h2
+// FLOW_CONTROL_ERROR style mid-body abort: the server closes the connection
+// after writing only part of a ranged response. streamRangedTo must re-issue
+// the Range from the new offset rather than ship a truncated body up to the
+// already-committed reverseProxy response headers.
+func TestStreamRangedTo_RetriesMidBodyTruncation(t *testing.T) {
+	body := makeBody(5000)
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		// Honor the Range header so the retry path resumes at the
+		// correct offset.
+		rng := r.Header.Get("Range")
+		start, end := int64(0), int64(len(body)-1)
+		if rng != "" {
+			var s, e int64
+			if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &s, &e); err == nil {
+				start, end = s, e
+			} else if _, err := fmt.Sscanf(rng, "bytes=%d-", &s); err == nil {
+				start = s
+			}
+		}
+		if end >= int64(len(body)) {
+			end = int64(len(body) - 1)
+		}
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		// Only the FIRST attempt truncates — write half the requested
+		// span then hijack and slam the connection.
+		if attempts == 1 {
+			half := (end - start + 1) / 2
+			w.Write(body[start : start+half])
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("hijacker unsupported")
+			}
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		w.Write(body[start : end+1])
+	}))
+	defer srv.Close()
+	withChunkSize(t, int64(len(body)))
+
+	var buf bytes.Buffer
+	status, _, n, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf)
+	if err != nil {
+		t.Fatalf("streamRangedTo: %v", err)
+	}
+	if status != http.StatusPartialContent {
+		t.Errorf("status = %d, want 206", status)
+	}
+	if n != int64(len(body)) {
+		t.Errorf("written = %d, want %d", n, len(body))
+	}
+	if !bytes.Equal(buf.Bytes(), body) {
+		t.Error("retried body does not match source")
+	}
+	if attempts < 2 {
+		t.Errorf("server saw %d attempts, want >= 2 (retry path)", attempts)
 	}
 }
 

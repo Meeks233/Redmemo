@@ -89,9 +89,19 @@
 		return false;
 	};
 
+	// Throttle scroll handling to one rAF; document.body.offsetHeight forces
+	// layout, so calling it on every raw scroll tick on a long, infinitely-
+	// scrolled page locked the main thread. Passive listener so the browser
+	// can scroll without waiting on this handler.
+	var scrollScheduled = false;
 	window.addEventListener('scroll', function() {
-		if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 50) {
-			loadMore();
-		}
-	});
+		if (scrollScheduled) return;
+		scrollScheduled = true;
+		window.requestAnimationFrame(function() {
+			scrollScheduled = false;
+			if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 50) {
+				loadMore();
+			}
+		});
+	}, { passive: true });
 })();

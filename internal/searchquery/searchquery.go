@@ -716,6 +716,21 @@ func (p Parsed) TextQuery() string {
 	return strings.Join(p.Terms, " ")
 }
 
+// LiveDisplayQuery re-serializes the parsed query restricted to tokens the
+// live Reddit search can actually honor — subs/author/flair/rating/terms plus
+// sort/timeframe (carried in URL params). Score, comment-count, media-type,
+// cache-score, and absolute date range are silently dropped so the search box
+// doesn't echo tags that had no effect on the upstream request.
+func (p Parsed) LiveDisplayQuery() string {
+	p.Score = nil
+	p.Comments = nil
+	p.CacheScore = nil
+	p.MediaTypes = nil
+	p.After = nil
+	p.Before = nil
+	return p.Canonical()
+}
+
 // --- per-backend sort translation ---------------------------------------
 
 // SortForSearch translates p.Sort to a word `/search.json?sort=` accepts.

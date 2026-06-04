@@ -114,6 +114,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	prefs := h.readPreferences(r)
 	query := r.URL.Query().Get("q")
 	after := r.URL.Query().Get("after")
+	before := r.URL.Query().Get("before")
 	urlPath := r.URL.Path
 
 	parsed, redditQ := buildSearchQuery(query, sub)
@@ -143,7 +144,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			h.serveSearchArchivePartial(w, r, parsed, prefs)
 			return
 		}
-		h.serveSearchMore(w, r, parsed, redditQ, query, sort, t, after, prefs)
+		h.serveSearchMore(w, r, parsed, redditQ, query, sort, t, after, before, prefs)
 		return
 	}
 
@@ -161,7 +162,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	degrade, reason := h.shouldDegrade(r.Context())
 	var upstreamErr error
 	if !degrade && redditQ != "" {
-		posts, subs, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, pageLimitFromPrefs(prefs))
+		posts, subs, _, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, before, pageLimitFromPrefs(prefs))
 		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
@@ -169,6 +170,9 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			// API-expressible constraint (subreddit/author/flair/rating + free
 			// text). Anything the API can't express (score/comments/date/media)
 			// is silently dropped on the live path so the page isn't gutted.
+			// The search box echo also drops those tokens so the user doesn't
+			// see tags that had no effect on the upstream request.
+			displayQuery := parsed.LiveDisplayQuery()
 
 			data := render.SearchPageData{
 				BasePage: render.BasePage{
@@ -180,15 +184,27 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				Posts:      posts,
 				Subreddits: subs,
 				Params: reddit.SearchParams{
-					Query: query,
-					Sort:  sort,
-					// After carries the cursor for the *next* page returned by
-					// Reddit, so the "Load More" button knows where to resume.
+					Query:     displayQuery,
+					Sort:      sort,
 					After:     nextAfter,
+					Before:    after,
 					Timeframe: t,
 				},
 				Sub:     sub,
 				NoPosts: len(posts) == 0,
+				// Reddit returns null `before` even after a forward-paginated
+				// request, so the Prev cursor is the incoming `?after=` (the
+				// last-post-id from the page the user came from) — same trick
+				// as the subreddit page (and redlib upstream).
+				//
+				// Backward pagination needs the mirror flip: a request with
+				// `?before=X` and no `?after=` would otherwise emit empty Prev
+				// AND Next cursors (after="" → Ends[0]=""; nextAfter often ""
+				// for backward fetches → Ends[1]=""), erasing both pagination
+				// buttons. In that case derive Prev from posts[0] (one further
+				// step back) and Next from the incoming `?before=X` (returns
+				// the viewer to the page they came from).
+				Ends: searchPageEnds(after, before, nextAfter, posts),
 			}
 
 			var buf bytes.Buffer
@@ -206,8 +222,10 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	}
 
 	// 3. Archive search (offline fallback) — same e621 constraints, but served
-	// purely from PostgreSQL.
-	if redditQ != "" {
+	// purely from PostgreSQL. Gated on the raw query rather than redditQ: a
+	// constraint-only box like `type:video score>100` yields an empty redditQ
+	// (Reddit's `q` can't express those tags) yet the archive can satisfy it.
+	if query != "" {
 		opts := parsedToArchiveOpts(parsed)
 		if prefs.ShowNSFW != "on" {
 			opts.NSFW = "sfw"
@@ -242,8 +260,12 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					Sort:  sort,
 				},
 				Sub:         sub,
-				NoPosts:     len(posts) == 0,
-				IsOffline:   reason == "",
+				NoPosts: len(posts) == 0,
+				// "Offline" reflects a *failed* upstream attempt, not any
+				// path that fell through to the archive. A constraint-only
+				// box (e.g. `type:video score>100`) skips upstream entirely
+				// because RedditQuery is empty — that's not an outage.
+				IsOffline:   reason == "" && upstreamErr != nil,
 				IsLocalOnly: true,
 				PageSize:    25,
 				Interval:    prefs.ScrollInterval,
@@ -311,7 +333,34 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		h.renderer.RenderError(w, prefs.Lang, "Search request failed", http.StatusBadGateway, upstreamErr.Error())
 		return
 	}
-	h.redirectFuckReddit(w, r, r.URL.RequestURI(), reason)
+	// No degrade, no upstream error, and either the box was empty or its tags
+	// were all dropped by RedditQuery (e.g. `type:video score>100`). Render an
+	// empty results page rather than bouncing to /fuckreddit's misleading
+	// "All right" countdown.
+	displayQuery := query
+	if redditQ == "" && query != "" {
+		displayQuery = parsed.LiveDisplayQuery()
+	}
+	data := render.SearchPageData{
+		BasePage: render.BasePage{
+			URL:       urlPath,
+			Prefs:     prefs,
+			BrandName: h.cfg.Render.BrandName,
+			Version:   "0.1.0",
+		},
+		Params: reddit.SearchParams{
+			Query:     displayQuery,
+			Sort:      sort,
+			Timeframe: t,
+		},
+		Sub:     sub,
+		NoPosts: true,
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Source", "fallback")
+	if err := h.renderer.RenderSearch(w, data); err != nil {
+		log.Printf("handler: render empty search: %v", err)
+	}
 }
 
 // serveSearchMore handles partial=1 "Load More" requests. It cascades through
@@ -320,7 +369,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 // can stop and explain why. Otherwise it fetches the next 3 posts upstream and
 // returns only the post-list HTML fragment, with the next-page cursor in the
 // X-Next-After header.
-func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, redditQ, query, sort, t, after string, prefs reddit.Preferences) {
+func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, redditQ, query, sort, t, after, before string, prefs reddit.Preferences) {
 	if redditQ == "" {
 		http.Error(w, "missing query", http.StatusBadRequest)
 		return
@@ -333,7 +382,7 @@ func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed
 		return
 	}
 
-	posts, _, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, pageLimitFromPrefs(prefs))
+	posts, _, _, nextAfter, err := h.redditCli.FetchSearch(r.Context(), redditQ, "", sort, t, after, before, pageLimitFromPrefs(prefs))
 	h.recordUpstream(r.Context())
 	if err != nil {
 		log.Printf("handler: search more %q: %v", query, err)
@@ -415,9 +464,9 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 	var err error
 
 	if h.oauthHolder.HasAvailableTokens() {
-		posts, _, _, err = h.redditCli.FetchSearch(ctx, redditQ, "", sort, t, after, 5)
+		posts, _, _, _, err = h.redditCli.FetchSearch(ctx, redditQ, "", sort, t, after, "", 5)
 	} else {
-		posts, _, _, err = h.publicCli.FetchSearch(ctx, redditQ, "", sort, t, after, 5)
+		posts, _, _, _, err = h.publicCli.FetchSearch(ctx, redditQ, "", sort, t, after, "", 5)
 	}
 	h.recordUpstream(ctx)
 	if err != nil {
@@ -425,4 +474,32 @@ func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
 		return
 	}
 	h.archiver.ArchivePosts(posts, sub, "search")
+}
+
+// searchPageEnds picks the [prev, next] cursors the search template renders
+// as Prev/Next links. Reddit's `before` field is unreliable on a forward
+// fetch, so the canonical Prev anchor for a forward page is the incoming
+// `?after=`; the canonical Next anchor is the API's returned afterCursor.
+//
+// Backward pagination is the awkward case: when the user arrived with
+// `?before=X` and no `?after=`, the naive [after, nextAfter] tuple is empty
+// on BOTH ends and the whole pagination footer vanishes. The fix derives the
+// Prev from the first post on this page (so clicking Prev steps one batch
+// further back) and the Next from the literal `?before=X` the viewer arrived
+// with (so clicking Next returns them to the page they came from). Post IDs
+// arrive bare (e.g. "10hprl2") — Reddit's cursor wants the `t3_` thing-kind
+// prefix.
+func searchPageEnds(after, before, nextAfter string, posts []reddit.Post) [2]string {
+	if before != "" && after == "" {
+		var prev string
+		if len(posts) > 0 {
+			prev = "t3_" + posts[0].ID
+		}
+		next := nextAfter
+		if next == "" {
+			next = before
+		}
+		return [2]string{prev, next}
+	}
+	return [2]string{after, nextAfter}
 }

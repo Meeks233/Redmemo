@@ -36,25 +36,42 @@ function NPPicker(opts) {
 		return false;
 	}
 
-	// trailingPartial is the fragment after the last '+' the caret is on, but only
-	// when it's an incomplete BARE name. A clause containing '=' is an override
-	// being typed — treat it as finished so the suggestion list reverts to top
-	// picks instead of trying to autocomplete the override grammar.
-	function trailingPartial() {
-		var parts = inputEl.value.split('+');
+	// trailingPartial is the fragment after the last '+' the caret is on. Any
+	// non-empty bare clause (no '=') drives the suggestion filter so the list
+	// keeps narrowing as the user types — even when the typed text already
+	// matches a known sub, since they may still be extending it toward a longer
+	// name (e.g. "cats" → "catsstandingup"). A clause containing '=' is an
+	// override being typed; treat it as finished and revert to top picks rather
+	// than autocompleting the override grammar.
+	function trailingPartial(value) {
+		if (value === undefined) value = inputEl.value;
+		var parts = value.split('+');
 		var last = parts[parts.length - 1];
 		if (last.indexOf('=') >= 0) return '';
-		var n = normalizeSub(last);
-		return (n !== '' && !isKnownSub(n)) ? n : '';
+		return normalizeSub(last);
+	}
+
+	// effectiveValue returns just the user-typed portion of the textarea, stripping
+	// a trailing ghost completion (a tail-anchored selection inserted by
+	// inlineComplete). The suggestion list and includedSet must reason about what
+	// the user actually typed, not the speculative completion, or filtering by the
+	// completed name would always collapse to zero results.
+	function effectiveValue() {
+		var start = inputEl.selectionStart, end = inputEl.selectionEnd;
+		if (start !== null && start < end && end === inputEl.value.length) {
+			return inputEl.value.substring(0, start);
+		}
+		return inputEl.value;
 	}
 
 	// includedSet collects the sub names already committed to the value — both
 	// bare clauses and override clauses (which we reduce to their sub name) —
 	// so they're hidden from the suggestion list. A still-being-typed trailing
 	// bare partial doesn't count yet.
-	function includedSet() {
+	function includedSet(value) {
+		if (value === undefined) value = inputEl.value;
 		var set = {};
-		var parts = inputEl.value.split('+');
+		var parts = value.split('+');
 		for (var i = 0; i < parts.length; i++) {
 			var hasEq = parts[i].indexOf('=') >= 0;
 			var n = clauseSub(parts[i]);
@@ -69,7 +86,7 @@ function NPPicker(opts) {
 	// "+name" token. Existing override clauses are preserved verbatim — the
 	// picker only ever adds a bare entry, the user can hand-attach overrides.
 	function addSub(name) {
-		var parts = inputEl.value.split('+');
+		var parts = effectiveValue().split('+');
 		var lastRaw = parts[parts.length - 1];
 		var lastHasEq = lastRaw.indexOf('=') >= 0;
 		var last = normalizeSub(lastRaw);
@@ -87,37 +104,55 @@ function NPPicker(opts) {
 	}
 
 	function renderList() {
-		var q = trailingPartial();
-		var included = includedSet();
+		var typed = effectiveValue();
+		var q = trailingPartial(typed);
+		var included = includedSet(typed);
 		var source = q
 			? window._allSubs.filter(function (s) { return s.name.toLowerCase().indexOf(q) !== -1; })
 			: window._topSubs;
 		source = source.filter(function (s) { return included[s.name.toLowerCase()] !== true; });
 		if (!q) source = source.slice(0, 10);
-		var html = '';
-		source.forEach(function (s) {
-			html += '<div class="sub-picker-item" data-name="' + s.name + '">';
-			html += '<span>r/' + s.name + '</span>';
-			if (s.posts > 0) html += '<span class="sub-picker-posts">' + s.posts + ' posts</span>';
-			html += '</div>';
-		});
+		// Build via DOM nodes; sub names and user-typed `q` flow through textContent /
+		// dataset, never through innerHTML, so a name like '<img onerror=...>' can't
+		// execute and a typed query with HTML metacharacters stays inert.
+		listEl.textContent = '';
 		if (source.length === 0 && q) {
 			if (!isKnownSub(q)) {
-				html = '<button type="button" class="sub-probe-btn" data-query="' + q + '">Try</button>';
-				html += '<div class="sub-picker-empty">Not archived locally</div>';
+				var btn = document.createElement('button');
+				btn.type = 'button';
+				btn.className = 'sub-probe-btn';
+				btn.dataset.query = q;
+				btn.textContent = 'Try';
+				btn.onclick = function () { probeSub(btn.dataset.query); };
+				listEl.appendChild(btn);
+				var empty1 = document.createElement('div');
+				empty1.className = 'sub-picker-empty';
+				empty1.textContent = 'Not archived locally';
+				listEl.appendChild(empty1);
 			} else {
-				html = '<div class="sub-picker-empty">Already added</div>';
+				var empty2 = document.createElement('div');
+				empty2.className = 'sub-picker-empty';
+				empty2.textContent = 'Already added';
+				listEl.appendChild(empty2);
 			}
+			return;
 		}
-		listEl.innerHTML = html;
-
-		listEl.querySelectorAll('.sub-picker-item').forEach(function (el) {
-			el.onclick = function () { addSub(el.dataset.name); };
+		source.forEach(function (s) {
+			var item = document.createElement('div');
+			item.className = 'sub-picker-item';
+			item.dataset.name = s.name;
+			var label = document.createElement('span');
+			label.textContent = 'r/' + s.name;
+			item.appendChild(label);
+			if (s.posts > 0) {
+				var posts = document.createElement('span');
+				posts.className = 'sub-picker-posts';
+				posts.textContent = s.posts + ' posts';
+				item.appendChild(posts);
+			}
+			item.onclick = function () { addSub(item.dataset.name); };
+			listEl.appendChild(item);
 		});
-		var probeBtn = listEl.querySelector('.sub-probe-btn');
-		if (probeBtn) {
-			probeBtn.onclick = function () { probeSub(probeBtn.dataset.query); };
-		}
 	}
 
 	function probeSub(name) {
@@ -138,7 +173,52 @@ function NPPicker(opts) {
 			});
 	}
 
-	inputEl.addEventListener('input', renderList);
+	// bestInlineMatch picks the highest-post-count sub whose name starts with the
+	// trailing partial but isn't already committed, so the suggestion the user is
+	// most likely to want is the one offered as a ghost completion.
+	function bestInlineMatch(q, included) {
+		var match = null, bestPosts = -1;
+		for (var i = 0; i < window._allSubs.length; i++) {
+			var s = window._allSubs[i];
+			var nm = s.name.toLowerCase();
+			if (nm.length > q.length && nm.indexOf(q) === 0 && !included[nm] && s.posts > bestPosts) {
+				match = s.name;
+				bestPosts = s.posts;
+			}
+		}
+		return match;
+	}
+
+	// Track whether the last edit was a delete so we don't immediately re-fill
+	// what the user just removed; Backspace/Delete should dismiss the ghost.
+	var lastEditWasDelete = false;
+	inputEl.addEventListener('beforeinput', function (e) {
+		lastEditWasDelete = !!(e.inputType && e.inputType.indexOf('delete') === 0);
+	});
+
+	// inlineComplete appends the missing suffix of the best match to the textarea
+	// and selects it. Subsequent typing replaces the selection by default (so the
+	// user can keep narrowing the partial), Backspace clears it, and Tab/End/→
+	// accepts it. Only runs when the caret sits at the very end and nothing is
+	// already selected — anything else and the user is mid-edit, leave them be.
+	function inlineComplete() {
+		if (lastEditWasDelete) return;
+		var caret = inputEl.selectionEnd;
+		if (caret !== inputEl.value.length) return;
+		if (inputEl.selectionStart !== caret) return;
+		var q = trailingPartial();
+		if (!q) return;
+		var match = bestInlineMatch(q, includedSet());
+		if (!match) return;
+		var anchor = inputEl.value.length;
+		inputEl.value = inputEl.value + match.substring(q.length);
+		inputEl.setSelectionRange(anchor, inputEl.value.length);
+	}
+
+	inputEl.addEventListener('input', function () {
+		inlineComplete();
+		renderList();
+	});
 	// Notify on blur and on each pick. The settings page uses this only to flag the
 	// form dirty (Save bar) — the field itself is part of the form and persisted on
 	// Save, so onChange no longer writes anything on its own.

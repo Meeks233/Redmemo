@@ -17,9 +17,10 @@ import (
 var staticFS embed.FS
 
 // mediaBundle is the concatenation of every media-page JS file (lazyMedia,
-// videoAutoplay, videoPreload, audioSync, imageReload), built once at startup
-// and served at /media.bundle.js. Listing pages used to ship 5 separate
-// <script defer> tags totalling ~44KB uncompressed; this collapses them into
+// videoAutoplay, videoPreload, audioSync, imageReload, videoReload), built
+// once at startup and served at /media.bundle.js. Listing pages used to ship
+// separate <script defer> tags totalling ~44KB uncompressed; this collapses
+// them into
 // one request + one parse, which gzip then compresses far more efficiently
 // than five small responses (each with its own header overhead). Each source
 // file is already wrapped in an IIFE, so concatenation is safe — no global
@@ -34,6 +35,7 @@ func buildMediaBundle() []byte {
 		"static/videoPreload.js",
 		"static/audioSync.js",
 		"static/imageReload.js",
+		"static/videoReload.js",
 	}
 	var buf []byte
 	for _, p := range parts {
@@ -174,6 +176,10 @@ type SearchPageData struct {
 	NoPosts            bool
 	AllPostsFiltered   bool
 	IsOffline          bool
+	// Ends carries the prev/next cursors returned by upstream Reddit so the
+	// footer can render Prev/Next links — same shape as SubredditPageData.Ends.
+	// Ends[0] is the `before` cursor, Ends[1] the `after`.
+	Ends [2]string
 	// IsLocalOnly is true when the page was served entirely from the local
 	// archive (offline fallback or upstream_disabled). Switches the "Load More"
 	// footer to the offset-based infinite-scroll loader against /search itself.
@@ -404,6 +410,25 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 func (e *Engine) RenderSearchPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
 	posts, _ = filterNSFW(posts, prefs)
 	return searchPostList(posts, prefs, prefs.LazyMedia == "on").Render(e.i18nContext(prefs.Lang), w)
+}
+
+// RenderCommentList emits just the per-thread comment cards the post page
+// wraps each top-level comment in. Used by the comments=load-all partial so a
+// click can swap in the full thread without re-rendering the whole page.
+func (e *Engine) RenderCommentList(w io.Writer, comments []reddit.Comment, prefs reddit.Preferences) error {
+	ctx := e.i18nContext(prefs.Lang)
+	for _, c := range comments {
+		if _, err := io.WriteString(w, `<div class="thread">`); err != nil {
+			return err
+		}
+		if err := commentTree(c).Render(ctx, w); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, `</div>`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {

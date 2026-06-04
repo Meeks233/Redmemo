@@ -72,7 +72,10 @@ func NewClient(tokens TokenProvider) *Client {
 // timeframe (hour|day|week|month|year|all) and is honored only by the
 // top/controversial sorts; it is harmlessly ignored by others.
 // Returns posts, before cursor, after cursor, error.
-func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after string, limit int) ([]Post, string, string, error) {
+// `before` paginates backward (Reddit's `before=t3_xxx`); when both before and
+// after are supplied Reddit honours after, so callers normally set one or the
+// other depending on which direction the user clicked.
+func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after, before string, limit int) ([]Post, string, string, error) {
 	if sort == "" {
 		sort = "hot"
 	}
@@ -87,6 +90,9 @@ func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after string,
 	if after != "" {
 		path += "&after=" + after
 	}
+	if before != "" {
+		path += "&before=" + before
+	}
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
@@ -98,10 +104,21 @@ func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after string,
 
 // FetchPost fetches a post and its comments.
 func (c *Client) FetchPost(ctx context.Context, sub, id, commentSort string) (Post, []Comment, error) {
+	return c.FetchPostLimited(ctx, sub, id, commentSort, 0)
+}
+
+// FetchPostLimited fetches a post and the first `limit` top-level comments.
+// limit<=0 means no cap (Reddit's default ~200). A small initial limit saves
+// quota: Reddit returns the requested comments plus a "more" placeholder that
+// the user can expand on demand.
+func (c *Client) FetchPostLimited(ctx context.Context, sub, id, commentSort string, limit int) (Post, []Comment, error) {
 	if commentSort == "" {
 		commentSort = "confidence"
 	}
 	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&include_over_18=on&sort=%s", sub, id, commentSort)
+	if limit > 0 {
+		path += fmt.Sprintf("&limit=%d", limit)
+	}
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
@@ -156,8 +173,10 @@ func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after s
 	return user, posts, comments, nil
 }
 
-// FetchSearch performs a search.
-func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after string, limit int) ([]Post, []Subreddit, string, error) {
+// FetchSearch performs a search. Returns posts, subreddits, before cursor,
+// after cursor, error — mirroring FetchSubreddit so callers can render both
+// Prev and Next pagination links.
+func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after, before string, limit int) ([]Post, []Subreddit, string, string, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
@@ -180,14 +199,17 @@ func (c *Client) FetchSearch(ctx context.Context, query, sub, sort, t, after str
 	if after != "" {
 		path += "&after=" + url.QueryEscape(after)
 	}
+	if before != "" {
+		path += "&before=" + url.QueryEscape(before)
+	}
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", "", err
 	}
 
-	posts, subs, _, afterCursor, err := ParseSearchResults(data)
-	return posts, subs, afterCursor, err
+	posts, subs, beforeCursor, afterCursor, err := ParseSearchResults(data)
+	return posts, subs, beforeCursor, afterCursor, err
 }
 
 // Probe sends a lightweight request to check rate limit headers.
