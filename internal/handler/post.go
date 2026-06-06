@@ -115,6 +115,9 @@ func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, ht
 	}
 	h.archiver.ArchivePost(&post, sub, "background")
 	h.archiver.ArchiveComments(post.Permalink, comments)
+	if h.prefetcher != nil {
+		h.prefetcher.RecordL3Fetch(sub, id, len(comments))
+	}
 
 	if len(htmlSnapshot) > 0 {
 		permalink := post.Permalink
@@ -168,6 +171,9 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 			h.archiver.ArchivePost(&post, sub, "manual_refresh")
 			h.archiver.ArchiveComments(post.Permalink, comments)
 		}()
+	}
+	if h.prefetcher != nil {
+		h.prefetcher.RecordL3Fetch(sub, id, len(comments))
 	}
 
 	// HTML cache keys now embed a prefs fingerprint; drop every variant under

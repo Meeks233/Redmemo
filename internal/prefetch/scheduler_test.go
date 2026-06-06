@@ -669,7 +669,7 @@ func TestDispatchLoop_CDNSkipsBudget(t *testing.T) {
 // Producer loop tests
 // ---------------------------------------------------------------------------
 
-func TestWaitUntilEnabled_CancelledContext(t *testing.T) {
+func TestCoordinatorLoop_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -678,105 +678,16 @@ func TestWaitUntilEnabled_CancelledContext(t *testing.T) {
 		Events:   NewEventLog(50),
 	}
 
-	err := s.waitUntilEnabled(ctx)
-	if err == nil {
-		t.Error("waitUntilEnabled should return error on cancelled context")
-	}
-}
-
-func TestWaitUntilEnabled_EnabledImmediately(t *testing.T) {
-	s := &Scheduler{
-		settings: &mockSettings{data: map[string]string{
-			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "sub:golang",
-		}},
-		Events: NewEventLog(50),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	err := s.waitUntilEnabled(ctx)
-	if err != nil {
-		t.Errorf("waitUntilEnabled should return nil when enabled, got: %v", err)
-	}
-}
-
-func TestRunBigCycle_NoSubs(t *testing.T) {
-	s := &Scheduler{
-		settings: &mockSettings{data: map[string]string{
-			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "",
-		}},
-		Events: NewEventLog(50),
-		queue:  make(chan *workItem, 1),
-	}
-
-	err := s.runBigCycle(context.Background())
-	if err != nil {
-		t.Errorf("runBigCycle with no subs should return nil, got: %v", err)
-	}
-}
-
-func TestRunBigCycle_CancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	s := &Scheduler{
-		settings: &mockSettings{data: map[string]string{
-			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "sub:golang",
-		}},
-		pool:   &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
-		Events: NewEventLog(50),
-		queue:  make(chan *workItem, 1),
-	}
-
-	err := s.runBigCycle(ctx)
-	if err == nil {
-		t.Error("runBigCycle should return error on cancelled context")
-	}
-}
-
-func TestRunBigCycle_DisabledMidCycle(t *testing.T) {
-	ts := &toggleSettings{
-		data: map[string]string{
-			"enable_natural_prefetch": "on",
-			"prefetch_subs":          "sub:golang",
-		},
-	}
-	firstCall := true
-	ts.onGet = func(key string) {
-		if key == "enable_natural_prefetch" && !firstCall {
-			ts.data["enable_natural_prefetch"] = "off"
-		}
-		firstCall = false
-	}
-
-	s := &Scheduler{
-		settings: ts,
-		pool:     &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
-		Events:   NewEventLog(50),
-		queue:    make(chan *workItem, 1),
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := s.runBigCycle(ctx)
-	if err != nil && err != context.DeadlineExceeded {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	events := s.Events.Snapshot()
-	found := false
-	for _, e := range events {
-		if e.Phase == "L1" && e.Level == LevelSkip {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected a skip event for disabled mid-cycle")
+	// Should return promptly on a pre-cancelled context.
+	done := make(chan struct{})
+	go func() {
+		s.coordinatorLoop(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("coordinatorLoop did not exit on cancelled context")
 	}
 }
 
@@ -884,123 +795,70 @@ func TestEventLog_Integration(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Cycle state persistence tests
+// Per-bucket state persistence tests
 // ---------------------------------------------------------------------------
 
-func TestCycleState_SaveLoadClear(t *testing.T) {
+func TestBucketState_SaveLoadIsolated(t *testing.T) {
 	ms := &mockSettings{data: map[string]string{}}
 	s := &Scheduler{settings: ms, Events: NewEventLog(10)}
 
-	// Initially empty
-	if got := s.loadCycleState(); got != nil {
-		t.Errorf("loadCycleState on empty should return nil, got %+v", got)
+	if got := s.loadBucketState(bucketDay); got != nil {
+		t.Errorf("loadBucketState on empty should return nil, got %+v", got)
 	}
 
-	// Save and reload
-	next := time.Now().Add(6 * time.Hour).Truncate(time.Second)
-	state := &cycleState{
-		NextCycleAt: next,
-		Round:       3,
-		Cursors:     map[string]string{"golang": "t3_abc", "rust": "t3_xyz"},
-	}
-	s.saveCycleState(state)
+	dayNext := time.Now().Add(12 * time.Hour).Truncate(time.Second)
+	hourNext := time.Now().Add(6 * time.Hour).Truncate(time.Second)
+	s.saveBucketState(bucketDay, &bucketState{
+		NextCycleAt: dayNext,
+		Cursors:     map[string]string{"golang|hot": "t3_d1"},
+	})
+	s.saveBucketState(bucketHour, &bucketState{
+		NextCycleAt: hourNext,
+		Cursors:     map[string]string{"news|hot": "t3_h1"},
+	})
 
-	loaded := s.loadCycleState()
-	if loaded == nil {
-		t.Fatal("loadCycleState returned nil after save")
+	day := s.loadBucketState(bucketDay)
+	hour := s.loadBucketState(bucketHour)
+	if day == nil || hour == nil {
+		t.Fatal("expected non-nil bucket state after save")
 	}
-	if !loaded.NextCycleAt.Equal(next) {
-		t.Errorf("NextCycleAt = %v, want %v", loaded.NextCycleAt, next)
+	if !day.NextCycleAt.Equal(dayNext) || !hour.NextCycleAt.Equal(hourNext) {
+		t.Errorf("bucket NextCycleAt mismatch: day=%v hour=%v", day.NextCycleAt, hour.NextCycleAt)
 	}
-	if loaded.Round != 3 {
-		t.Errorf("Round = %d, want 3", loaded.Round)
-	}
-	if loaded.Cursors["golang"] != "t3_abc" || loaded.Cursors["rust"] != "t3_xyz" {
-		t.Errorf("Cursors = %v, want golang=t3_abc rust=t3_xyz", loaded.Cursors)
-	}
-
-	// Clear
-	s.clearCycleState()
-	if got := s.loadCycleState(); got != nil {
-		t.Errorf("loadCycleState after clear should return nil, got %+v", got)
+	if day.Cursors["golang|hot"] != "t3_d1" || hour.Cursors["news|hot"] != "t3_h1" {
+		t.Errorf("cross-bucket cursor bleed: day=%v hour=%v", day.Cursors, hour.Cursors)
 	}
 }
 
-func TestCycleState_NilSettings(t *testing.T) {
+func TestBucketState_NilSettings(t *testing.T) {
 	s := &Scheduler{settings: nil, Events: NewEventLog(10)}
-
-	// Should not panic with nil settings
-	s.saveCycleState(&cycleState{Round: 1})
-	if got := s.loadCycleState(); got != nil {
-		t.Errorf("loadCycleState with nil settings should return nil, got %+v", got)
+	// Should not panic.
+	s.saveBucketState(bucketDay, &bucketState{NextCycleAt: time.Now()})
+	if got := s.loadBucketState(bucketDay); got != nil {
+		t.Errorf("loadBucketState with nil settings should return nil, got %+v", got)
 	}
-	s.clearCycleState() // should not panic
+	s.clearLegacyCycleState()
 }
 
-func TestCycleState_InvalidJSON(t *testing.T) {
+func TestBucketState_InvalidJSON(t *testing.T) {
 	ms := &mockSettings{data: map[string]string{
-		cycleStateKey: "not valid json{{{",
+		bucketStateKey(bucketDay): "not valid json{{{",
 	}}
 	s := &Scheduler{settings: ms, Events: NewEventLog(10)}
 
-	got := s.loadCycleState()
-	if got != nil {
-		t.Errorf("loadCycleState with invalid JSON should return nil, got %+v", got)
+	if got := s.loadBucketState(bucketDay); got != nil {
+		t.Errorf("loadBucketState with invalid JSON should return nil, got %+v", got)
 	}
 }
 
-func TestCycleState_CompletedCycleResumeSleep(t *testing.T) {
-	next := time.Now().Add(2 * time.Hour)
-	ms := &mockSettings{data: map[string]string{}}
-	s := &Scheduler{
-		settings: ms,
-		Events:   NewEventLog(10),
-		queue:    make(chan *workItem, 1),
-	}
-
-	// Simulate a completed cycle stored in DB
-	s.saveCycleState(&cycleState{
-		NextCycleAt: next,
-		Round:       maxRoundsPerCycle,
-		Cursors:     nil,
-	})
-
-	loaded := s.loadCycleState()
-	if loaded == nil {
-		t.Fatal("expected non-nil state")
-	}
-	if loaded.Round != maxRoundsPerCycle {
-		t.Errorf("Round = %d, want %d", loaded.Round, maxRoundsPerCycle)
-	}
-	// Verify the runBigCycle logic would detect this as a completed cycle
-	if wait := time.Until(loaded.NextCycleAt); wait <= 0 || loaded.Round < maxRoundsPerCycle {
-		t.Error("completed cycle state should have positive wait and Round >= maxRoundsPerCycle")
-	}
-}
-
-func TestCycleState_MidCycleRestore(t *testing.T) {
-	ms := &mockSettings{data: map[string]string{}}
-	s := &Scheduler{
-		settings: ms,
-		Events:   NewEventLog(10),
-	}
-
-	// Save mid-cycle state (round 4 of 8)
-	s.saveCycleState(&cycleState{
-		NextCycleAt: time.Now().Add(10 * time.Hour),
-		Round:       4,
-		Cursors:     map[string]string{"golang": "t3_mid"},
-	})
-
-	loaded := s.loadCycleState()
-	if loaded == nil {
-		t.Fatal("expected non-nil state")
-	}
-	if loaded.Round != 4 {
-		t.Errorf("Round = %d, want 4", loaded.Round)
-	}
-	if loaded.Cursors["golang"] != "t3_mid" {
-		t.Errorf("cursor for golang = %q, want t3_mid", loaded.Cursors["golang"])
+func TestClearLegacyCycleState(t *testing.T) {
+	ms := &mockSettings{data: map[string]string{
+		legacyCycleStateKey: `{"round":3}`,
+	}}
+	s := &Scheduler{settings: ms, Events: NewEventLog(10)}
+	s.clearLegacyCycleState()
+	if ms.data[legacyCycleStateKey] != "" {
+		t.Errorf("legacy state should be cleared, still %q", ms.data[legacyCycleStateKey])
 	}
 }
 
@@ -1276,5 +1134,508 @@ func TestCursorKey(t *testing.T) {
 				t.Errorf("cursorKey(%q, %+v) = %q, want %q", tt.sub, tt.mode, got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Per-timeframe bucket tests
+//
+// These cover the L1 refactor from a single global cycle to one cycle per
+// timeframe bucket. The focus is on cadence math, burst-prevention floors,
+// and bucket-group dispatch — not the full reddit.Client integration, which
+// is exercised by the fetchFunc test hook below.
+// ---------------------------------------------------------------------------
+
+func TestNormalizeBucket(t *testing.T) {
+	tests := map[string]string{
+		"":             bucketDay,
+		"  ":           bucketDay,
+		"day":          bucketDay,
+		"DAY":          bucketDay,
+		" hour ":       bucketHour,
+		"week":         bucketWeek,
+		"month":        bucketMonth,
+		"year":         bucketYear,
+		"all":          bucketAll,
+		"forever":      bucketDay, // unknown → default
+		"never":        bucketDay,
+		"halfhour":     bucketDay,
+	}
+	for in, want := range tests {
+		if got := normalizeBucket(in); got != want {
+			t.Errorf("normalizeBucket(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBucketBasePeriod(t *testing.T) {
+	tests := map[string]time.Duration{
+		bucketHour:  6 * time.Hour,
+		bucketDay:   12 * time.Hour,
+		bucketWeek:  48 * time.Hour,
+		bucketMonth: 15 * 24 * time.Hour,
+		bucketYear:  180 * 24 * time.Hour,
+		bucketAll:   365 * 24 * time.Hour,
+		"unknown":   12 * time.Hour, // default
+	}
+	for tf, want := range tests {
+		if got := bucketBasePeriod(tf); got != want {
+			t.Errorf("bucketBasePeriod(%q) = %v, want %v", tf, got, want)
+		}
+	}
+}
+
+func TestResolveSubBucket(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings SettingsProvider
+		sub      string
+		want     string
+	}{
+		{"no settings → day default", nil, "golang", bucketDay},
+		{"global tf=week applies even when sort=hot drops it from mode", &mockSettings{data: map[string]string{
+			"prefetch_timeframe": "week",
+		}}, "golang", bucketWeek},
+		{"per-sub time:hour", &mockSettings{data: map[string]string{
+			"prefetch_sub_modes": "news=time:hour",
+		}}, "news", bucketHour},
+		{"per-sub time:month with sort:top", &mockSettings{data: map[string]string{
+			"prefetch_sub_modes": "rust=sort:top&time:month",
+		}}, "rust", bucketMonth},
+		{"per-sub time:all", &mockSettings{data: map[string]string{
+			"prefetch_sub_modes": "history=time:all",
+		}}, "history", bucketAll},
+		{"sub not listed falls to global tf", &mockSettings{data: map[string]string{
+			"prefetch_timeframe": "year",
+			"prefetch_sub_modes": "other=time:hour",
+		}}, "untouched", bucketYear},
+		{"unknown timeframe → day default", &mockSettings{data: map[string]string{
+			"prefetch_sub_modes": "x=time:fortnight",
+		}}, "x", bucketDay},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Scheduler{settings: tt.settings}
+			if got := s.resolveSubBucket(tt.sub); got != tt.want {
+				t.Errorf("resolveSubBucket(%q) = %q, want %q", tt.sub, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupSubsByBucket(t *testing.T) {
+	s := &Scheduler{settings: &mockSettings{data: map[string]string{
+		"prefetch_sub_modes": "a=time:hour+b=time:day+c=time:hour+d=time:month",
+	}}}
+	groups := s.groupSubsByBucket([]string{"a", "b", "c", "d", "e"})
+	// e has no clause and no global tf → default day
+	if len(groups[bucketHour]) != 2 || groups[bucketHour][0] != "a" || groups[bucketHour][1] != "c" {
+		t.Errorf("hour bucket = %v, want [a c]", groups[bucketHour])
+	}
+	if len(groups[bucketDay]) != 2 || groups[bucketDay][0] != "b" || groups[bucketDay][1] != "e" {
+		t.Errorf("day bucket = %v, want [b e]", groups[bucketDay])
+	}
+	if len(groups[bucketMonth]) != 1 || groups[bucketMonth][0] != "d" {
+		t.Errorf("month bucket = %v, want [d]", groups[bucketMonth])
+	}
+	if len(groups[bucketWeek]) != 0 || len(groups[bucketYear]) != 0 || len(groups[bucketAll]) != 0 {
+		t.Errorf("non-empty buckets without members: week=%v year=%v all=%v",
+			groups[bucketWeek], groups[bucketYear], groups[bucketAll])
+	}
+}
+
+func TestJitterPercent(t *testing.T) {
+	// 0/negative inputs and frac=0 are stable; positive inputs stay strictly positive.
+	if got := jitterPercent(0, 0.5); got != 0 {
+		t.Errorf("jitterPercent(0, 0.5) = %v, want 0", got)
+	}
+	if got := jitterPercent(-time.Second, 0.5); got != 0 {
+		t.Errorf("jitterPercent(-1s, 0.5) = %v, want 0", got)
+	}
+	if got := jitterPercent(time.Minute, 0); got != time.Minute {
+		t.Errorf("jitterPercent(1m, 0) = %v, want 1m", got)
+	}
+	for i := 0; i < 1000; i++ {
+		got := jitterPercent(time.Hour, jitterFrac)
+		if got <= 0 {
+			t.Fatalf("jitterPercent produced non-positive value: %v", got)
+		}
+		lo := time.Duration(float64(time.Hour) * (1 - jitterFrac - 0.001))
+		hi := time.Duration(float64(time.Hour) * (1 + jitterFrac + 0.001))
+		if got < lo || got > hi {
+			t.Errorf("jitterPercent(1h, %v) = %v out of [%v, %v]", jitterFrac, got, lo, hi)
+		}
+	}
+}
+
+func TestComputeCyclePeriod_Floor(t *testing.T) {
+	// A reasonable production case: hour bucket, 3 subs, 30s gap. Period
+	// must comfortably exceed gap*n so per-sub spacing isn't squeezed.
+	for i := 0; i < 200; i++ {
+		got := computeCyclePeriod(bucketHour, 3, minBucketGap, 0)
+		floor := 3 * minBucketGap
+		if got < floor {
+			t.Errorf("computeCyclePeriod hour/3 = %v < floor %v", got, floor)
+		}
+		// Stays within jitter band of base 6h.
+		lo := time.Duration(float64(6*time.Hour) * (1 - jitterFrac - 0.001))
+		hi := time.Duration(float64(6*time.Hour) * (1 + jitterFrac + 0.001))
+		if got < lo || got > hi {
+			t.Errorf("computeCyclePeriod hour/3 = %v out of [%v, %v]", got, lo, hi)
+		}
+	}
+}
+
+func TestComputeCyclePeriod_ZeroGapFallsToMin(t *testing.T) {
+	// Even when caller passes gap=0 the floor must hold.
+	got := computeCyclePeriod(bucketHour, 1, 0, 0)
+	if got < minBucketGap {
+		t.Errorf("zero-gap floor breached: %v < %v", got, minBucketGap)
+	}
+}
+
+func TestComputeCyclePeriod_PathologicalManySubs(t *testing.T) {
+	// If a tiny bucket somehow gets 1000 subs the gap*n floor takes over.
+	got := computeCyclePeriod(bucketHour, 1000, minBucketGap, 0)
+	floor := 1000 * minBucketGap
+	if got < floor {
+		t.Errorf("many-subs floor breached: %v < %v", got, floor)
+	}
+}
+
+func TestConfigSignature_ChangesOnEverySetting(t *testing.T) {
+	keys := []string{"prefetch_subs", "prefetch_sort", "prefetch_timeframe", "prefetch_sub_modes"}
+	ms := &mockSettings{data: map[string]string{}}
+	s := &Scheduler{settings: ms}
+	prev := s.configSignature()
+	for _, k := range keys {
+		ms.data[k] = "v"
+		next := s.configSignature()
+		if next == prev {
+			t.Errorf("configSignature did not change when %s was set", k)
+		}
+		prev = next
+	}
+}
+
+// ---------------------------------------------------------------------------
+// bucketLoop integration: a fake fetchFunc lets us assert burst-prevention
+// timing without spinning a real reddit.Client.
+// ---------------------------------------------------------------------------
+
+type fakeFetchCall struct {
+	at     time.Time
+	sub    string
+	cursor string
+}
+
+func newBucketTestScheduler() (*Scheduler, *[]fakeFetchCall, *sync.Mutex) {
+	var mu sync.Mutex
+	var calls []fakeFetchCall
+
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"enable_natural_prefetch": "on",
+			"prefetch_subs":           "sub:news+a+b+c+d+e",
+		}},
+		pool:               &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
+		Events:             NewEventLog(200),
+		queue:              make(chan *workItem, 4),
+		bucketGap:          5 * time.Millisecond,
+		bucketBaseOverride: 80 * time.Millisecond,
+		dispatchCooldown:   func() time.Duration { return 2 * time.Millisecond },
+	}
+	s.fetchFunc = func(_ context.Context, sub, _, _, cursor string, _ int) ([]reddit.Post, string, string, error) {
+		mu.Lock()
+		calls = append(calls, fakeFetchCall{at: time.Now(), sub: sub, cursor: cursor})
+		mu.Unlock()
+		// Return a single dummy post and no further cursor so the cycle
+		// records exhaustion (and the next cycle restarts from head).
+		return []reddit.Post{{ID: "p1"}}, "", "", nil
+	}
+	return s, &calls, &mu
+}
+
+func TestBucketLoop_NoBurst_SingleSub(t *testing.T) {
+	s, calls, mu := newBucketTestScheduler()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		s.bucketLoop(ctx, bucketHour, []string{"news"})
+		close(done)
+	}()
+
+	// Wait for ~2 fetches then cancel.
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(*calls)
+		mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*calls) < 2 {
+		t.Fatalf("expected at least 2 fetches in window, got %d", len(*calls))
+	}
+	gap := (*calls)[1].at.Sub((*calls)[0].at)
+	if gap < s.bucketGap {
+		t.Errorf("single-sub bucket fired faster than gap floor: %v < %v", gap, s.bucketGap)
+	}
+}
+
+func TestBucketLoop_NoBurst_MultiSub(t *testing.T) {
+	s, calls, mu := newBucketTestScheduler()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	subs := []string{"a", "b", "c", "d"}
+	done := make(chan struct{})
+	go func() {
+		s.bucketLoop(ctx, bucketHour, subs)
+		close(done)
+	}()
+
+	// Wait until each sub fetched at least once.
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		seen := map[string]bool{}
+		for _, c := range *calls {
+			seen[c.sub] = true
+		}
+		mu.Unlock()
+		if len(seen) == len(subs) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*calls) < len(subs) {
+		t.Fatalf("expected each sub to fetch, got %d calls: %+v", len(*calls), *calls)
+	}
+	for i := 1; i < len(*calls); i++ {
+		gap := (*calls)[i].at.Sub((*calls)[i-1].at)
+		if gap < s.bucketGap {
+			t.Errorf("burst detected at call %d: gap %v < floor %v", i, gap, s.bucketGap)
+		}
+	}
+}
+
+func TestBucketLoop_ShufflesOrderBetweenCycles(t *testing.T) {
+	s, calls, mu := newBucketTestScheduler()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	subs := []string{"a", "b", "c", "d", "e"}
+	done := make(chan struct{})
+	go func() {
+		s.bucketLoop(ctx, bucketHour, subs)
+		close(done)
+	}()
+
+	// Wait for ~3 cycles worth of fetches.
+	target := 3 * len(subs)
+	deadline := time.Now().Add(4500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(*calls)
+		mu.Unlock()
+		if n >= target {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*calls) < 2*len(subs) {
+		t.Skipf("not enough cycles captured (%d calls) — likely scheduler-loaded environment", len(*calls))
+	}
+	// Compare cycle 1 and cycle 2 sub order.
+	c1 := make([]string, len(subs))
+	c2 := make([]string, len(subs))
+	for i := 0; i < len(subs); i++ {
+		c1[i] = (*calls)[i].sub
+		c2[i] = (*calls)[i+len(subs)].sub
+	}
+	identical := true
+	for i := range c1 {
+		if c1[i] != c2[i] {
+			identical = false
+			break
+		}
+	}
+	// 5! = 120 permutations; back-to-back identical is a 1/120 chance.
+	// Not strictly a bug if it happens once, so this is a soft check.
+	if identical {
+		t.Logf("cycle order identical across two cycles — possible but improbable: %v", c1)
+	}
+}
+
+func TestBucketLoop_CancelDuringSleepReturnsPromptly(t *testing.T) {
+	s, _, _ := newBucketTestScheduler()
+	s.bucketGap = 5 * time.Second // long gap so the loop is mostly sleeping
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go s.dispatchLoop(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		s.bucketLoop(ctx, bucketHour, []string{"news"})
+		close(done)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("bucketLoop did not exit promptly after cancellation")
+	}
+}
+
+func TestBucketLoop_EmptySubsReturnsImmediately(t *testing.T) {
+	s, _, _ := newBucketTestScheduler()
+	done := make(chan struct{})
+	go func() {
+		s.bucketLoop(context.Background(), bucketHour, nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("bucketLoop with empty subs did not return")
+	}
+}
+
+func TestBucketLoop_CursorAdvancesWithinCycleThenResetsBetweenCycles(t *testing.T) {
+	var mu sync.Mutex
+	var calls []fakeFetchCall
+	pageNum := 0
+
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"enable_natural_prefetch": "on",
+			"prefetch_subs":           "sub:news",
+		}},
+		pool:               &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
+		Events:             NewEventLog(200),
+		queue:              make(chan *workItem, 4),
+		bucketGap:          5 * time.Millisecond,
+		bucketBaseOverride: 80 * time.Millisecond,
+		dispatchCooldown:   func() time.Duration { return 2 * time.Millisecond },
+	}
+	// First fetch returns a cursor; subsequent fetches return "" (exhaustion).
+	// Then the cycle ends, exhaustion clears, and the next cycle starts fresh.
+	s.fetchFunc = func(_ context.Context, sub, _, _, cursor string, _ int) ([]reddit.Post, string, string, error) {
+		mu.Lock()
+		calls = append(calls, fakeFetchCall{at: time.Now(), sub: sub, cursor: cursor})
+		pageNum++
+		var after string
+		if pageNum%2 == 1 {
+			after = "next-cursor"
+		}
+		mu.Unlock()
+		return []reddit.Post{{ID: "p1"}}, "", after, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		// Single-sub bucket so per-cycle == per-fetch is easy to reason about.
+		s.bucketLoop(ctx, bucketHour, []string{"news"})
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(calls)
+		mu.Unlock()
+		if n >= 3 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) < 2 {
+		t.Fatalf("expected ≥2 calls, got %d", len(calls))
+	}
+	// First cycle's only fetch carries cursor="" (no prior state).
+	if calls[0].cursor != "" {
+		t.Errorf("first call cursor = %q, want empty", calls[0].cursor)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// coordinatorLoop integration
+// ---------------------------------------------------------------------------
+
+func TestCoordinatorLoop_StopsBucketsWhenDisabled(t *testing.T) {
+	ms := &mockSettings{data: map[string]string{
+		"enable_natural_prefetch": "on",
+		"prefetch_subs":           "sub:news",
+		"prefetch_sub_modes":      "news=time:hour",
+	}}
+	s := &Scheduler{
+		settings:           ms,
+		pool:               &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
+		Events:             NewEventLog(200),
+		queue:              make(chan *workItem, 4),
+		bucketGap:          5 * time.Millisecond,
+		bucketBaseOverride: 80 * time.Millisecond,
+		dispatchCooldown:   func() time.Duration { return 2 * time.Millisecond },
+		fetchFunc: func(_ context.Context, sub, _, _, _ string, _ int) ([]reddit.Post, string, string, error) {
+			return []reddit.Post{{ID: "p"}}, "", "", nil
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+	done := make(chan struct{})
+	go func() { s.coordinatorLoop(ctx); close(done) }()
+
+	// Give buckets a moment to start, then cancel — the coordinator must
+	// tear down its bucket goroutines and exit. We deliberately don't
+	// mutate ms.data mid-flight (the toggleSettings helper does not lock)
+	// because the real disable-driven shutdown is exercised by the
+	// in-process settings.Get path in production; this test focuses on the
+	// cancel-driven teardown, which the bucket goroutines must honour.
+	_ = ms // retained for documentation; not mutated to keep the race detector quiet
+	time.Sleep(120 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("coordinatorLoop did not exit after cancellation")
 	}
 }

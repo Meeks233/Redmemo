@@ -1,6 +1,9 @@
 package render
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // errorTitle is the <title> slot: rate-limit label, the raw message for 2xx
 // (debug) pages, or the "error.title" framing otherwise — matching the old
@@ -154,6 +157,26 @@ templ errorContent(d ErrorPageData) {
 									<td>{ d.PrefetchStatus.L1NextCycle }</td>
 								</tr>
 							}
+							for _, b := range d.PrefetchStatus.L1Buckets {
+								<tr>
+									<td class="ps-label">bucket={ b.TF }</td>
+									<td>
+										period { b.Period }
+										if b.NextCycle != "" {
+											&#183; next { b.NextCycle }
+										}
+										if b.Subs != "" {
+											&#183; [{ b.Subs }]
+										}
+										if len(b.Cursors) > 0 {
+											{ " " }
+											for _, c := range b.Cursors {
+												<span class="ps-cursor">r/{ c.Sub }: <code>{ c.Cursor }</code></span>{ " " }
+											}
+										}
+									</td>
+								</tr>
+							}
 							<tr><td colspan="2" class="ps-divider">L2 — Media Download</td></tr>
 							<tr>
 								<td class="ps-label">{ T(ctx, "error.phase") }</td>
@@ -167,6 +190,47 @@ templ errorContent(d ErrorPageData) {
 									}
 								</td>
 							</tr>
+							<tr><td colspan="2" class="ps-divider">L3 — Deep Archive (Comments)</td></tr>
+							<tr>
+								<td class="ps-label">{ T(ctx, "error.phase") }</td>
+								<td>
+									<span class="ps-phase">{ orDash(d.PrefetchStatus.L3Phase) }</span>
+									if d.PrefetchStatus.L3Current != "" {
+										{ " · " + d.PrefetchStatus.L3Current }
+									}
+								</td>
+							</tr>
+							if d.PrefetchStatus.L3LastAt != "" {
+								<tr>
+									<td class="ps-label">last fetch</td>
+									<td>{ d.PrefetchStatus.L3LastAt }</td>
+								</tr>
+							}
+							if d.PrefetchStatus.L3Count != 0 {
+								<tr>
+									<td class="ps-label">archived</td>
+									<td>{ fmt.Sprintf("%d post(s) this run", d.PrefetchStatus.L3Count) }</td>
+								</tr>
+							}
+							<tr><td colspan="2" class="ps-divider">L4 — Icon Cache</td></tr>
+							<tr>
+								<td class="ps-label">{ T(ctx, "error.phase") }</td>
+								<td>
+									<span class="ps-phase">{ orDash(d.PrefetchStatus.L4Phase) }</span>
+									if d.PrefetchStatus.L4Current != "" {
+										{ " · " + d.PrefetchStatus.L4Current }
+									}
+									if d.PrefetchStatus.L4QueueLen != 0 {
+										{ fmt.Sprintf(" · queue %d", d.PrefetchStatus.L4QueueLen) }
+									}
+								</td>
+							</tr>
+							if d.PrefetchStatus.L4NextTick != "" {
+								<tr>
+									<td class="ps-label">next tick</td>
+									<td>{ d.PrefetchStatus.L4NextTick }</td>
+								</tr>
+							}
 							<tr><td colspan="2" class="ps-divider">L5 — Audio Remux</td></tr>
 							<tr>
 								<td class="ps-label">{ T(ctx, "error.phase") }</td>

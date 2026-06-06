@@ -496,12 +496,21 @@ type PrefetchStatusView struct {
 	L1Subs      string
 	L1Cursors   []PrefetchCursorView
 	L1NextCycle string
+	L1Buckets   []PrefetchBucketView
 	L2Phase     string
 	L2Sub       string
 	L2Pending   int
 	L5Phase     string
 	L5Current   string
 	L5Pending   int
+	L3Phase     string
+	L3Current   string
+	L3LastAt    string
+	L3Count     int
+	L4Phase     string
+	L4Current   string
+	L4QueueLen  int
+	L4NextTick  string
 	NPPhase     string
 	NPCurrent   string
 	QueueLen    int
@@ -510,6 +519,17 @@ type PrefetchStatusView struct {
 type PrefetchCursorView struct {
 	Sub    string
 	Cursor string
+}
+
+// PrefetchBucketView surfaces one timeframe bucket's live schedule on the
+// debug page: which subs ride it, when its next cycle fires, and the cursor
+// each (sub, sort, t) has accumulated across cycles.
+type PrefetchBucketView struct {
+	TF        string
+	Period    string
+	Subs      string
+	NextCycle string
+	Cursors   []PrefetchCursorView
 }
 
 type DebugData struct {

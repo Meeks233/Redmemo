@@ -200,10 +200,13 @@ func (s *Scheduler) nextIconBatch() []string {
 func (s *Scheduler) iconLoop(ctx context.Context) {
 	if s.iconStore == nil {
 		s.Events.Add(LevelSkip, "L4", "icon store not configured, L4 disabled")
+		s.setL4Status("disabled", "icon store not configured", 0)
 		return
 	}
 
 	s.Events.Add(LevelInfo, "L4", "icon layer started, running initial check")
+	s.setL4Status("idle", "", 0)
+	s.setL4NextTick(time.Now().Add(iconCheckInterval))
 	s.runIconBatch(ctx, "tick")
 
 	ticker := time.NewTicker(iconCheckInterval)
@@ -212,6 +215,7 @@ func (s *Scheduler) iconLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
+			s.setL4NextTick(time.Now().Add(iconCheckInterval))
 			s.runIconBatch(ctx, "tick")
 		case <-ctx.Done():
 			return
@@ -235,16 +239,29 @@ func (s *Scheduler) runIconBatch(ctx context.Context, source string) {
 		if source == "tick" {
 			s.Events.Add(LevelOK, "L4", "tick: round queue empty, nothing to refresh")
 		}
+		s.iconMu.Lock()
+		ql := len(s.iconRound)
+		s.iconMu.Unlock()
+		s.setL4Status("idle", "", ql)
 		return
 	}
 	log.Printf("L4 %s: fetching %v", source, batch)
 	s.Events.Addf(LevelInfo, "L4", "%s: %d sub(s) batched: %v", source, len(batch), batch)
 	for _, sub := range batch {
 		if err := ctx.Err(); err != nil {
+			s.setL4Status("cancelled", sub, 0)
 			return
 		}
+		s.iconMu.Lock()
+		ql := len(s.iconRound)
+		s.iconMu.Unlock()
+		s.setL4Status("fetching", source+":r/"+sub, ql)
 		s.fetchAndSaveIcon(ctx, sub)
 	}
+	s.iconMu.Lock()
+	ql := len(s.iconRound)
+	s.iconMu.Unlock()
+	s.setL4Status("idle", "", ql)
 }
 
 func (s *Scheduler) fetchAndSaveIcon(ctx context.Context, sub string) {

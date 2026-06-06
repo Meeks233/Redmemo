@@ -2027,7 +2027,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Prefs.PageLimit)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 317, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/settings.templ`, Line: 317, Col: 135}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {

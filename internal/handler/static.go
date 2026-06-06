@@ -503,6 +503,20 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		if ps.L1MaxRounds > 0 {
 			l1Progress = fmt.Sprintf("%d / %d", ps.L1Round, ps.L1MaxRounds)
 		}
+		var buckets []render.PrefetchBucketView
+		for _, b := range ps.L1Buckets {
+			bc := make([]render.PrefetchCursorView, 0, len(b.Cursors))
+			for sub, cur := range b.Cursors {
+				bc = append(bc, render.PrefetchCursorView{Sub: sub, Cursor: cur})
+			}
+			buckets = append(buckets, render.PrefetchBucketView{
+				TF:        b.TF,
+				Period:    b.Period,
+				Subs:      strings.Join(b.Subs, ", "),
+				NextCycle: b.NextCycle,
+				Cursors:   bc,
+			})
+		}
 		prefetchStatus = render.PrefetchStatusView{
 			Enabled:     ps.Enabled,
 			ActiveSubs:  strings.Join(ps.ActiveSubs, ", "),
@@ -511,12 +525,21 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L1Subs:      strings.Join(ps.L1Subs, ", "),
 			L1Cursors:   cursors,
 			L1NextCycle: ps.L1NextCycle,
+			L1Buckets:   buckets,
 			L2Phase:     ps.L2Phase,
 			L2Sub:       ps.L2Sub,
 			L2Pending:   ps.L2Pending,
 			L5Phase:     ps.L5Phase,
 			L5Current:   ps.L5Current,
 			L5Pending:   ps.L5Pending,
+			L3Phase:     ps.L3Phase,
+			L3Current:   ps.L3Current,
+			L3LastAt:    ps.L3LastAt,
+			L3Count:     ps.L3Count,
+			L4Phase:     ps.L4Phase,
+			L4Current:   ps.L4Current,
+			L4QueueLen:  ps.L4QueueLen,
+			L4NextTick:  ps.L4NextTick,
 			NPPhase:     ps.NPPhase,
 			NPCurrent:   ps.NPCurrent,
 			QueueLen:    ps.QueueLen,

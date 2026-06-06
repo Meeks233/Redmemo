@@ -95,18 +95,40 @@ type workItem struct {
 	needsBudget bool
 }
 
-// cycleState is persisted to DB so the scheduler can resume after container restart.
-type cycleState struct {
+// bucketStatus is the live debug view of one bucket loop. Owned by the
+// scheduler's statusMu; bucketLoop updates it once per cycle.
+type bucketStatus struct {
+	TF          string
+	NextCycleAt time.Time
+	Period      time.Duration
+	Subs        []string
+	Cursors     map[string]string
+}
+
+// bucketState is persisted per timeframe bucket so the scheduler can resume
+// each bucket's cadence independently after container restart. NextCycleAt is
+// the wall-clock time the current cycle should *start* (i.e. its first fetch
+// is scheduled at some random offset into that cycle's period).
+type bucketState struct {
 	NextCycleAt time.Time         `json:"next_cycle_at"`
-	Round       int               `json:"round"`
-	Cursors     map[string]string `json:"cursors"`
-	// Exhausted records subs whose listing returned no further pages. A sub
-	// missing from Cursors is NOT necessarily exhausted — it may have failed
-	// to fetch — so resumption must consult this set, not cursor presence.
+	Cursors     map[string]string `json:"cursors,omitempty"`
+	// Exhausted records (sub, sort, tf) cursors whose listing returned no
+	// further pages. Cleared at the start of every cycle so the bucket
+	// re-walks fresh content on each period rather than skipping forever.
 	Exhausted map[string]bool `json:"exhausted,omitempty"`
 }
 
-const cycleStateKey = "_prefetch_cycle_state"
+// bucketStateKey returns the per-bucket settings key. Bucket-scoped state was
+// introduced when L1 was refactored from a single global cycle to one cycle
+// per timeframe bucket (hour/day/week/month/year/all).
+func bucketStateKey(tf string) string {
+	return "_prefetch_bucket_state_" + tf
+}
+
+// legacyCycleStateKey is the pre-bucket scheduler state key. New code never
+// writes it, but the producer clears it on startup so a stale entry from the
+// monolithic-cycle era doesn't sit in the settings table forever.
+const legacyCycleStateKey = "_prefetch_cycle_state"
 
 type SubIconProvider interface {
 	Get(name string) (*store.SubIcon, error)
@@ -140,6 +162,26 @@ type Scheduler struct {
 	// applies; tests override it for deterministic, fast runs.
 	userActivePause func() time.Duration
 
+	// dispatchCooldown is the inter-call pause the dispatch loop sleeps
+	// after every fetch. Defaults to 4–8s randomized when nil; tests pin it
+	// to a tiny value so multiple submissions complete within a sub-second
+	// window.
+	dispatchCooldown func() time.Duration
+
+	// fetchFunc, when non-nil, replaces the s.cli.FetchSubreddit call so
+	// bucketLoop tests can exercise the dispatch / cadence path without
+	// running a real Reddit client. The hook is honoured by every fetch
+	// site (initial and post-token-recovery retry).
+	fetchFunc func(ctx context.Context, sub, sort, tf, after string, limit int) ([]reddit.Post, string, string, error)
+
+	// bucketGap and bucketBaseOverride let tests shrink the cadence so a
+	// full bucket cycle completes in milliseconds instead of hours.
+	// bucketGap is the per-sub floor; bucketBaseOverride, when non-zero,
+	// replaces the timeframe-derived base period so the same code path is
+	// exercised without waiting out 6h of jitter.
+	bucketGap          time.Duration
+	bucketBaseOverride time.Duration
+
 	// L4 icon round queue: pre-ordered (post count desc) list of subs still to
 	// fetch this round. Built lazily when empty by nextIconBatch. Both the
 	// hourly tick and passive /archive triggers drain from the same queue, so
@@ -156,18 +198,68 @@ type Scheduler struct {
 	l1Subs      []string
 	l1Cursors   map[string]string
 	l1NextCycle time.Time
+	// l1Buckets surfaces per-bucket schedule + cursors to /debug. Keyed by
+	// timeframe (hour/day/.../all). Updated at the top of every bucket
+	// cycle; the global L1 view picks the *earliest* NextCycleAt across
+	// buckets and the union of all cursors so the debug page reflects the
+	// "next thing about to happen" rather than any one bucket in isolation.
+	l1Buckets map[string]*bucketStatus
 	l2Phase     string
 	l2Sub       string
 	l2Pending   int
 	l5Phase     string
 	l5Current   string
 	l5Pending   int
+	// L3 — deep archive (comments). Handler-initiated, on-demand only; the
+	// scheduler tracks it for /debug visibility but never schedules it itself.
+	l3Phase    string
+	l3Current  string
+	l3LastAt   time.Time
+	l3Count    int
+	// L4 — icon cache loop. Updated by iconLoop/runIconBatch so /debug shows
+	// the live round queue, current sub, and next tick eta even between
+	// hourly batches.
+	l4Phase       string
+	l4Current     string
+	l4QueueLen    int
+	l4NextTickAt  time.Time
 	npPhase     string
 	npCurrent   string
 }
 
+// Bucket identifiers — one per Reddit listing-API timeframe.
 const (
-	maxRoundsPerCycle = 8
+	bucketHour  = "hour"
+	bucketDay   = "day"
+	bucketWeek  = "week"
+	bucketMonth = "month"
+	bucketYear  = "year"
+	bucketAll   = "all"
+)
+
+// bucketOrder is the canonical iteration order of buckets — finest to
+// coarsest. Used for deterministic event-log ordering and PrefetchStatus
+// aggregation; ordering has no effect on the actual cadence which is
+// per-bucket independent.
+var bucketOrder = []string{bucketHour, bucketDay, bucketWeek, bucketMonth, bucketYear, bucketAll}
+
+const (
+	// jitterFrac is the ±fractional spread applied to every cadence period
+	// (bucket cycle length and intra-cycle sub gap). 0.20 keeps fetches close
+	// enough to the user's intended cadence to actually honour timeframe
+	// semantics, while leaving enough wall-clock entropy that an observer
+	// can't pin the period to a fixed value over a few cycles.
+	jitterFrac = 0.20
+	// minBucketGap is the floor for the intra-cycle pre-fetch sleep. Without
+	// it, two subs in a tiny bucket could race the NP dispatcher's own
+	// inter-call cooldown and look like a coordinated burst even after our
+	// own randomization. 30s comfortably exceeds the dispatcher's 4-8s.
+	minBucketGap = 30 * time.Second
+	// minCyclePeriod is the absolute floor for one bucket cycle even after
+	// downward jitter and a defensive min-gap multiplier. It guards against
+	// pathological clock skew or misconfigured base periods producing a
+	// zero/negative period (which would otherwise burn CPU in a tight loop).
+	minCyclePeriod = time.Minute
 	// pageSize is L2's batch size for the per-sub media-needing query.
 	// Kept at 25 by design — L2's per-round cost scales with this and the
 	// "other layers unchanged" directive applies here.
@@ -231,9 +323,10 @@ func (s *Scheduler) NotifyUserRequest() {
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L5 + NP dispatch)")
+	s.Events.Add(LevelInfo, "init", "scheduler started (L1/L2/L5 + NP dispatch, per-timeframe buckets)")
+	s.clearLegacyCycleState()
 	go s.dispatchLoop(ctx)
-	go s.producerLoop(ctx)
+	go s.coordinatorLoop(ctx)
 	go s.iconLoop(ctx)
 }
 
@@ -243,23 +336,23 @@ func (s *Scheduler) Stop() {}
 // Cycle state persistence
 // ---------------------------------------------------------------------------
 
-func (s *Scheduler) loadCycleState() *cycleState {
+func (s *Scheduler) loadBucketState(tf string) *bucketState {
 	if s.settings == nil {
 		return nil
 	}
-	raw := s.settings.Get(cycleStateKey)
+	raw := s.settings.Get(bucketStateKey(tf))
 	if raw == "" {
 		return nil
 	}
-	var st cycleState
+	var st bucketState
 	if err := json.Unmarshal([]byte(raw), &st); err != nil {
-		log.Printf("prefetch: failed to parse cycle state: %v", err)
+		log.Printf("prefetch: failed to parse bucket=%s state: %v", tf, err)
 		return nil
 	}
 	return &st
 }
 
-func (s *Scheduler) saveCycleState(st *cycleState) {
+func (s *Scheduler) saveBucketState(tf string, st *bucketState) {
 	if s.settings == nil {
 		return
 	}
@@ -267,16 +360,18 @@ func (s *Scheduler) saveCycleState(st *cycleState) {
 	if err != nil {
 		return
 	}
-	if err := s.settings.Set(cycleStateKey, string(data)); err != nil {
-		log.Printf("prefetch: failed to save cycle state: %v", err)
+	if err := s.settings.Set(bucketStateKey(tf), string(data)); err != nil {
+		log.Printf("prefetch: failed to save bucket=%s state: %v", tf, err)
 	}
 }
 
-func (s *Scheduler) clearCycleState() {
+func (s *Scheduler) clearLegacyCycleState() {
 	if s.settings == nil {
 		return
 	}
-	s.settings.Set(cycleStateKey, "")
+	if s.settings.Get(legacyCycleStateKey) != "" {
+		s.settings.Set(legacyCycleStateKey, "")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -327,7 +422,12 @@ func (s *Scheduler) dispatchLoop(ctx context.Context) {
 		close(item.done)
 
 		s.setNPStatus("cooldown", "")
-		delay := time.Duration(4000+rand.Intn(4000)) * time.Millisecond
+		var delay time.Duration
+		if s.dispatchCooldown != nil {
+			delay = s.dispatchCooldown()
+		} else {
+			delay = time.Duration(4000+rand.Intn(4000)) * time.Millisecond
+		}
 		if err := sleep(ctx, delay); err != nil {
 			return
 		}
@@ -390,14 +490,85 @@ func (s *Scheduler) submit(ctx context.Context, label string, needsBudget bool, 
 // Producer Loop — L1/L2 generate work items and feed them to the NP queue
 // ---------------------------------------------------------------------------
 
-func (s *Scheduler) producerLoop(ctx context.Context) {
+// coordinatorLoop owns the lifetime of all per-bucket producer goroutines.
+// It waits for NP to be enabled with at least one sub, then groups subs by
+// their resolved timeframe bucket and launches one bucketLoop per non-empty
+// bucket. When the relevant settings change (subs / per-sub modes / global
+// sort / global timeframe) it tears down the running bucket loops and rebuilds
+// from scratch — cheaper than tracking partial deltas, and the bucketLoop
+// preserves cursor continuity by reloading per-bucket state from settings on
+// restart.
+func (s *Scheduler) coordinatorLoop(ctx context.Context) {
+	var bucketsCancel context.CancelFunc
+	var bucketsWG sync.WaitGroup
+	var lastSig string
+	var lastSubs []string
+
+	stopBuckets := func() {
+		if bucketsCancel != nil {
+			bucketsCancel()
+			bucketsWG.Wait()
+			bucketsCancel = nil
+			s.dropBucketStatus()
+		}
+	}
+	defer stopBuckets()
+
 	for {
-		if err := s.waitUntilEnabled(ctx); err != nil {
-			s.Events.Addf(LevelError, "L1", "exiting: %v", err)
+		if err := ctx.Err(); err != nil {
 			return
 		}
-		if err := s.runBigCycle(ctx); err != nil {
-			s.Events.Addf(LevelError, "L1", "exiting: %v", err)
+		if !s.isEnabled() {
+			if bucketsCancel != nil {
+				s.Events.Add(LevelSkip, "L1", "disabled or no subs, stopping bucket loops")
+				stopBuckets()
+				lastSig = ""
+				lastSubs = nil
+			}
+			toggle, subs := "", ""
+			if s.settings != nil {
+				toggle = s.settings.Get("enable_natural_prefetch")
+				subs = s.settings.Get("prefetch_subs")
+			}
+			s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
+			s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q, prefetch_subs=%q), sleeping 30s", toggle, subs)
+			if err := sleep(ctx, 30*time.Second); err != nil {
+				return
+			}
+			continue
+		}
+
+		sig := s.configSignature()
+		if sig != lastSig {
+			stopBuckets()
+			subs := s.activeSubs()
+			groups := s.groupSubsByBucket(subs)
+			bctx, bcancel := context.WithCancel(ctx)
+			bucketsCancel = bcancel
+			started := 0
+			for _, tf := range bucketOrder {
+				members := groups[tf]
+				if len(members) == 0 {
+					continue
+				}
+				bucketsWG.Add(1)
+				started++
+				bucketSubs := append([]string(nil), members...)
+				bucketTF := tf
+				go func() {
+					defer bucketsWG.Done()
+					s.bucketLoop(bctx, bucketTF, bucketSubs)
+				}()
+			}
+			s.Events.Addf(LevelInfo, "L1", "coordinator launched %d bucket loop(s) for [%s]",
+				started, strings.Join(subs, ", "))
+			s.setL1Status("running", 0, 0, subs, nil, time.Time{})
+			lastSig = sig
+			lastSubs = subs
+		}
+		_ = lastSubs // retained for future reload diagnostics
+
+		if err := sleep(ctx, 30*time.Second); err != nil {
 			return
 		}
 	}
@@ -438,12 +609,12 @@ type subMode struct {
 	Timeframe string // hour|day|week|month|year|all (only honored by top/controversial)
 }
 
-// resolveSubMode returns the listing-API mode for sub: per-sub override from
-// prefetch_sub_modes wins per-field (sort and time are overridden independently),
-// then the global prefetch_sort + prefetch_timeframe, then ("hot", "day") as
-// the hard-coded fallback. The per-sub query grammar mirrors navbar search:
-// `suba=sort:rising&time:day+subb=sort:top`.
-func (s *Scheduler) resolveSubMode(sub string) subMode {
+// resolveSubParams returns the raw (Sort, Timeframe) parsed from settings —
+// the Timeframe field is retained even when Sort doesn't honor it upstream,
+// so the bucket scheduler can read the user's intended cadence regardless of
+// which sort they picked. resolveSubMode is the API-facing wrapper that drops
+// the timeframe for sort=hot/new/rising before it reaches the listing call.
+func (s *Scheduler) resolveSubParams(sub string) subMode {
 	mode := subMode{Sort: "hot", Timeframe: "day"}
 	if s.settings != nil {
 		if v := s.settings.Get("prefetch_sort"); v != "" {
@@ -482,14 +653,87 @@ func (s *Scheduler) resolveSubMode(sub string) subMode {
 			}
 		}
 	}
-	// top/controversial honour timeframe; for hot/new/rising it is harmlessly
-	// ignored upstream, but we drop it so cursorKey stays minimal and event
-	// logs don't claim a meaningless tf for those sorts. Applied uniformly so
-	// the no-settings / no-sub_modes paths don't leak the default "day" tf.
+	return mode
+}
+
+// resolveSubMode returns the listing-API mode for sub: per-sub override from
+// prefetch_sub_modes wins per-field (sort and time are overridden independently),
+// then the global prefetch_sort + prefetch_timeframe, then ("hot", "day") as
+// the hard-coded fallback. For sort=hot/new/rising the timeframe is dropped
+// before it reaches the listing call (Reddit ignores it harmlessly, but a
+// non-empty value would leak into cursorKey and the event log).
+func (s *Scheduler) resolveSubMode(sub string) subMode {
+	mode := s.resolveSubParams(sub)
 	if mode.Sort != "top" && mode.Sort != "controversial" {
 		mode.Timeframe = ""
 	}
 	return mode
+}
+
+// resolveSubBucket returns the timeframe bucket this sub belongs to. It uses
+// the *raw* timeframe (the user's intended cadence) even when the sort
+// wouldn't honor it for the API call, so a "sort=hot, time=week" sub still
+// fires on a weekly cadence rather than collapsing into the default day
+// bucket. Unknown timeframes fall back to "day".
+func (s *Scheduler) resolveSubBucket(sub string) string {
+	return normalizeBucket(s.resolveSubParams(sub).Timeframe)
+}
+
+func normalizeBucket(tf string) string {
+	switch strings.ToLower(strings.TrimSpace(tf)) {
+	case bucketHour, bucketDay, bucketWeek, bucketMonth, bucketYear, bucketAll:
+		return strings.ToLower(strings.TrimSpace(tf))
+	}
+	return bucketDay
+}
+
+// bucketBasePeriod returns the fixed nominal cadence for each timeframe. The
+// values match the user-facing intuition: an "hour" sub gets a 6h cycle so a
+// listing snapshot lines up with a few full hour-windows; "all" gets one
+// pass per year. Cycle wall-clock is then jittered ±jitterFrac to break any
+// fixed-period detection.
+func bucketBasePeriod(tf string) time.Duration {
+	switch normalizeBucket(tf) {
+	case bucketHour:
+		return 6 * time.Hour
+	case bucketDay:
+		return 12 * time.Hour
+	case bucketWeek:
+		return 48 * time.Hour
+	case bucketMonth:
+		return 15 * 24 * time.Hour
+	case bucketYear:
+		return 180 * 24 * time.Hour
+	case bucketAll:
+		return 365 * 24 * time.Hour
+	}
+	return 12 * time.Hour
+}
+
+// groupSubsByBucket partitions the active sub list by timeframe bucket,
+// preserving each bucket's encounter order so a stable shuffle within a
+// bucket starts from a deterministic baseline.
+func (s *Scheduler) groupSubsByBucket(subs []string) map[string][]string {
+	groups := make(map[string][]string, len(bucketOrder))
+	for _, sub := range subs {
+		tf := s.resolveSubBucket(sub)
+		groups[tf] = append(groups[tf], sub)
+	}
+	return groups
+}
+
+// configSignature is the coordinator's cheap dirty-bit: any change to subs,
+// per-sub modes or the global sort/timeframe re-derives the per-bucket sub
+// lists and re-launches the bucket loops. It's a settings hash rather than
+// a deep diff because all three settings are short user-entered strings.
+func (s *Scheduler) configSignature() string {
+	if s.settings == nil {
+		return ""
+	}
+	return s.settings.Get("prefetch_subs") + "|" +
+		s.settings.Get("prefetch_sort") + "|" +
+		s.settings.Get("prefetch_timeframe") + "|" +
+		s.settings.Get("prefetch_sub_modes")
 }
 
 // tfSuffix renders a timeframe as a compact event-log label suffix, or "" when
@@ -519,260 +763,326 @@ func (s *Scheduler) userRequestedRecently() bool {
 	return time.Since(time.Unix(last, 0)) < 30*time.Second
 }
 
-func (s *Scheduler) waitUntilEnabled(ctx context.Context) error {
+// jitterPercent returns d adjusted by a uniform random factor in
+// [1-frac, 1+frac]. Clamped to never go non-positive — a zero/negative sleep
+// would defeat its purpose as a pacing barrier.
+func jitterPercent(d time.Duration, frac float64) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	if frac <= 0 {
+		return d
+	}
+	off := (rand.Float64()*2 - 1) * frac
+	out := time.Duration(float64(d) * (1 + off))
+	if out <= 0 {
+		return d / 2
+	}
+	return out
+}
+
+// computeCyclePeriod returns the jittered length of one bucket cycle. Floors
+// at minCyclePeriod and at gap*len(subs) so a tiny base period with many subs
+// can't collapse into a burst-prone sub-second cycle. gap is the per-sub
+// floor (production: minBucketGap; tests may shrink it). When base ≤ 0 the
+// timeframe-derived default is used.
+func computeCyclePeriod(tf string, nSubs int, gap, base time.Duration) time.Duration {
+	overridden := base > 0
+	if base <= 0 {
+		base = bucketBasePeriod(tf)
+	}
+	period := jitterPercent(base, jitterFrac)
+	if gap <= 0 {
+		gap = minBucketGap
+	}
+	floor := time.Duration(nSubs) * gap
+	// Skip the absolute minCyclePeriod floor when the caller has explicitly
+	// passed a tiny base period — that path is reserved for tests, which
+	// would otherwise wait out a full minute per cycle.
+	if !overridden && floor < minCyclePeriod {
+		floor = minCyclePeriod
+	}
+	if period < floor {
+		period = floor
+	}
+	return period
+}
+
+// effectiveGap returns the per-sub minimum gap used by the bucket loop. Tests
+// may shrink it via bucketGap; production uses minBucketGap.
+func (s *Scheduler) effectiveGap() time.Duration {
+	if s.bucketGap > 0 {
+		return s.bucketGap
+	}
+	return minBucketGap
+}
+
+// bucketLoop runs the dispatch cadence for one timeframe bucket. Each cycle
+// it shuffles its sub list, derives per-sub sleeps that sum to one jittered
+// cycle period, and submits one L1 listing fetch + L2 media drain per sub.
+// Multiple bucketLoops run concurrently but every outbound request still
+// funnels through the single NP dispatch queue, so the global rate ceiling
+// is preserved regardless of how many buckets are active.
+//
+// On startup it restores the saved next-cycle time and cursors from
+// settings. If the saved cycle is already due (or overdue) the first sub
+// fires after a short randomized warmup rather than racing immediately —
+// avoiding a startup burst when the container was offline through a cycle
+// boundary.
+func (s *Scheduler) bucketLoop(ctx context.Context, tf string, subs []string) {
+	if len(subs) == 0 {
+		return
+	}
+
+	cursors := make(map[string]string)
+	if saved := s.loadBucketState(tf); saved != nil && saved.Cursors != nil {
+		cursors = saved.Cursors
+	}
+
+	base := bucketBasePeriod(tf)
+	if s.bucketBaseOverride > 0 {
+		base = s.bucketBaseOverride
+	}
+	s.Events.Addf(LevelInfo, "L1", "bucket=%s started for [%s] -- base period %s, %d sub(s)",
+		tf, strings.Join(subs, ", "), formatDur(base), len(subs))
+
+	// Initial offset: if persisted state has a future NextCycleAt, honour it
+	// so a cycle survives a restart on its original schedule. Otherwise pick
+	// a uniform random offset inside [0, base/4) so freshly-launched buckets
+	// don't all fire at the same wall-clock instant (which would queue up
+	// against each other in the NP dispatcher and look like a burst).
+	var initialWait time.Duration
+	if saved := s.loadBucketState(tf); saved != nil && !saved.NextCycleAt.IsZero() {
+		if w := time.Until(saved.NextCycleAt); w > 0 {
+			initialWait = w
+		}
+	}
+	if initialWait == 0 {
+		quarter := base / 4
+		if quarter <= 0 {
+			quarter = time.Minute
+		}
+		// When the gap floor has been shrunk for tests, cap the initial
+		// offset at a few gaps so the loop reaches its first fetch
+		// quickly — otherwise a 6h/4 = 90 min random offset against a
+		// 1 ms gap dwarfs everything else.
+		if s.bucketGap > 0 && s.bucketGap*4 < quarter {
+			quarter = s.bucketGap * 4
+		}
+		initialWait = time.Duration(rand.Int63n(int64(quarter)))
+	}
+	// Surface the bucket on /debug *before* the initial offset sleep —
+	// otherwise the bucket panel stays empty for up to base/4 after a fresh
+	// start and operators can't see that the loop is alive and scheduled.
+	// NextCycleAt here is the *first cycle's* anchor (now + initialWait);
+	// it's overwritten with the actual cycle anchor once the cycle starts.
+	s.recordBucketStatus(tf, time.Now().Add(initialWait), base, subs, cursors)
+
+	if initialWait > 0 {
+		s.Events.Addf(LevelInfo, "L1", "bucket=%s: initial offset %s before first cycle", tf, formatDur(initialWait))
+		if err := sleep(ctx, initialWait); err != nil {
+			return
+		}
+	}
+
 	for {
-		if s.isEnabled() {
-			s.setL1Status("ready", 0, 0, s.activeSubs(), nil, time.Time{})
-			return nil
+		if err := ctx.Err(); err != nil {
+			return
 		}
-		toggle, subs := "", ""
-		if s.settings != nil {
-			toggle = s.settings.Get("enable_natural_prefetch")
-			subs = s.settings.Get("prefetch_subs")
+		if !s.isEnabled() {
+			s.Events.Addf(LevelSkip, "L1", "bucket=%s: disabled mid-cycle, exiting", tf)
+			return
 		}
-		s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
-		s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q, prefetch_subs=%q), sleeping 30s", toggle, subs)
-		if err := sleep(ctx, 30*time.Second); err != nil {
-			return err
+
+		gap := s.effectiveGap()
+		period := computeCyclePeriod(tf, len(subs), gap, s.bucketBaseOverride)
+		nextCycleAt := time.Now().Add(period)
+
+		// Shuffle order each cycle so observers can't infer a stable sub
+		// rotation. Reseed locally with the global rand source.
+		ordered := append([]string(nil), subs...)
+		rand.Shuffle(len(ordered), func(i, j int) { ordered[i], ordered[j] = ordered[j], ordered[i] })
+
+		s.Events.Addf(LevelInfo, "L1", "bucket=%s cycle started -- period %s, order [%s]",
+			tf, formatDur(period), strings.Join(ordered, ", "))
+		// Persist the cycle anchor (NextCycleAt) up front so a container
+		// restart picks up the same schedule even if no sub has fetched yet.
+		// Without this, a restart during the initial offset / first gap
+		// would re-roll a fresh random offset and drift the cadence.
+		s.saveBucketState(tf, &bucketState{
+			NextCycleAt: nextCycleAt,
+			Cursors:     cursors,
+		})
+		s.recordBucketStatus(tf, nextCycleAt, period, ordered, cursors)
+		s.setL1Status(fmt.Sprintf("bucket=%s running", tf), 0, 0, subs, cursors, nextCycleAt)
+
+		// Reset per-cycle exhaustion: each cycle re-walks the listing from
+		// the head if the previous cursor ran out. New "hot" / "top" content
+		// appears between cycles, so a one-time exhaustion isn't permanent.
+		exhausted := make(map[string]bool)
+		remaining := period
+		n := len(ordered)
+
+		for i, sub := range ordered {
+			if err := ctx.Err(); err != nil {
+				return
+			}
+
+			// Per-sub sleep: split the *remaining* budget evenly across the
+			// subs left in the cycle, then jitter that fair share ±jitterFrac.
+			// Floored at minBucketGap so two subs in a 6h bucket can't end up
+			// hitting the dispatcher back-to-back even after unlucky jitter.
+			subsLeft := n - i
+			fairShare := remaining / time.Duration(subsLeft)
+			subGap := jitterPercent(fairShare, jitterFrac)
+			if subGap < gap {
+				subGap = gap
+			}
+			if subGap > remaining {
+				subGap = remaining
+			}
+			if err := sleep(ctx, subGap); err != nil {
+				return
+			}
+			remaining -= subGap
+
+			s.runOneSubFetch(ctx, tf, sub, cursors, exhausted)
+
+			if err := s.submitL2(ctx, sub); err != nil {
+				return
+			}
+
+			// Persist after every sub so a restart picks up advanced cursors.
+			s.saveBucketState(tf, &bucketState{
+				NextCycleAt: nextCycleAt,
+				Cursors:     cursors,
+				Exhausted:   exhausted,
+			})
+		}
+
+		// L5 trails L2 just as before: one drain pass per bucket cycle.
+		if err := s.submitL5(ctx); err != nil {
+			return
+		}
+
+		// Sleep out the remainder so the next cycle aligns with nextCycleAt.
+		if tail := time.Until(nextCycleAt); tail > 0 {
+			s.Events.Addf(LevelInfo, "L1", "bucket=%s cycle complete -- next cycle in %s", tf, formatDur(tail))
+			if err := sleep(ctx, tail); err != nil {
+				return
+			}
+		} else {
+			s.Events.Addf(LevelOK, "L1", "bucket=%s cycle complete -- starting next immediately", tf)
 		}
 	}
 }
 
-// runBigCycle executes one full L1 cycle, resuming from persisted state if available.
-func (s *Scheduler) runBigCycle(ctx context.Context) error {
-	subs := s.activeSubs()
-	if len(subs) == 0 {
-		return nil
+// runOneSubFetch performs one L1 listing fetch for a single sub, with the
+// same token-recovery semantics the legacy big-cycle loop had. Fetch and
+// archive outcomes mutate the supplied cursors/exhausted maps in place; the
+// call is otherwise self-contained and never returns an error (all failure
+// paths either record a sub-status warning or skip silently — the bucket
+// loop continues to the next sub regardless).
+func (s *Scheduler) runOneSubFetch(ctx context.Context, tf, sub string, cursors map[string]string, exhausted map[string]bool) {
+	mode := s.resolveSubMode(sub)
+	ck := cursorKey(sub, mode)
+
+	// A cursor that already exhausted this listing earlier in this same
+	// cycle is skipped — re-issuing the same cursor would return an empty
+	// page and burn a request. The exhausted map is per-cycle (cleared by
+	// the caller), so the next cycle still re-walks from the head.
+	if exhausted[ck] {
+		return
 	}
 
-	// Try to restore state from a previous run
-	var startRound int
-	cursors := make(map[string]string)
-	exhausted := make(map[string]bool)
-	var cycleWait time.Duration
+	cursor := cursors[ck]
+	var posts []reddit.Post
+	var after string
+	var fetchErr error
+	limit := l1RoundLimit()
+	label := fmt.Sprintf("L1 bucket=%s r/%s [%s%s] listing limit=%d (after=%q)",
+		tf, sub, mode.Sort, tfSuffix(mode.Timeframe), limit, cursor)
 
-	if saved := s.loadCycleState(); saved != nil && !saved.NextCycleAt.IsZero() {
-		if wait := time.Until(saved.NextCycleAt); wait > 0 && saved.Round >= maxRoundsPerCycle {
-			// Previous cycle completed, still in sleep phase
-			s.Events.Addf(LevelInfo, "L1", "resuming inter-cycle sleep -- next cycle in %s", formatDur(wait))
-			log.Printf("natural prefetch L1: resuming inter-cycle sleep, next in %s", formatDur(wait))
-			return sleep(ctx, wait)
+	if err := s.submit(ctx, label, true, func(ctx context.Context) {
+		if s.fetchFunc != nil {
+			posts, _, after, fetchErr = s.fetchFunc(ctx, sub, mode.Sort, mode.Timeframe, cursor, limit)
+		} else {
+			posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
 		}
-		if saved.Round > 0 && saved.Round < maxRoundsPerCycle {
-			startRound = saved.Round
-			if saved.Cursors != nil {
-				cursors = saved.Cursors
-			}
-			if saved.Exhausted != nil {
-				exhausted = saved.Exhausted
-			}
-			cycleWait = time.Until(saved.NextCycleAt)
-			if cycleWait <= 0 {
-				cycleWait = 12*time.Hour + time.Duration(rand.Int63n(int64(12*time.Hour)))
-			}
-			s.Events.Addf(LevelInfo, "L1", "resuming cycle at round %d/%d for [%s] (restored from DB)",
-				startRound+1, maxRoundsPerCycle, strings.Join(subs, ", "))
-			log.Printf("natural prefetch L1: resuming at round %d/%d", startRound+1, maxRoundsPerCycle)
-		}
-	}
-
-	if cycleWait <= 0 {
-		cycleWait = 12*time.Hour + time.Duration(rand.Int63n(int64(12*time.Hour)))
-	}
-	nextCycleAt := time.Now().Add(cycleWait)
-
-	if startRound == 0 {
-		s.Events.Addf(LevelInfo, "L1", "big cycle started for [%s] -- next cycle in %s",
-			strings.Join(subs, ", "), formatDur(cycleWait))
-		log.Printf("natural prefetch L1: big cycle started for [%s], next in %s",
-			strings.Join(subs, ", "), formatDur(cycleWait))
-	}
-	s.setL1Status("running", startRound, maxRoundsPerCycle, subs, cursors, nextCycleAt)
-
-	for round := startRound; round < maxRoundsPerCycle; round++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if !s.isEnabled() {
-			s.Events.Add(LevelSkip, "L1", "disabled mid-cycle, stopping")
-			s.clearCycleState()
-			break
-		}
-
-		activeSubs := 0
-		for _, sub := range subs {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-
-			// Resolve the listing-API mode (sort + timeframe) for this sub.
-			// Per-sub override beats the global default; cursors and the
-			// exhausted-page flag are scoped to (sub, sort, t) so a mid-cycle
-			// settings edit doesn't reuse a cursor minted against a different
-			// listing endpoint.
-			mode := s.resolveSubMode(sub)
-			ck := cursorKey(sub, mode)
-
-			// Skip only subs that genuinely ran out of pages. A sub that
-			// failed to fetch in an earlier round has no cursor either, but
-			// must be retried — not silently dropped for the rest of the cycle.
-			if round > 0 && exhausted[ck] {
-				continue
-			}
-			// This sub is still in play this round (whether it succeeds or
-			// fails), so the cycle should not end early on its account.
-			activeSubs++
-
-			cursor := cursors[ck]
-			var posts []reddit.Post
-			var after string
-			var fetchErr error
-
-			limit := l1RoundLimit()
-			label := fmt.Sprintf("L1 r/%s [%s%s] round %d/%d listing limit=%d (after=%q)", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1, maxRoundsPerCycle, limit, cursor)
-			err := s.submit(ctx, label, true, func(ctx context.Context) {
-				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
-				s.recordUpstream(ctx)
-				// Token() returns nil for three distinct reasons; ErrNoTokenAvailable
-				// collapses them. Disambiguate before reacting:
-				//   - no token ever installed (cold start) → block until the
-				//     first token+UA pair lands, then retry on the OAuth path.
-				//   - token installed but momentarily unusable (rate-limited or
-				//     refreshing) → tokenReady already fired, so WaitForToken
-				//     would return instantly and the retry would fail identically.
-				//     Don't emit a misleading "blocking" warn or spin a no-op
-				//     retry; skip this sub for the round (quota resets within
-				//     ~10 min, next round is 15-30 min out).
-				// Either way, no publicCli fallback: emitting an unauthenticated
-				// request from the same IP that's about to carry the session
-				// token is a stealth tell we won't accept.
-				if errors.Is(fetchErr, reddit.ErrNoTokenAvailable) && s.tokenWaiter != nil {
-					if s.tokenWaiter.TokenInstalled() {
-						// Token is installed but momentarily unusable (rate-limited
-						// or refreshing). Rather than abandon the round outright,
-						// give the local token a few exponential-backoff chances to
-						// recover, re-checking only whether a usable session token
-						// has reappeared — no upstream request is spent probing. If
-						// it comes back, resume this round with a real fetch; if all
-						// retries lapse, give up the round as before.
-						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token temporarily unusable (rate-limited or refreshing), retrying up to %dx with backoff", sub, round+1, l1TokenRetries)
-						recovered := false
-						for attempt := 0; attempt < l1TokenRetries; attempt++ {
-							backoff := l1TokenRetryBase << attempt
-							select {
-							case <-ctx.Done():
-								fetchErr = ctx.Err()
-								return
-							case <-time.After(backoff):
-							}
-							if s.tokenWaiter.TokenUsable() {
-								s.Events.Addf(LevelInfo, "L1", "r/%s round %d: session token recovered on retry %d/%d, resuming round", sub, round+1, attempt+1, l1TokenRetries)
-								recovered = true
-								break
-							}
-							s.Events.Addf(LevelSkip, "L1", "r/%s round %d: token still unusable after retry %d/%d", sub, round+1, attempt+1, l1TokenRetries)
-						}
-						if !recovered {
-							s.Events.Addf(LevelWarn, "L1", "r/%s round %d: session token still unusable after %d retries, skipping this round", sub, round+1, l1TokenRetries)
-							if s.subStatus != nil {
-								s.subStatus.RecordFailure(sub, "token temporarily unusable")
-							}
-							return
-						}
-						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
-						s.recordUpstream(ctx)
-					} else {
-						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
-						if s.tokenWaiter.WaitForToken(ctx) {
-							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
-							s.recordUpstream(ctx)
-						}
+		s.recordUpstream(ctx)
+		// Token() returning nil collapses three distinct conditions into
+		// ErrNoTokenAvailable. Disambiguate before reacting: cold start
+		// (block until first token), installed-but-unusable (short
+		// backoff retry checking only local state), or genuinely missing
+		// (give up this sub for the cycle). No publicCli fallback —
+		// emitting an unauthenticated request from the same IP that's
+		// about to carry the session token is a stealth tell.
+		if errors.Is(fetchErr, reddit.ErrNoTokenAvailable) && s.tokenWaiter != nil {
+			if s.tokenWaiter.TokenInstalled() {
+				s.Events.Addf(LevelWarn, "L1", "bucket=%s r/%s: session token temporarily unusable, retrying up to %dx with backoff", tf, sub, l1TokenRetries)
+				recovered := false
+				for attempt := 0; attempt < l1TokenRetries; attempt++ {
+					backoff := l1TokenRetryBase << attempt
+					select {
+					case <-ctx.Done():
+						fetchErr = ctx.Err()
+						return
+					case <-time.After(backoff):
 					}
+					if s.tokenWaiter.TokenUsable() {
+						s.Events.Addf(LevelInfo, "L1", "bucket=%s r/%s: session token recovered on retry %d/%d", tf, sub, attempt+1, l1TokenRetries)
+						recovered = true
+						break
+					}
+					s.Events.Addf(LevelSkip, "L1", "bucket=%s r/%s: token still unusable after retry %d/%d", tf, sub, attempt+1, l1TokenRetries)
 				}
-				if fetchErr != nil {
-					s.Events.Addf(LevelError, "L1", "r/%s round %d: fetch failed: %v", sub, round+1, fetchErr)
+				if !recovered {
+					s.Events.Addf(LevelWarn, "L1", "bucket=%s r/%s: session token still unusable after %d retries, skipping", tf, sub, l1TokenRetries)
 					if s.subStatus != nil {
-						s.subStatus.RecordFailure(sub, fetchErr.Error())
+						s.subStatus.RecordFailure(sub, "token temporarily unusable")
 					}
 					return
 				}
-				s.Events.Addf(LevelOK, "L1", "r/%s round %d/%d: %d posts fetched (after=%q)",
-					sub, round+1, maxRoundsPerCycle, len(posts), after)
-				if s.subStatus != nil {
-					s.subStatus.MarkLive(sub)
-				}
-				s.archiver.ArchivePosts(posts, sub, "natural_prefetch")
-			})
-			if err != nil {
-				return err
-			}
-
-			if fetchErr != nil {
-				continue
-			}
-
-			if after != "" {
-				cursors[ck] = after
+				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
+				s.recordUpstream(ctx)
 			} else {
-				delete(cursors, ck)
-				exhausted[ck] = true
-				s.Events.Addf(LevelInfo, "L1", "r/%s [%s%s]: no more pages after round %d", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1)
-			}
-
-			if err := s.submitL2(ctx, sub); err != nil {
-				return err
+				s.Events.Addf(LevelWarn, "L1", "bucket=%s r/%s: no session token yet, blocking until token+UA ready", tf, sub)
+				if s.tokenWaiter.WaitForToken(ctx) {
+					posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
+					s.recordUpstream(ctx)
+				}
 			}
 		}
-
-		// L5 trails L2: once this round's listing + media work is queued,
-		// drain any videos whose audio mux earlier exhausted its retries.
-		if err := s.submitL5(ctx); err != nil {
-			return err
-		}
-
-		if round > 0 && activeSubs == 0 {
-			s.Events.Add(LevelInfo, "L1", "all subs exhausted pages, ending cycle early")
-			break
-		}
-
-		// Persist state after each round so we can resume on restart
-		s.saveCycleState(&cycleState{
-			NextCycleAt: nextCycleAt,
-			Round:       round + 1,
-			Cursors:     cursors,
-			Exhausted:   exhausted,
-		})
-		s.setL1Status("running", round+1, maxRoundsPerCycle, subs, cursors, nextCycleAt)
-
-		if round < maxRoundsPerCycle-1 {
-			roundWait := 15*time.Minute + time.Duration(rand.Int63n(int64(15*time.Minute)))
-			s.setL1Status("sleeping between rounds", round+1, maxRoundsPerCycle, subs, cursors, nextCycleAt)
-			s.Events.Addf(LevelInfo, "L1", "round %d/%d complete -- next round in %s",
-				round+1, maxRoundsPerCycle, formatDur(roundWait))
-			log.Printf("natural prefetch L1: round %d/%d complete, next in %s",
-				round+1, maxRoundsPerCycle, formatDur(roundWait))
-			if err := sleep(ctx, roundWait); err != nil {
-				return err
+		if fetchErr != nil {
+			s.Events.Addf(LevelError, "L1", "bucket=%s r/%s: fetch failed: %v", tf, sub, fetchErr)
+			if s.subStatus != nil {
+				s.subStatus.RecordFailure(sub, fetchErr.Error())
 			}
+			return
 		}
+		s.Events.Addf(LevelOK, "L1", "bucket=%s r/%s: %d posts fetched (after=%q)",
+			tf, sub, len(posts), after)
+		if s.subStatus != nil {
+			s.subStatus.MarkLive(sub)
+		}
+		if s.archiver != nil {
+			s.archiver.ArchivePosts(posts, sub, "natural_prefetch")
+		}
+	}); err != nil {
+		return
 	}
 
-	// Mark cycle complete: persist next cycle time so restart sleeps correctly
-	s.saveCycleState(&cycleState{
-		NextCycleAt: nextCycleAt,
-		Round:       maxRoundsPerCycle,
-		Cursors:     nil,
-	})
-
-	remaining := time.Until(nextCycleAt)
-	if remaining <= 0 {
-		remaining = 1 * time.Minute
+	if fetchErr != nil {
+		return
 	}
-	s.setL1Status("sleeping between cycles", maxRoundsPerCycle, maxRoundsPerCycle, subs, nil, nextCycleAt)
-	s.Events.Addf(LevelOK, "L1", "big cycle complete -- sleeping %s until next cycle", formatDur(remaining))
-	log.Printf("natural prefetch L1: big cycle complete, sleeping %s", formatDur(remaining))
-	return sleep(ctx, remaining)
+
+	if after != "" {
+		cursors[ck] = after
+	} else {
+		delete(cursors, ck)
+		exhausted[ck] = true
+		s.Events.Addf(LevelInfo, "L1", "bucket=%s r/%s [%s%s]: no more pages this cycle", tf, sub, mode.Sort, tfSuffix(mode.Timeframe))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,12 +1425,23 @@ type PrefetchStatus struct {
 	L1Subs      []string
 	L1Cursors   map[string]string
 	L1NextCycle string
+	// L1Buckets is the per-bucket schedule snapshot for the debug page. One
+	// entry per active bucket, ordered finest-to-coarsest (hour → all).
+	L1Buckets   []PrefetchBucketStatus
 	L2Phase     string
 	L2Sub       string
 	L2Pending   int
 	L5Phase     string
 	L5Current   string
 	L5Pending   int
+	L3Phase     string
+	L3Current   string
+	L3LastAt    string
+	L3Count     int
+	L4Phase     string
+	L4Current   string
+	L4QueueLen  int
+	L4NextTick  string
 	NPPhase     string
 	NPCurrent   string
 	QueueLen    int
@@ -1128,18 +1449,62 @@ type PrefetchStatus struct {
 	ActiveSubs  []string
 }
 
+type PrefetchBucketStatus struct {
+	TF          string
+	Period      string
+	Subs        []string
+	Cursors     map[string]string
+	NextCycle   string
+}
+
 func (s *Scheduler) Status() PrefetchStatus {
 	s.statusMu.RLock()
 	defer s.statusMu.RUnlock()
 
-	cursors := make(map[string]string, len(s.l1Cursors))
-	for k, v := range s.l1Cursors {
-		cursors[k] = v
+	// Build the aggregate L1 view from the per-bucket snapshots when
+	// available; fall back to the older single-cycle fields otherwise.
+	cursors := make(map[string]string)
+	var earliest time.Time
+	var buckets []PrefetchBucketStatus
+	for _, tf := range bucketOrder {
+		b, ok := s.l1Buckets[tf]
+		if !ok {
+			continue
+		}
+		for k, v := range b.Cursors {
+			cursors[k] = v
+		}
+		if earliest.IsZero() || b.NextCycleAt.Before(earliest) {
+			earliest = b.NextCycleAt
+		}
+		var nc string
+		if !b.NextCycleAt.IsZero() {
+			if d := time.Until(b.NextCycleAt); d > 0 {
+				nc = "in " + formatDur(d)
+			} else {
+				nc = "now"
+			}
+		}
+		buckets = append(buckets, PrefetchBucketStatus{
+			TF:        b.TF,
+			Period:    formatDur(b.Period),
+			Subs:      append([]string(nil), b.Subs...),
+			Cursors:   copyMap(b.Cursors),
+			NextCycle: nc,
+		})
+	}
+	if len(cursors) == 0 {
+		for k, v := range s.l1Cursors {
+			cursors[k] = v
+		}
+	}
+	if earliest.IsZero() {
+		earliest = s.l1NextCycle
 	}
 
 	var nextCycle string
-	if !s.l1NextCycle.IsZero() {
-		if d := time.Until(s.l1NextCycle); d > 0 {
+	if !earliest.IsZero() {
+		if d := time.Until(earliest); d > 0 {
 			nextCycle = "in " + formatDur(d)
 		} else {
 			nextCycle = "now"
@@ -1149,6 +1514,21 @@ func (s *Scheduler) Status() PrefetchStatus {
 	subs := make([]string, len(s.l1Subs))
 	copy(subs, s.l1Subs)
 
+	var l3LastAt string
+	if !s.l3LastAt.IsZero() {
+		if d := time.Since(s.l3LastAt); d > 0 {
+			l3LastAt = formatDur(d) + " ago"
+		}
+	}
+	var l4NextTick string
+	if !s.l4NextTickAt.IsZero() {
+		if d := time.Until(s.l4NextTickAt); d > 0 {
+			l4NextTick = "in " + formatDur(d)
+		} else {
+			l4NextTick = "now"
+		}
+	}
+
 	return PrefetchStatus{
 		L1Phase:     s.l1Phase,
 		L1Round:     s.l1Round,
@@ -1156,18 +1536,67 @@ func (s *Scheduler) Status() PrefetchStatus {
 		L1Subs:      subs,
 		L1Cursors:   cursors,
 		L1NextCycle: nextCycle,
+		L1Buckets:   buckets,
 		L2Phase:     s.l2Phase,
 		L2Sub:       s.l2Sub,
 		L2Pending:   s.l2Pending,
 		L5Phase:     s.l5Phase,
 		L5Current:   s.l5Current,
 		L5Pending:   s.l5Pending,
+		L3Phase:     s.l3Phase,
+		L3Current:   s.l3Current,
+		L3LastAt:    l3LastAt,
+		L3Count:     s.l3Count,
+		L4Phase:     s.l4Phase,
+		L4Current:   s.l4Current,
+		L4QueueLen:  s.l4QueueLen,
+		L4NextTick:  l4NextTick,
 		NPPhase:     s.npPhase,
 		NPCurrent:   s.npCurrent,
 		QueueLen:    len(s.queue),
 		Enabled:     s.isEnabled(),
 		ActiveSubs:  s.activeSubs(),
 	}
+}
+
+// recordBucketStatus updates the live per-bucket schedule view for /debug.
+// Snapshotted under the same lock as the rest of the status struct so the
+// debug renderer never sees a torn view.
+func (s *Scheduler) recordBucketStatus(tf string, nextCycleAt time.Time, period time.Duration, subs []string, cursors map[string]string) {
+	cs := make(map[string]string, len(cursors))
+	for k, v := range cursors {
+		cs[k] = v
+	}
+	ss := append([]string(nil), subs...)
+	s.statusMu.Lock()
+	if s.l1Buckets == nil {
+		s.l1Buckets = make(map[string]*bucketStatus, len(bucketOrder))
+	}
+	s.l1Buckets[tf] = &bucketStatus{
+		TF:          tf,
+		NextCycleAt: nextCycleAt,
+		Period:      period,
+		Subs:        ss,
+		Cursors:     cs,
+	}
+	s.statusMu.Unlock()
+}
+
+// dropBucketStatus clears the bucket from the live view when the coordinator
+// retires its loop (settings change / disable). Keeps stale buckets from
+// claiming to be "running" after they were torn down.
+func (s *Scheduler) dropBucketStatus() {
+	s.statusMu.Lock()
+	s.l1Buckets = nil
+	s.statusMu.Unlock()
+}
+
+func copyMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Scheduler) setL1Status(phase string, round, maxRounds int, subs []string, cursors map[string]string, nextCycle time.Time) {
@@ -1200,6 +1629,48 @@ func (s *Scheduler) setL5Status(phase, current string, pending int) {
 	s.l5Phase = phase
 	s.l5Current = current
 	s.l5Pending = pending
+	s.statusMu.Unlock()
+}
+
+// RecordL3Fetch surfaces an on-demand comment fetch (deep-archive layer) on
+// the /debug page. Handler-side: called after a successful comment retrieval
+// regardless of whether it was an initial post view, a manual refresh, or a
+// "load more" expansion. The scheduler never initiates L3 itself — this is
+// pure passive bookkeeping for visibility.
+func (s *Scheduler) RecordL3Fetch(sub, postID string, commentCount int) {
+	target := fmt.Sprintf("r/%s/%s (%d cmts)", sub, postID, commentCount)
+	s.statusMu.Lock()
+	s.l3Phase = "active"
+	s.l3Current = target
+	s.l3LastAt = time.Now()
+	s.l3Count++
+	s.statusMu.Unlock()
+	if s.Events != nil {
+		s.Events.Addf(LevelOK, "L3", "%s: archived %d comments on demand", target, commentCount)
+	}
+	// Drop "active" back to idle in the background so the panel doesn't read
+	// "active" forever for a single user click.
+	go func() {
+		time.Sleep(2 * time.Second)
+		s.statusMu.Lock()
+		if s.l3Current == target {
+			s.l3Phase = "idle"
+		}
+		s.statusMu.Unlock()
+	}()
+}
+
+func (s *Scheduler) setL4Status(phase, current string, queueLen int) {
+	s.statusMu.Lock()
+	s.l4Phase = phase
+	s.l4Current = current
+	s.l4QueueLen = queueLen
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) setL4NextTick(t time.Time) {
+	s.statusMu.Lock()
+	s.l4NextTickAt = t
 	s.statusMu.Unlock()
 }
 
