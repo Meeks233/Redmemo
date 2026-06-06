@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
@@ -46,6 +47,9 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	commentSort := r.URL.Query().Get("sort")
 	if commentSort == "" {
 		commentSort = prefs.CommentSort
+	}
+	if commentSort == "" {
+		commentSort = "confidence"
 	}
 
 	// 1. Cache — keyed by full prefs fingerprint so a zh visitor never receives
@@ -191,6 +195,9 @@ func (h *Handler) handleLoadMoreComments(w http.ResponseWriter, r *http.Request)
 	if commentSort == "" {
 		commentSort = prefs.CommentSort
 	}
+	if commentSort == "" {
+		commentSort = "confidence"
+	}
 
 	// loaded = how many top-level comments the client already shows.
 	// step   = how many extra to reveal on this click (capped server-side).
@@ -200,9 +207,14 @@ func (h *Handler) handleLoadMoreComments(w http.ResponseWriter, r *http.Request)
 			loaded = n
 		}
 	}
-	step := 5
+	// Step caps at 500 — Reddit's /r/.../comments/<id>.json?limit=N call costs
+	// 1 OAuth unit regardless of N, so the client asks for the full remaining
+	// batch in one shot instead of forcing dozens of round-trips. Comment
+	// images and emotes are loading="lazy" so a 500-comment payload won't
+	// fire 500 image GETs at once.
+	step := 500
 	if v := r.URL.Query().Get("step"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 25 {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
 			step = n
 		}
 	}
@@ -231,27 +243,12 @@ func (h *Handler) handleLoadMoreComments(w http.ResponseWriter, r *http.Request)
 	// Reddit may tack a trailing "more" placeholder onto the comment listing
 	// at the requested limit; strip those before computing slice math so the
 	// `loaded` counter stays aligned with actual rendered top-level threads.
-	real := make([]reddit.Comment, 0, len(comments))
-	for _, c := range comments {
-		if c.Kind == "more" {
-			continue
-		}
-		real = append(real, c)
-	}
+	// moreCount is the count of top-level comments still available upstream.
+	real, moreCount := splitTopLevelMore(comments)
 
 	hasMore := "0"
-	if len(real) > limit-step { // we got at least one new comment past the previous window
-		// "more" exists when Reddit still has comments beyond what we asked for.
-		// We can't tell directly without inspecting the trailing-more, but if
-		// real == limit AND a more placeholder was present, there are more.
-		if len(real) >= limit {
-			for _, c := range comments {
-				if c.Kind == "more" {
-					hasMore = "1"
-					break
-				}
-			}
-		}
+	if moreCount > 0 {
+		hasMore = "1"
 	}
 
 	// Slice off what the client already has so we append, not replace.
@@ -272,9 +269,152 @@ func (h *Handler) handleLoadMoreComments(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Has-More", hasMore)
 	w.Header().Set("X-Added", strconv.Itoa(len(slice)))
+	w.Header().Set("X-Remaining", strconv.Itoa(moreCount))
 	if err := h.renderer.RenderCommentList(w, slice, prefs); err != nil {
 		log.Printf("handler: render load-more comments: %v", err)
 	}
+}
+
+// handleLoadMoreReplies serves a "fetch the next batch of hidden children for
+// one comment" partial. Quota math: one Reddit /api/morechildren call returns
+// only the specific child IDs we ask for (plus whatever Reddit inlines as
+// their nested replies), so cost stays at 1 quota unit per click — vs. the
+// focus-view alternative that re-fetched the full subtree every click and
+// silently expanded all remaining children at once.
+//
+// Query params:
+//   - children: comma-separated child IDs, in original Reddit "more" stub order
+//   - sort:     comment sort (defaults to user pref → "confidence")
+//
+// The client takes the first `step` (typically 5) IDs off its stored list,
+// sends them here, then trims those IDs out of its data-children for the next
+// click. We just forward them to Reddit and render the returned tree.
+func (h *Handler) handleLoadMoreReplies(w http.ResponseWriter, r *http.Request) {
+	sub := r.PathValue("sub")
+	id := r.PathValue("id")
+	commentSort := r.URL.Query().Get("sort")
+	prefs := h.readPreferences(r)
+	if commentSort == "" {
+		commentSort = prefs.CommentSort
+	}
+	if commentSort == "" {
+		commentSort = "confidence"
+	}
+
+	childrenRaw := r.URL.Query().Get("children")
+	childIDs := splitChildrenIDs(childrenRaw)
+	if len(childIDs) == 0 {
+		w.Header().Set("X-Has-More", "0")
+		w.Header().Set("X-Added", "0")
+		return
+	}
+
+	// Archive short-circuit: if every requested child ID is already in our
+	// stored comment tree we render straight from disk, skipping the upstream
+	// quota burn entirely. Partial hits (some IDs missing) still fall through
+	// to Reddit — splitting one call into "ask only for the missing ones" is
+	// not worth the code, since /api/morechildren is per-call billed and
+	// asking for the full set costs the same as asking for the subset.
+	postPermalink := "/r/" + sub + "/comments/" + id + "/"
+	if h.commentStore != nil {
+		if prior, _ := h.commentStore.GetLatest(postPermalink); prior != nil && len(prior.JSONData) > 0 {
+			var priorTree []reddit.Comment
+			if json.Unmarshal(prior.JSONData, &priorTree) == nil {
+				idx := archive.IndexCommentsByID(priorTree)
+				cached := make([]reddit.Comment, 0, len(childIDs))
+				for _, cid := range childIDs {
+					if c, ok := idx[cid]; ok {
+						c.Replies = archive.ExpandMoreFromArchive(c.Replies, idx)
+						cached = append(cached, c)
+					}
+				}
+				if len(cached) == len(childIDs) {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("X-Added", strconv.Itoa(len(cached)))
+					w.Header().Set("X-Source", "archive")
+					if err := h.renderer.RenderReplyList(w, cached, prefs); err != nil {
+						log.Printf("handler: render archived replies: %v", err)
+					}
+					return
+				}
+			}
+		}
+	}
+
+	if degrade, reason := h.shouldDegrade(r.Context()); degrade {
+		w.Header().Set("X-Degraded", reason)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	roots, err := h.redditCli.FetchMoreChildren(r.Context(), sub, id, childIDs, commentSort)
+	h.recordUpstream(r.Context())
+	if err != nil {
+		log.Printf("handler: load more replies %s/%s [%d ids]: %v", sub, id, len(childIDs), err)
+		w.Header().Set("X-Degraded", "upstream_error")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if len(roots) > 0 {
+		go h.archiver.ArchiveComments(postPermalink, roots)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Added", strconv.Itoa(len(roots)))
+	if err := h.renderer.RenderReplyList(w, roots, prefs); err != nil {
+		log.Printf("handler: render load-more replies: %v", err)
+	}
+}
+
+// splitChildrenIDs is the comma-list parser for the deeper-replies endpoint's
+// `children` query param. Caps at 100 (Reddit's per-morechildren ceiling) and
+// drops anything outside the base36 ID alphabet so a malformed URL can't be
+// smuggled into the upstream call. Returns nil on empty input.
+func splitChildrenIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 100 {
+		parts = parts[:100]
+	}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if isBase36ID(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func isBase36ID(s string) bool {
+	if s == "" || len(s) > 12 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'z')) {
+			return false
+		}
+	}
+	return true
+}
+
+// splitTopLevelMore separates real top-level comments from the trailing "more"
+// placeholder Reddit appends when a limit truncates the listing. Returns the
+// rendered slice and the upstream's count of remaining top-level comments past
+// it (0 when no placeholder is present — i.e., the visitor has the full list).
+func splitTopLevelMore(comments []reddit.Comment) ([]reddit.Comment, int) {
+	real := make([]reddit.Comment, 0, len(comments))
+	moreCount := 0
+	for _, c := range comments {
+		if c.Kind == "more" {
+			moreCount += int(c.MoreCount)
+			continue
+		}
+		real = append(real, c)
+	}
+	return real, moreCount
 }
 
 func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub, id, commentSort string, prefs reddit.Preferences, t *reqTimer, cacheKey string) bool {
@@ -287,14 +427,14 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		comments []reddit.Comment
 		err      error
 	}
-	// Initial page view fetches only the first few top-level comments to keep
-	// the OAuth quota cost of casual browsing low. The "Load all comments"
-	// button below the thread re-fetches without the cap when the visitor
-	// actually wants them.
-	const initialCommentLimit = 5
+	// One shot: ask Reddit for the entire comment listing on the initial view.
+	// /r/<sub>/comments/<id>.json is billed per request, so a single call with
+	// no `limit` returns every text comment Reddit will give us (default depth
+	// ~10) for the same 1 OAuth unit a 5-comment cap used to cost. No more
+	// "Load N more comments" round-trips, no more click-to-burn-quota.
 	flightKey := "post|" + sub + "|" + id + "|" + commentSort
 	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
-		post, comments, err := h.redditCli.FetchPostLimited(r.Context(), sub, id, commentSort, initialCommentLimit)
+		post, comments, err := h.redditCli.FetchPost(r.Context(), sub, id, commentSort)
 		h.recordUpstream(r.Context())
 		res := &postFetchResult{post: post, comments: comments, err: err}
 		if err != nil {
@@ -335,6 +475,22 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
 	}
 
+	// Inline-expand "more" stubs using any deeper-reply children we've
+	// previously archived for this thread. The fresh upstream tree only knows
+	// about the first `initialCommentLimit` top-level threads; merging the
+	// archive in means a returning viewer doesn't have to re-click "More
+	// replies" to see subtrees they already loaded last visit.
+	if h.commentStore != nil {
+		if prior, _ := h.commentStore.GetLatest(post.Permalink); prior != nil && len(prior.JSONData) > 0 {
+			var priorTree []reddit.Comment
+			if json.Unmarshal(prior.JSONData, &priorTree) == nil {
+				comments = archive.ExpandMoreFromArchive(comments, archive.IndexCommentsByID(priorTree))
+			}
+		}
+	}
+
+	realComments, moreCount := splitTopLevelMore(comments)
+
 	data := render.PostPageData{
 		BasePage: render.BasePage{
 			URL:       r.URL.Path,
@@ -343,10 +499,11 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 			Version:   "0.1.0",
 		},
 		Post:            post,
-		Comments:        comments,
+		Comments:        realComments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
 		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
+		MoreComments:    moreCount,
 	}
 
 	var buf bytes.Buffer
@@ -419,7 +576,15 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if stored != nil {
 		json.Unmarshal(stored.JSONData, &comments)
 	}
+	// Inline-expand any "more" stub whose children are already archived in this
+	// same tree (a result of prior partial /api/morechildren writes being merged
+	// into the snapshot). The viewer sees the resolved replies directly and
+	// doesn't have to click "More replies" again to re-fetch what we already
+	// have on disk.
+	comments = archive.ExpandMoreFromArchive(comments, archive.IndexCommentsByID(comments))
 	t.mark("archive-decode")
+
+	realComments, moreCount := splitTopLevelMore(comments)
 
 	data := render.PostPageData{
 		BasePage: render.BasePage{
@@ -430,11 +595,12 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 			DegradedReason: degradedReason,
 		},
 		Post:            post,
-		Comments:        comments,
+		Comments:        realComments,
 		Sort:            commentSort,
 		URLWithoutQuery: r.URL.Path,
 		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
 		IsOffline:       offline,
+		MoreComments:    moreCount,
 	}
 
 	var buf bytes.Buffer

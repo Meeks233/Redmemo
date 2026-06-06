@@ -74,6 +74,9 @@
   "media.video": "Video",
 
   "post.archived": "archived %s",
+  "post.repost_badge": "+%d reposts",
+  "post.repost_badge_title": "Same content surfaced more times — variants listed below",
+  "post.repost_variants_summary": "%d variants of this content (click to expand / collapse)",
   "post.upvotes": "Upvotes",
   "post.upvoted": "Upvoted",
   "post.refetch_title": "Re-fetch this post from Reddit",
@@ -99,6 +102,7 @@
   "poll.votes": "%v votes,",
 
   "comment.more_replies": "More replies (%v)",
+  "comment.replies_remaining": "%v left",
   "comment.edited": "edited %s",
   "comment.filtered": "(Filtered content)",
 
@@ -107,7 +111,7 @@
   "comments.search_placeholder": "Search comments",
   "comments.containing": "Comments containing \"%s\"",
   "comments.all": "All comments",
-  "comments.load_more": "Load 5 more comments",
+  "comments.load_more": "Load %v more comments",
   "comments.view_all": "View all comments",
   "comments.show_parent": "Show parent comments",
 
@@ -257,7 +261,7 @@
   "settings.token_ttl_30": "30 minutes",
   "settings.token_ttl_60": "1 hour",
   "settings.page_limit": "Posts per upstream page",
-  "settings.page_limit_title": "How many posts each /r/{sub} or /search request fetches from Reddit. Lower values stretch your session-token quota; higher values mean fewer requests but each one costs more. Range 5-25, default 5.",
+  "settings.page_limit_title": "How many posts each /r/{sub} or /search request fetches from Reddit. Reddit's OAuth quota counts requests, not items, so a larger page costs the same as a small one and burns less quota per post you actually see. Range 5-100, default 50.",
   "settings.version": "Version",
   "settings.archived_posts": "Archived Posts",
   "settings.archived_subs": "Archived Subreddits",

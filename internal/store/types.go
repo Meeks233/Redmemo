@@ -20,6 +20,11 @@ type StoredPost struct {
 	// we never overwrite the local JSON again. The post page renders the
 	// archived copy with a Time Machine badge and stops scheduling refetches.
 	UpstreamRemoved bool
+	// RepostCount is the size of this row's repost cluster — same author +
+	// same normalized title — populated only by queries that GROUP / DISTINCT
+	// ON repost_key (ArchiveSearch). 0 ⇒ the query didn't fold; 1 ⇒ singleton;
+	// >1 ⇒ N copies were collapsed and the renderer shows a "+N reposts" badge.
+	RepostCount int
 }
 
 type StoredComments struct {

@@ -179,13 +179,22 @@ func (s *Service) ArchiveComments(postURLPath string, comments []reddit.Comment)
 	// removed never overwrites the good local copy with tombstones. The
 	// Removed flag stays set so the renderer keeps showing the Time Machine
 	// badge.
-	if hasRemovedComment(comments) && s.commentStore != nil {
+	// Load the prior tree once and use it for BOTH the removed-body restore
+	// AND the partial-fetch merge. Without the merge, a partial fetch (e.g.
+	// /api/morechildren returning 5 replies under one parent) would overwrite
+	// the full snapshot with that 5-comment fragment — the next archive read
+	// would lose every other thread.
+	var priorTree []reddit.Comment
+	if s.commentStore != nil {
 		if prior, err := s.commentStore.GetLatest(postURLPath); err == nil && prior != nil && len(prior.JSONData) > 0 {
-			var priorTree []reddit.Comment
-			if json.Unmarshal(prior.JSONData, &priorTree) == nil {
-				mergeRemovedBodies(comments, indexAliveComments(priorTree))
-			}
+			_ = json.Unmarshal(prior.JSONData, &priorTree)
 		}
+	}
+	if hasRemovedComment(comments) && len(priorTree) > 0 {
+		mergeRemovedBodies(comments, indexAliveComments(priorTree))
+	}
+	if len(priorTree) > 0 {
+		comments = MergeCommentTrees(priorTree, comments)
 	}
 	data, err := json.Marshal(comments)
 	if err != nil {

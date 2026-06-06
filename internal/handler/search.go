@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -139,16 +140,28 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 	//   - local: the offline / upstream_disabled page scrolls the local archive
 	//     via offset (serveSearchArchivePartial), driven by infiniteScroll.js.
 	// We pick by looking at the request — `offset` ⇒ local, otherwise upstream.
+	// Mint or read the search-session ID before any sub-handler dispatches —
+	// every search path (live, load-more, archive partial) needs it for the
+	// cross-page seen-titles dedup. The cookie has to land on the response
+	// before WriteHeader, so we do it here at the entry point.
+	sid := h.ensureSearchSID(w, r)
+	sessKey := searchSessionKey(sid, query, sort, t)
+
 	if r.URL.Query().Get("partial") == "1" {
 		if r.URL.Query().Get("offset") != "" {
-			h.serveSearchArchivePartial(w, r, parsed, prefs)
+			h.serveSearchArchivePartial(w, r, parsed, prefs, sessKey)
 			return
 		}
-		h.serveSearchMore(w, r, parsed, redditQ, query, sort, t, after, before, prefs)
+		h.serveSearchMore(w, r, parsed, redditQ, query, sort, t, after, before, prefs, sessKey)
 		return
 	}
 
-	cacheKey := htmlCacheKey(urlPath, r.URL.RawQuery, prefs)
+	// HTML cache key includes sid so cached entries don't leak across
+	// sessions — a different user's seen-titles must not influence what
+	// this user is shown. Same user revisiting the same page (cursor) sees
+	// the same cached result, which stays consistent with the snapshot of
+	// `sessKey` taken at original render time.
+	cacheKey := htmlCacheKey(urlPath, r.URL.RawQuery+"&sid="+sid, prefs)
 
 	// 1. Cache
 	if cached, _ := h.cache.GetHTML(r.Context(), cacheKey); cached != nil {
@@ -166,6 +179,14 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 		h.recordUpstream(r.Context())
 		if err == nil {
 			go h.archiver.ArchivePosts(posts, sub, "search")
+			// In-page fold (same-title clusters collapse to one survivor with
+			// a +N badge), then cross-page fold (drop any title that was
+			// already presented earlier in this session). Order matters: the
+			// session set tracks survivors, so we must fold first.
+			posts = reddit.FoldReposts(posts)
+			seen := h.loadSeenTitles(r.Context(), sessKey)
+			posts = applySessionDedup(posts, seen, after)
+			h.saveSeenTitles(r.Context(), sessKey, seen)
 			// No client-side post-filter: Reddit's `q` already enforces every
 			// API-expressible constraint (subreddit/author/flair/rating + free
 			// text). Anything the API can't express (score/comments/date/media)
@@ -242,9 +263,16 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				var p reddit.Post
 				if err := json.Unmarshal(sp.JSONData, &p); err == nil {
 					p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+					p.RepostCount = sp.RepostCount
 					posts = append(posts, p)
 				}
 			}
+			// SQL DISTINCT ON already folded within this page; apply session
+			// dedup so paginating into the archive doesn't replay clusters
+			// the user already saw on a prior live or archive page.
+			seenArchive := h.loadSeenTitles(r.Context(), sessKey)
+			posts = applySessionDedup(posts, seenArchive, "archive:0")
+			h.saveSeenTitles(r.Context(), sessKey, seenArchive)
 
 			data := render.SearchPageData{
 				BasePage: render.BasePage{
@@ -369,7 +397,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 // can stop and explain why. Otherwise it fetches the next 3 posts upstream and
 // returns only the post-list HTML fragment, with the next-page cursor in the
 // X-Next-After header.
-func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, redditQ, query, sort, t, after, before string, prefs reddit.Preferences) {
+func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, redditQ, query, sort, t, after, before string, prefs reddit.Preferences, sessKey string) {
 	if redditQ == "" {
 		http.Error(w, "missing query", http.StatusBadRequest)
 		return
@@ -392,7 +420,12 @@ func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed
 	}
 
 	go h.archiver.ArchivePosts(posts, "", "search")
-	// Live "Load More" page: same policy as the first page — no post-filter.
+	// Live "Load More" page: same policy as the first page — in-page fold
+	// then cross-page session dedup.
+	posts = reddit.FoldReposts(posts)
+	seen := h.loadSeenTitles(r.Context(), sessKey)
+	posts = applySessionDedup(posts, seen, after)
+	h.saveSeenTitles(r.Context(), sessKey, seen)
 
 	w.Header().Set("X-Next-After", nextAfter)
 	w.Header().Set("X-Source", "fallback")
@@ -406,7 +439,7 @@ func (h *Handler) serveSearchMore(w http.ResponseWriter, r *http.Request, parsed
 // back the local-only /search page. It runs the same e621-style query the full
 // page rendered, but at the requested `offset`, and emits just the post-list
 // fragment so infiniteScroll.js can append it. Never touches Reddit.
-func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, prefs reddit.Preferences) {
+func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Request, parsed searchquery.Parsed, prefs reddit.Preferences, sessKey string) {
 	if h.postStore == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		return
@@ -438,9 +471,16 @@ func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Reque
 		var p reddit.Post
 		if err := json.Unmarshal(sp.JSONData, &p); err == nil {
 			p.ArchivedRelTime, p.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+			p.RepostCount = sp.RepostCount
 			posts = append(posts, p)
 		}
 	}
+	// Session dedup — the SQL DISTINCT ON already collapsed clusters within
+	// this page; the session layer suppresses any cluster the user already
+	// saw on an earlier infinite-scroll batch.
+	seen := h.loadSeenTitles(r.Context(), sessKey)
+	posts = applySessionDedup(posts, seen, fmt.Sprintf("archive:%d", offset))
+	h.saveSeenTitles(r.Context(), sessKey, seen)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Source", "archive")

@@ -314,7 +314,7 @@ templ settingsContent(d SettingsPageData) {
 						</div>
 						<div class="prefs-group">
 							<label for="page_limit" title={ T(ctx, "settings.page_limit_title") }>{ T(ctx, "settings.page_limit") }</label>
-							<input type="number" name="page_limit" id="page_limit" form="settings-form" min="5" max="25" step="1" value={ d.Prefs.PageLimit } style="width:60px"/>
+							<input type="number" name="page_limit" id="page_limit" form="settings-form" min="5" max="100" step="1" value={ d.Prefs.PageLimit } style="width:60px"/>
 						</div>
 						<div class="prefs-group">
 							<label for="enable_debug">{ T(ctx, "settings.enable_debug") }</label>

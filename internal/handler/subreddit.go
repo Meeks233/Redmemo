@@ -221,12 +221,14 @@ func (h *Handler) renderHomepagePartial(w http.ResponseWriter, posts []reddit.Po
 }
 
 // pageLimitFromPrefs parses the user's page_limit setting back into an int,
-// clamped to [5, 25]. Empty/invalid values fall back to the 5-post default —
+// clamped to [5, 100]. Empty/invalid values fall back to the 50-post default —
 // matching what NormalizeSettings would have refused to persist anyway.
+// Reddit's OAuth quota is per-request, not per-item, so a single limit=50
+// request costs the same as limit=5 — we may as well harvest more per call.
 func pageLimitFromPrefs(prefs reddit.Preferences) int {
 	n, err := strconv.Atoi(prefs.PageLimit)
-	if err != nil || n < 5 || n > 25 {
-		return 5
+	if err != nil || n < 5 || n > 100 {
+		return 50
 	}
 	return n
 }

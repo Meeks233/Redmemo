@@ -6,7 +6,7 @@ The upstream API hands every app a small per-window request budget. Spend it car
 
 ## TL;DR — what this buys you
 
-- **Smaller per-request cost.** A `/r/<sub>` entry or `/search` page is targeted to fetch **5 posts** per upstream call instead of the legacy default of **25**. Infinite-scroll batches stay small too — you pay only for what the user actually scrolls past.
+- **Bigger page per request, fewer requests overall.** The upstream OAuth budget is measured in **requests**, not items — a `limit=50` call and a `limit=5` call both count as one tick on the meter. So a `/r/<sub>` entry or `/search` page is targeted to fetch **50 posts** per upstream call by default. Operators who want a tighter cap can dial `page_limit` down to as little as 5 from the settings page.
 - **Live navbar ring.** Every page renders a circular SVG ring next to the search box. The arc length is the **remaining fraction** of the current budget window; the centre number is the integer count of calls still on the meter.
 - **Auto-calculated balance.** The ring's percentage isn't a guess — it's derived from the rate-limit metadata returned by the upstream API on the most recent successful call, surfaced through `internal/ratelimit/manager.go`.
 - **HR-layer auto-throttle.** When the budget is low (or any HR tier trips), the next upstream attempt is denied **before** it leaves the box and the request degrades to the archive with an amber banner. No silent retries.
@@ -15,7 +15,7 @@ The upstream API hands every app a small per-window request budget. Spend it car
 
 | | Legacy default | RedMemo |
 |---|---|---|
-| Page size per upstream call | **25** posts | **5** posts |
+| Page size per upstream call | **25** posts (fixed) | **50** posts default, operator-configurable 5–100 |
 | Concurrent visitor cost | Any anonymous visitor can drain the shared budget, kicking everyone off | Shared global counter; HR caps per 5 s / 30 s / 5 min windows |
 | When the budget is empty | Hard error surfaced to the user, no graceful fallback | Amber banner + archive serves the same route, link explains why |
 | Visibility | None — you find out by getting errors | Navbar ring shows live remaining budget on every page |
@@ -36,13 +36,15 @@ Colour states (driven by a CSS class on `#status_quota`):
 
 Clicking the ring routes to an explainer page with the cooldown reason and the next reset wall-clock in plain English / 中文.
 
-## Why a smaller page size
+## Why a larger page size
 
-Listing endpoints accept large pages, but the legacy default of 25 was a UX choice — fill one viewport of cards in a single fetch. In practice:
+Listing endpoints accept up to 100 items per request, and Reddit's OAuth budget is decremented per HTTP call regardless of how many items the response carries — confirmed by the `X-Ratelimit-Used` header, which moves by 1 per request whether you ask for 5 or 50. A small page therefore wastes budget twice:
 
-1. **Most users scroll < 10 posts** before clicking through or leaving. Loading 25 wastes most of the request.
-2. **Infinite-scroll already exists** (`localInfiniteLoader` in [`internal/render/partials.templ`](../internal/render/partials.templ:34)), so smaller initial pages don't hurt the user — more streams in only if they actually scroll.
-3. **Smaller pages give the HR tiers time to trip** and degrade to the archive before the shared budget is in real danger.
+1. **Same cost, fewer posts.** A `limit=5` call burns one quota tick for 5 posts; a `limit=50` call burns one tick for 50. The user who scrolls 30 posts pays 6 ticks at `limit=5` but only 1 tick at `limit=50`.
+2. **Fresh tail material is essentially free.** Reddit already gathers the full window server-side; extra items in the response come back at no marginal cost to the operator's quota.
+3. **The archive still benefits.** Every fetched post is fed into the local archive on the way out, so a 50-post fetch front-loads cold storage for searches and infinite scroll that follow.
+
+`page_limit` remains operator-tunable down to 5 for situations where a tighter cap on archive growth or per-page bandwidth matters more than quota efficiency.
 
 ## Wiring (file map)
 

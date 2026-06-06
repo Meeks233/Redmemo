@@ -2,13 +2,14 @@ package render
 
 import "github.com/redmemo/redmemo/internal/reddit"
 
-// commentTree ports comment.html: a recursive comment thread, or a
-// "load more replies" link for collapsed "more" nodes. Locale comes from ctx;
+// commentTree renders a real comment ("t1") and its replies. Reddit's "more"
+// stubs are dropped at render time — the post handler fetches the full
+// listing in one call, and we deliberately do not surface click-to-load
+// buttons for deeper subtrees that Reddit's default depth chops off (every
+// such click would burn another OAuth quota unit). Locale comes from ctx;
 // per-comment prefs ride on the Comment itself.
 templ commentTree(c reddit.Comment) {
-	if c.Kind == "more" && c.ParentKind == "t1" {
-		<a class="deeper_replies" href={ templ.SafeURL(c.PostLink + c.ParentID) }>&rarr; { T(ctx, "comment.more_replies", c.MoreCount) }</a>
-	} else if c.Kind == "t1" {
+	if c.Kind == "t1" {
 		<div id={ c.ID } class="comment">
 			<div class="comment_left">
 				<p class="comment_score" title={ c.Score[1] }>

@@ -111,7 +111,7 @@ var prefDefaults = map[string]string{
 	"mute_nsfw_videos":        "on",
 	"disable_initiative_upstream_access": "on",
 	"settings_token_ttl":      "10",
-	"page_limit":              "5",
+	"page_limit":              "50",
 	"auto_theme_day":          "light",
 	"auto_theme_night":        "black",
 	"lang":                    render.DefaultLang,

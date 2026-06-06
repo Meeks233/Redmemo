@@ -1,6 +1,10 @@
 package render
 
-import "github.com/redmemo/redmemo/internal/reddit"
+import (
+	"strconv"
+
+	"github.com/redmemo/redmemo/internal/reddit"
+)
 
 // post.templ ports templates/post.html plus the "post_detail" and
 // "visit_reddit_confirmation" defines from partials.html.
@@ -110,7 +114,6 @@ templ postContent(d PostPageData) {
 					</div>
 				}
 			</div>
-			@loadMoreComments(d)
 		}
 	</div>
 }
@@ -334,16 +337,118 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 	</div>
 }
 
-// loadMoreComments renders the per-page "load 5 more" affordance under the
+// deeperRepliesScript is the in-place progressive loader for the
+// `<button class="deeper_replies">` placeholders that replace Reddit's
+// `more` children stubs under expanded comments. Click delegation handles
+// every button under #commentList (including ones the loader itself appends
+// when a fresh subtree carries its own deeper stubs). Each click pulls at
+// most 5 replies and updates the button's data-loaded / data-remaining so
+// the next click slices the next chunk; when nothing remains the button is
+// removed entirely.
+templ deeperRepliesScript() {
+	<script>
+	(function(){
+		var list = document.getElementById('commentList');
+		if (!list) return;
+		var sortSel = document.getElementById('commentSortSelect');
+		function currentSort(){ return sortSel ? sortSel.value : ''; }
+		function parsePostLink(link){
+			var m = /^\/r\/([^/]+)\/comments\/([^/]+)\//.exec(link || '');
+			return m ? { sub: m[1], postId: m[2] } : null;
+		}
+		function applyLabel(btn, step){
+			var tpl = btn.dataset.labelTpl || '';
+			if (!tpl) return;
+			btn.textContent = '→ ' + tpl.replace('{n}', String(step));
+		}
+		function updateRemainingBadge(btn, remaining){
+			var sib = btn.nextElementSibling;
+			var hasBadge = sib && sib.classList && sib.classList.contains('deeper_replies_remaining');
+			if (remaining > 5) {
+				var tpl = btn.dataset.remainingTpl || '';
+				var text = tpl ? tpl.replace('{n}', String(remaining)) : (remaining + ' left');
+				if (hasBadge) {
+					sib.textContent = text;
+				} else {
+					var span = document.createElement('span');
+					span.className = 'deeper_replies_remaining';
+					span.textContent = text;
+					btn.parentNode.insertBefore(span, btn.nextSibling);
+				}
+			} else if (hasBadge) {
+				sib.remove();
+			}
+		}
+		list.addEventListener('click', function(ev){
+			var btn = ev.target.closest('.deeper_replies');
+			if (!btn || !list.contains(btn) || btn.disabled) return;
+			ev.preventDefault();
+			var info = parsePostLink(btn.dataset.postlink);
+			if (!info) return;
+			// `children` is the FULL list of hidden child IDs from the original
+			// Reddit "more" stub. Each click pops the first `step` IDs off the
+			// front, sends just those to /api/morechildren, then trims them out
+			// of data-children so the next click picks up where this one left
+			// off. One Reddit call per click, exactly N comments per call.
+			var remainingIDs = (btn.dataset.children || '').split(',').filter(Boolean);
+			if (remainingIDs.length === 0) { btn.remove(); return; }
+			btn.disabled = true;
+			var step = parseInt(btn.dataset.step, 10) || 5;
+			if (step > remainingIDs.length) step = remainingIDs.length;
+			var batch = remainingIDs.slice(0, step);
+			var url = '/api/replies/' + info.sub + '/' + info.postId +
+				'?sort=' + encodeURIComponent(currentSort()) +
+				'&children=' + encodeURIComponent(batch.join(','));
+			fetch(url).then(function(r){
+				if (r.headers.get('X-Degraded')) { btn.disabled = false; return null; }
+				return r.text().then(function(html){ return {
+					html: html,
+					added: parseInt(r.headers.get('X-Added'), 10) || 0,
+				}; });
+			}).then(function(res){
+				if (res === null) return;
+				if (res.added > 0 && res.html.trim()) {
+					var tmp = document.createElement('div');
+					tmp.innerHTML = res.html;
+					while (tmp.firstChild) btn.parentNode.insertBefore(tmp.firstChild, btn);
+				}
+				var leftover = remainingIDs.slice(step);
+				if (leftover.length === 0) {
+					var sib = btn.nextElementSibling;
+					if (sib && sib.classList && sib.classList.contains('deeper_replies_remaining')) sib.remove();
+					btn.remove();
+					return;
+				}
+				btn.dataset.children = leftover.join(',');
+				var next = leftover.length > 100 ? 100 : leftover.length;
+				btn.dataset.step = next;
+				applyLabel(btn, next);
+				updateRemainingBadge(btn, leftover.length);
+				btn.disabled = false;
+			}).catch(function(){ btn.disabled = false; });
+		});
+	})();
+	</script>
+}
+
+// loadMoreComments renders the per-page "load N more" affordance under the
 // truncated initial comment list. The post handler caps the first upstream
 // fetch at 5 top-level comments to keep idle browsing cheap; each click of
-// this button bumps the upstream limit by another 5 and appends just the
-// newly-revealed comments to #commentList (no full-page reload).
+// this button bumps the upstream limit by another min(5, remaining) and
+// appends just the newly-revealed comments to #commentList (no full-page
+// reload). Suppressed entirely when no top-level comments remain upstream.
 templ loadMoreComments(d PostPageData) {
-	if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline {
+	if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline && d.MoreComments > 0 {
 		<div id="loadMoreCommentsWrap" style="text-align:center;margin:20px 0;">
-			<button id="loadMoreCommentsBtn" data-sub={ d.Post.Community } data-postid={ d.Post.ID } data-sort={ d.Sort } data-loaded="5" data-step="5">
-				{ T(ctx, "comments.load_more") }
+			<button id="loadMoreCommentsBtn"
+				data-sub={ d.Post.Community }
+				data-postid={ d.Post.ID }
+				data-sort={ d.Sort }
+				data-loaded={ strconv.Itoa(len(d.Comments)) }
+				data-step={ strconv.Itoa(loadMoreStep(d.MoreComments)) }
+				data-remaining={ strconv.Itoa(d.MoreComments) }
+				data-label-tpl={ T(ctx, "comments.load_more", "{n}") }>
+				{ T(ctx, "comments.load_more", loadMoreStep(d.MoreComments)) }
 			</button>
 			<span id="loadMoreCommentsStatus" style="margin-left:8px;color:var(--muted)"></span>
 		</div>
@@ -353,6 +458,11 @@ templ loadMoreComments(d PostPageData) {
 			if (!btn) return;
 			var list = document.getElementById('commentList');
 			var status = document.getElementById('loadMoreCommentsStatus');
+			var labelTpl = btn.dataset.labelTpl || '';
+			function applyLabel(step){
+				if (!labelTpl) return;
+				btn.textContent = labelTpl.replace('{n}', String(step));
+			}
 			btn.addEventListener('click', function(){
 				if (btn.disabled) return;
 				btn.disabled = true;
@@ -365,7 +475,12 @@ templ loadMoreComments(d PostPageData) {
 				fetch(url).then(function(r){
 					var reason = r.headers.get('X-Degraded');
 					if (reason) { status.textContent = reason; btn.disabled = false; return null; }
-					return r.text().then(function(html){ return {html: html, hasMore: r.headers.get('X-Has-More'), added: parseInt(r.headers.get('X-Added'), 10) || 0}; });
+					return r.text().then(function(html){ return {
+						html: html,
+						hasMore: r.headers.get('X-Has-More'),
+						added: parseInt(r.headers.get('X-Added'), 10) || 0,
+						remaining: parseInt(r.headers.get('X-Remaining'), 10) || 0,
+					}; });
 				}).then(function(res){
 					if (res === null) return;
 					if (res.added > 0 && res.html.trim()) {
@@ -374,7 +489,11 @@ templ loadMoreComments(d PostPageData) {
 						while (tmp.firstChild) list.appendChild(tmp.firstChild);
 						btn.dataset.loaded = (loaded + res.added);
 					}
-					if (res.hasMore === '1' && res.added > 0) {
+					if (res.hasMore === '1' && res.remaining > 0) {
+						var next = res.remaining > 500 ? 500 : res.remaining;
+						btn.dataset.step = next;
+						btn.dataset.remaining = res.remaining;
+						applyLabel(next);
 						status.textContent = '';
 						btn.disabled = false;
 					} else {

@@ -37,6 +37,34 @@ type Post struct {
 	// archive layer uses it to skip overwriting a previously-good local copy,
 	// and the renderer uses it to show the Time Machine badge.
 	Removed bool `json:"removed,omitempty"`
+	// RepostCount is the number of posts in this post's repost cluster — same
+	// content surfacing again and again under near-identical titles, whether
+	// by one spammer or syndicated by many accounts. Computed at fetch /
+	// archive-query time via FoldReposts (and the matching SQL DISTINCT ON
+	// repost_key path), never archived to json_data, never parsed from
+	// upstream. 0 ⇒ unfolded; 1 ⇒ singleton; >1 ⇒ N variants exist and the
+	// renderer expands the card to show each one's per-sub navigation row.
+	RepostCount int `json:"-"`
+	// RepostMembers carries one row per cluster variant (including the head
+	// itself at index 0) — each row's permalink, sub, title, author, score
+	// stays navigable so the user can jump to any specific repost. The
+	// shared media renders ONCE via the head's Media / Gallery; only the
+	// per-row navigation text is duplicated, so no single asset is fetched
+	// more than once when the cluster expands.
+	RepostMembers []RepostMember `json:"-"`
+}
+
+// RepostMember is one navigable variant inside a repost cluster (FoldReposts
+// output). The cluster head's own data appears at RepostMembers[0]; later
+// entries are the folded-away duplicates surfaced as per-sub links.
+type RepostMember struct {
+	Community string
+	Permalink string
+	Title     string
+	Author    Author
+	Score     [2]string
+	RelTime   string
+	Created   string
 }
 
 // Comment represents a Reddit comment with recursive replies.
@@ -58,7 +86,8 @@ type Comment struct {
 	Awards      Awards
 	Collapsed   bool // stickied mod comment or filtered user
 	IsFiltered  bool
-	MoreCount   int64 // child count when kind=="more"
+	MoreCount   int64    // descendant count when kind=="more"
+	Children    []string // child IDs the "more" stub represents (kind=="more" only)
 	Prefs       Preferences
 	// Removed is set when this comment's body was removed/deleted upstream
 	// ("[removed]", "[ Removed by Reddit ]" or author=="[deleted]" with empty
@@ -206,7 +235,7 @@ type Preferences struct {
 	MuteNSFWVideos                 string // default "on"  — start NSFW videos muted (ignored when MuteAllVideos is on)
 	DisableInitiativeUpstreamAccess string // default "off" — when "on", user-driven session-token requests never hit Reddit, only the local archive (CDN media still flows, governed by the global limiter)
 	SettingsTokenTTL               string // /settings auth-cookie lifetime in minutes — discrete choices "5","10" (default),"15","30","60"; capped at 60
-	PageLimit                      string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 25], default "5"
+	PageLimit                      string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 100], default "50". Reddit's OAuth quota is per-request, so larger pages are strictly cheaper.
 }
 
 // Params holds common query parameters for listing endpoints.

@@ -210,6 +210,32 @@ var timeframes = []string{"hour", "day", "week", "month", "year", "all"}
 // commentSorts is the comment sort option set on the post page.
 var commentSorts = []string{"confidence", "top", "new", "controversial", "old"}
 
+// deeperRepliesStep is the per-click load size for the in-place "more replies"
+// loader. Reddit's /api/morechildren charges per call (not per child) with a
+// hard ceiling of 100 child IDs per call, so the cheapest UX is one click =
+// one call = every remaining child. The label always matches the actual
+// fetched count, which also fixes the prior 5-vs-7 label mismatch.
+func deeperRepliesStep(remaining int) int {
+	if remaining > 100 {
+		return 100
+	}
+	return remaining
+}
+
+// loadMoreStep computes how many top-level comments the next "Load more"
+// click should request. Reddit's /r/<sub>/comments/<id>.json?limit=N call is
+// billed per request (1 OAuth quota unit) regardless of N, so the cheapest
+// UX is one click = one call = the entire remaining batch, capped at
+// Reddit's practical per-call ceiling (500). Media inside comments is
+// loading="lazy" so a 500-comment payload won't fire 500 image GETs at once
+// (which would get the host's IP flagged by Reddit's CDN).
+func loadMoreStep(remaining int) int {
+	if remaining > 500 {
+		return 500
+	}
+	return remaining
+}
+
 // userListings / userSorts are the user-profile listing tabs and sort options.
 var userListings = []string{"overview", "comments", "submitted"}
 var userSorts = []string{"hot", "new", "top", "controversial"}

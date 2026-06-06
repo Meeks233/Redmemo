@@ -229,8 +229,11 @@ func TestRewriteEmotes(t *testing.T) {
 	}
 	body := "Hello :smile: world"
 	result := RewriteEmotes(metadata, body)
-	if !strings.Contains(result, `<img src="`) {
+	if !strings.Contains(result, `<img `) || !strings.Contains(result, `src="/preview/pre/emote.png"`) {
 		t.Errorf("RewriteEmotes should replace emote text with img tag, got: %q", result)
+	}
+	if !strings.Contains(result, `loading="lazy"`) {
+		t.Errorf("RewriteEmotes should mark emote img loading=lazy, got: %q", result)
 	}
 	if strings.Contains(result, ":smile:") {
 		t.Errorf("RewriteEmotes should replace :smile:, got: %q", result)

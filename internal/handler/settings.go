@@ -333,9 +333,9 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 	}
 
 	if v, ok := out["page_limit"]; ok {
-		if n, err := strconv.Atoi(v); err != nil || n < 5 || n > 25 {
+		if n, err := strconv.Atoi(v); err != nil || n < 5 || n > 100 {
 			delete(out, "page_limit")
-			rejected = append(rejected, RejectedSetting{Key: "page_limit", Value: v, Reason: "must be an integer in [5, 25]"})
+			rejected = append(rejected, RejectedSetting{Key: "page_limit", Value: v, Reason: "must be an integer in [5, 100]"})
 		} else {
 			out["page_limit"] = strconv.Itoa(n)
 		}

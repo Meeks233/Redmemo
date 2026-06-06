@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,30 @@ func (c *PublicClient) FetchPostLimited(ctx context.Context, sub, id, commentSor
 		return Post{}, nil, err
 	}
 	return ParsePostPage(data)
+}
+
+// FetchMoreChildren is Reddit's quota-frugal "load N more children" call.
+// We pass the exact child IDs from a "more" stub (up to 100 per call) and
+// get back ONLY those expanded comments plus whatever nested replies Reddit
+// inlines — one request per click regardless of how many remain hidden,
+// vs. the focus-view alternative that re-fetches every visible sibling
+// too. /api/morechildren is unauthenticated-friendly so PublicClient uses
+// the same path the OAuth Client does.
+func (c *PublicClient) FetchMoreChildren(ctx context.Context, sub, postID string, childrenIDs []string, sort string) ([]Comment, error) {
+	if sort == "" {
+		sort = "confidence"
+	}
+	if len(childrenIDs) == 0 {
+		return nil, nil
+	}
+	path := fmt.Sprintf("/api/morechildren.json?api_type=json&raw_json=1&link_id=t3_%s&children=%s&sort=%s",
+		postID, strings.Join(childrenIDs, ","), sort)
+	data, err := c.fetch(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	postLink := fmt.Sprintf("/r/%s/comments/%s/", sub, postID)
+	return ParseMoreChildren(data, postLink, "")
 }
 
 func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, after, before string, limit int) ([]Post, []Subreddit, string, string, error) {

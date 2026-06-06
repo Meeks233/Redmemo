@@ -163,6 +163,10 @@ type PostPageData struct {
 	URLWithoutQuery string
 	HasOAuth        bool
 	IsOffline       bool
+	// MoreComments is the count of top-level comments still available upstream
+	// past the slice already in Comments. Zero suppresses the "Load more"
+	// button; a positive value drives data-step (capped at 5) and label.
+	MoreComments int
 }
 
 type SearchPageData struct {
@@ -425,6 +429,20 @@ func (e *Engine) RenderCommentList(w io.Writer, comments []reddit.Comment, prefs
 			return err
 		}
 		if _, err := io.WriteString(w, `</div>`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RenderReplyList emits a sequence of comment trees with no surrounding
+// `<div class="thread">` wrapper — the deeper-replies progressive loader
+// inserts the result directly inside an existing parent's
+// `<blockquote class="replies">` before the load-more button.
+func (e *Engine) RenderReplyList(w io.Writer, replies []reddit.Comment, prefs reddit.Preferences) error {
+	ctx := e.i18nContext(prefs.Lang)
+	for _, c := range replies {
+		if err := commentTree(c).Render(ctx, w); err != nil {
 			return err
 		}
 	}

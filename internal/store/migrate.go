@@ -558,6 +558,48 @@ var migrations = []string{
 	`ALTER TABLE media_unavailable ADD COLUMN IF NOT EXISTS dead_at TIMESTAMPTZ;
 	 CREATE INDEX IF NOT EXISTS idx_media_unavailable_dead ON media_unavailable (dead_at)
 	    WHERE dead_at IS NOT NULL;`,
+
+	// v29: spam-repost folding. Stamps every post with a (author, normalized
+	// title) key so the search/archive layers can collapse the same Reddit
+	// account dumping a near-identical title across many subs. The column is
+	// a STORED generated column — every existing row backfills atomically
+	// when the migration runs and every future INSERT auto-populates it, so
+	// the app layer never writes to repost_key directly.
+	//
+	// Normalization mirrors reddit.RepostKey exactly: lowercase author,
+	// lowercase title with internal whitespace collapsed to single spaces and
+	// outer whitespace trimmed. Anonymous / deleted authors produce NULL so
+	// the dedup layer can fall back to per-row uniqueness (each row's URL)
+	// and avoid bucketing every "[deleted]" post into one cluster.
+	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS repost_key TEXT
+	    GENERATED ALWAYS AS (
+	        CASE
+	            WHEN author IS NULL OR LOWER(author) IN ('', '[deleted]') THEN NULL
+	            ELSE LOWER(author) || '|' || LOWER(regexp_replace(BTRIM(COALESCE(title, '')), '\s+', ' ', 'g'))
+	        END
+	    ) STORED;
+	 CREATE INDEX IF NOT EXISTS idx_posts_repost_key ON posts (repost_key) WHERE repost_key IS NOT NULL;`,
+
+	// v30: broaden repost folding from (author, title) to title-only with a
+	// minimum title length. The v29 column keyed on author, which kept
+	// distinct buckets for the same listing forwarded by different accounts
+	// across many subs — exactly the syndicated-spam case the search UI was
+	// supposed to fold. Dropping author lets one normalized title collapse
+	// every copy regardless of who posted it; the length floor stops generic
+	// titles ("lol", "rule") from co-mingling unrelated content.
+	//
+	// A generated column's expression cannot be altered in place — drop and
+	// re-add. The matching index moves with it.
+	`DROP INDEX IF EXISTS idx_posts_repost_key;
+	 ALTER TABLE posts DROP COLUMN IF EXISTS repost_key;
+	 ALTER TABLE posts ADD COLUMN repost_key TEXT
+	    GENERATED ALWAYS AS (
+	        CASE
+	            WHEN LENGTH(LOWER(regexp_replace(BTRIM(COALESCE(title, '')), '\s+', ' ', 'g'))) < 12 THEN NULL
+	            ELSE LOWER(regexp_replace(BTRIM(COALESCE(title, '')), '\s+', ' ', 'g'))
+	        END
+	    ) STORED;
+	 CREATE INDEX idx_posts_repost_key ON posts (repost_key) WHERE repost_key IS NOT NULL;`,
 }
 
 func RunMigrations(db *sql.DB) error {

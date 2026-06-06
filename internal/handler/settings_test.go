@@ -126,18 +126,20 @@ func runNumericNorm(t *testing.T, key string, cases []numericNormCase) {
 }
 
 // TestNormalizeSettings_PageLimit pins the validation contract: values inside
-// [5, 25] are accepted and canonicalised; anything else is dropped from the
+// [5, 100] are accepted and canonicalised; anything else is dropped from the
 // updates map (so the existing stored value — DB row or env_override —
 // survives) and surfaces in the rejected slice. The same call runs at startup
 // over REDMEMO_DEFAULT_PAGE_LIMIT, so a garbage env var never poisons
-// siteDefaults and pref() falls through to prefDefaults["page_limit"]="5".
+// siteDefaults and pref() falls through to prefDefaults["page_limit"]="50".
+// The upper bound is Reddit's listing-endpoint cap; the default of 50 reflects
+// that the OAuth quota is per-request, so a larger page is strictly cheaper.
 func TestNormalizeSettings_PageLimit(t *testing.T) {
 	runNumericNorm(t, "page_limit", []numericNormCase{
 		{"min boundary", "5", true, "5"},
-		{"max boundary", "25", true, "25"},
-		{"interior", "12", true, "12"},
+		{"max boundary", "100", true, "100"},
+		{"interior", "50", true, "50"},
 		{"below range", "4", false, ""},
-		{"above range", "26", false, ""},
+		{"above range", "101", false, ""},
 		{"zero", "0", false, ""},
 		{"negative", "-5", false, ""},
 		{"non-numeric", "abc", false, ""},

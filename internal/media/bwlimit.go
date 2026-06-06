@@ -78,6 +78,9 @@ func (b *tokenBucket) reserve(want int) (granted int, wait time.Duration) {
 func (b *tokenBucket) waitN(ctx context.Context, n int) error {
 	remaining := n
 	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		got, wait := b.reserve(remaining)
 		if got > 0 {
 			remaining -= got

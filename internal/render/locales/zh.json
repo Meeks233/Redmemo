@@ -74,6 +74,9 @@
   "media.video": "视频",
 
   "post.archived": "存档于 %s",
+  "post.repost_badge": "+%d 条同款",
+  "post.repost_badge_title": "同一内容多次出现 — 各变体列在下方",
+  "post.repost_variants_summary": "%d 个同款变体（点击展开/收起）",
   "post.upvotes": "赞",
   "post.upvoted": "好评率",
   "post.refetch_title": "从 Reddit 重新抓取此帖",
@@ -99,6 +102,7 @@
   "poll.votes": "%v 票,",
 
   "comment.more_replies": "更多回复(%v)",
+  "comment.replies_remaining": "剩余 %v 条",
   "comment.edited": "编辑于 %s",
   "comment.filtered": "(已过滤内容)",
 
@@ -107,7 +111,7 @@
   "comments.search_placeholder": "搜索评论",
   "comments.containing": "包含「%s」的评论",
   "comments.all": "全部评论",
-  "comments.load_more": "再加载 5 条评论",
+  "comments.load_more": "再加载 %v 条评论",
   "comments.view_all": "查看全部评论",
   "comments.show_parent": "显示父级评论",
 
@@ -257,7 +261,7 @@
   "settings.token_ttl_30": "30 分钟",
   "settings.token_ttl_60": "1 小时",
   "settings.page_limit": "每次上游请求的帖子数",
-  "settings.page_limit_title": "每次 /r/{sub} 或 /search 向 Reddit 拉取多少条帖子。数值越小,session token 配额越省;数值越大,请求次数减少但单次开销更大。范围 5-25,默认 5。",
+  "settings.page_limit_title": "每次 /r/{sub} 或 /search 向 Reddit 拉取多少条帖子。Reddit OAuth 配额按请求数计费而非条目数,单次拉 50 条和拉 5 条成本一样,所以更大的 page 反而更省。范围 5-100,默认 50。",
   "settings.version": "版本",
   "settings.archived_posts": "已存档帖子",
   "settings.archived_subs": "已存档 Subreddit",

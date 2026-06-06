@@ -168,8 +168,24 @@ type Scheduler struct {
 
 const (
 	maxRoundsPerCycle = 8
-	pageSize          = 25
+	// pageSize is L2's batch size for the per-sub media-needing query.
+	// Kept at 25 by design — L2's per-round cost scales with this and the
+	// "other layers unchanged" directive applies here.
+	pageSize = 25
+	// L1 fetches a randomized closed-interval batch in [l1ListingMin,
+	// l1ListingMax] posts per round. Reddit caps listing limit at 100, and
+	// reading a fuller page per call is more natural than the previous
+	// fixed 25 — it lets one round of L1 archive a larger swath without
+	// changing the cadence or any downstream layer.
+	l1ListingMin = 75
+	l1ListingMax = 100
 )
+
+// l1RoundLimit returns the listing-API limit for one L1 round: a uniform
+// pick across the closed interval [l1ListingMin, l1ListingMax].
+func l1RoundLimit() int {
+	return l1ListingMin + rand.Intn(l1ListingMax-l1ListingMin+1)
+}
 
 func New(
 	cfg config.PrefetchConfig,
@@ -613,9 +629,10 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 			var after string
 			var fetchErr error
 
-			label := fmt.Sprintf("L1 r/%s [%s%s] round %d/%d listing (after=%q)", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1, maxRoundsPerCycle, cursor)
+			limit := l1RoundLimit()
+			label := fmt.Sprintf("L1 r/%s [%s%s] round %d/%d listing limit=%d (after=%q)", sub, mode.Sort, tfSuffix(mode.Timeframe), round+1, maxRoundsPerCycle, limit, cursor)
 			err := s.submit(ctx, label, true, func(ctx context.Context) {
-				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
+				posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
 				s.recordUpstream(ctx)
 				// Token() returns nil for three distinct reasons; ErrNoTokenAvailable
 				// collapses them. Disambiguate before reacting:
@@ -663,12 +680,12 @@ func (s *Scheduler) runBigCycle(ctx context.Context) error {
 							}
 							return
 						}
-						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
+						posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
 						s.recordUpstream(ctx)
 					} else {
 						s.Events.Addf(LevelWarn, "L1", "r/%s round %d: no session token yet, blocking until token+UA ready", sub, round+1)
 						if s.tokenWaiter.WaitForToken(ctx) {
-							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", pageSize)
+							posts, _, after, fetchErr = s.cli.FetchSubreddit(ctx, sub, mode.Sort, mode.Timeframe, cursor, "", limit)
 							s.recordUpstream(ctx)
 						}
 					}

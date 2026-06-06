@@ -551,13 +551,26 @@ func archiveFilterClauses(opts ArchiveSearchOpts, startArg int) (string, []any, 
 
 // ArchiveSearch runs a purely-local search over the posts archive. It never
 // touches Reddit; it only queries PostgreSQL. It returns the requested page of
-// posts (newest first) plus the total number of matches for pagination.
+// posts (newest first) plus the total number of distinct repost clusters for
+// pagination.
+//
+// Repost-spam folding (v29): rows that share a non-null `repost_key` — same
+// author + same normalized title — collapse into a single survivor at the SQL
+// layer. The survivor is the highest-scoring row in the cluster; its returned
+// RepostCount carries the size of the hidden tail (>1 ⇒ the renderer shows a
+// "+N reposts" badge). Anonymous / [deleted] authors have a NULL repost_key
+// and bucket per-row (via COALESCE on url_path) so they stay visible. See
+// reddit.RepostKey for the matching Go-side normalization used on the live
+// upstream path.
 func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64, error) {
 	extra, args, argN := archiveFilterClauses(opts, 1)
 	where := "1=1" + extra
 
+	// Total counts distinct repost clusters, not raw rows, so the pagination
+	// footer matches the deduped result set the user actually sees.
 	var total int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM posts WHERE "+where, args...).Scan(&total); err != nil {
+	countQ := "SELECT COUNT(DISTINCT COALESCE(repost_key, url_path)) FROM posts WHERE " + where
+	if err := s.db.QueryRow(countQ, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("archive search count: %w", err)
 	}
 
@@ -571,11 +584,23 @@ func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64,
 
 	limitN, offsetN := argN, argN+1
 	args = append(args, opts.Limit, opts.Offset)
+	// DISTINCT ON keeps the highest-scoring row per cluster; the inner window
+	// COUNT propagates the cluster size onto that survivor so the badge can
+	// render. The outer SELECT re-sorts by the caller's order (DISTINCT ON
+	// forces its own ORDER BY for the picker), then pages.
 	q := fmt.Sprintf(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
-		       author, score, created_utc, first_seen, last_updated, source, media_done
-		FROM posts
-		WHERE %s
+		       author, score, created_utc, first_seen, last_updated, source, media_done,
+		       repost_count
+		FROM (
+			SELECT DISTINCT ON (COALESCE(repost_key, url_path))
+			       url_path, subreddit, post_id, title, json_data, rendered_html,
+			       author, score, created_utc, first_seen, last_updated, source, media_done,
+			       COUNT(*) OVER (PARTITION BY COALESCE(repost_key, url_path)) AS repost_count
+			FROM posts
+			WHERE %s
+			ORDER BY COALESCE(repost_key, url_path), score DESC NULLS LAST, created_utc DESC
+		) folded
 		ORDER BY %s
 		LIMIT $%d OFFSET $%d`, where, orderBy, limitN, offsetN)
 
@@ -584,7 +609,7 @@ func (s *PostStore) ArchiveSearch(opts ArchiveSearchOpts) ([]*StoredPost, int64,
 		return nil, 0, fmt.Errorf("archive search: %w", err)
 	}
 	defer rows.Close()
-	posts, err := scanPosts(rows)
+	posts, err := scanPostsWithRepostCount(rows)
 	return posts, total, err
 }
 
@@ -828,6 +853,24 @@ func scanPostsWithKey(rows *sql.Rows) ([]*StoredPost, float64, error) {
 		lastKey = key
 	}
 	return posts, lastKey, rows.Err()
+}
+
+// scanPostsWithRepostCount scans rows with a trailing repost_count column —
+// the cluster-size value DISTINCT ON queries surface via a window COUNT.
+func scanPostsWithRepostCount(rows *sql.Rows) ([]*StoredPost, error) {
+	var posts []*StoredPost
+	for rows.Next() {
+		p := &StoredPost{}
+		if err := rows.Scan(
+			&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
+			&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
+			&p.RepostCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan post with repost count: %w", err)
+		}
+		posts = append(posts, p)
+	}
+	return posts, rows.Err()
 }
 
 func scanPosts(rows *sql.Rows) ([]*StoredPost, error) {

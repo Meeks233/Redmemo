@@ -580,6 +580,77 @@ func ParseComments(data json.RawMessage, postLink, postAuthor string) []Comment 
 	return comments
 }
 
+// ParseMoreChildren parses Reddit's /api/morechildren.json response — a FLAT
+// list of comment "things" addressing exactly the child IDs we requested. We
+// rebuild the tree client-side using parent_id so each item nests under its
+// real parent: any item whose parent is also in the response becomes a reply
+// of that parent (preserving Reddit's inline expansion of grandchildren),
+// while items whose parent lives upstream (the original "more" stub's parent,
+// not in this payload) surface as roots — those are what the caller splices
+// into the visible DOM next to the loaded button.
+func ParseMoreChildren(data []byte, postLink, postAuthor string) ([]Comment, error) {
+	var resp struct {
+		JSON struct {
+			Errors [][]interface{} `json:"errors"`
+			Data   struct {
+				Things []json.RawMessage `json:"things"`
+			} `json:"data"`
+		} `json:"json"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, err
+	}
+
+	flat := make([]*Comment, 0, len(resp.JSON.Data.Things))
+	for _, raw := range resp.JSON.Data.Things {
+		c := buildComment(raw, postLink, postAuthor)
+		if c.ID == "" && c.Kind != "more" {
+			continue
+		}
+		cp := c
+		flat = append(flat, &cp)
+	}
+
+	byID := make(map[string]bool, len(flat))
+	for _, c := range flat {
+		if c.ID != "" {
+			byID[c.ID] = true
+		}
+	}
+
+	// Two-pass tree build: index children by parent ID, then DFS-copy each
+	// root with its full subtree. Avoids the value-copy-vs-late-attach trap
+	// of single-pass mutation on []Comment slices — by the time we copy a
+	// node into its parent's Replies, the parent→children index is already
+	// complete so the recursive walk picks up every descendant.
+	childrenOf := make(map[string][]*Comment, len(flat))
+	roots := []*Comment{}
+	for _, c := range flat {
+		if c.ParentKind == "t1" && byID[c.ParentID] {
+			childrenOf[c.ParentID] = append(childrenOf[c.ParentID], c)
+			continue
+		}
+		roots = append(roots, c)
+	}
+
+	var build func(c *Comment) Comment
+	build = func(c *Comment) Comment {
+		out := *c
+		kids := childrenOf[c.ID]
+		out.Replies = make([]Comment, 0, len(kids))
+		for _, k := range kids {
+			out.Replies = append(out.Replies, build(k))
+		}
+		return out
+	}
+
+	result := make([]Comment, 0, len(roots))
+	for _, r := range roots {
+		result = append(result, build(r))
+	}
+	return result, nil
+}
+
 func buildComment(raw json.RawMessage, postLink, postAuthor string) Comment {
 	var wrapper struct {
 		Kind string                 `json:"kind"`
@@ -600,6 +671,14 @@ func buildComment(raw json.RawMessage, postLink, postAuthor string) Comment {
 		c.Kind = "more"
 		c.MoreCount = getInt64(d, "count")
 		c.ParentKind, c.ParentID = ParseParentID(getString(d, "parent_id"))
+		if childrenRaw, ok := d["children"].([]interface{}); ok {
+			c.Children = make([]string, 0, len(childrenRaw))
+			for _, id := range childrenRaw {
+				if s, ok := id.(string); ok && s != "" {
+					c.Children = append(c.Children, s)
+				}
+			}
+		}
 		return c
 	}
 

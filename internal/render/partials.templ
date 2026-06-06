@@ -181,7 +181,11 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 			if post.Flags.Spoiler {
 				{ " " }<small class="spoiler">{ T(ctx, "flag.spoiler") }</small>
 			}
+			if post.RepostCount > 1 {
+				{ " " }<small class="repost_badge" title={ T(ctx, "post.repost_badge_title") }>{ T(ctx, "post.repost_badge", post.RepostCount-1) }</small>
+			}
 		</h2>
+		@repostVariants(post)
 		if prefs.Layout == "" || prefs.Layout == "card" {
 			if post.PostType == "image" {
 				<div class="post_media_content">
@@ -256,9 +260,38 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 						><a href={ templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)) }>{ T(ctx, "media.video") }</a></video>
 					</div>
 				}
+			} else if post.PostType == "gallery" && len(post.Gallery) > 0 {
+				<div class="post_media_content">
+					<a href={ templ.SafeURL(post.Permalink) } class="post_media_image gallery_preview">
+						if lazy {
+							<img
+								class="lazy-media"
+								if post.Gallery[0].Width > 0 && post.Gallery[0].Height > 0 {
+									width={ i64(post.Gallery[0].Width) }
+									height={ i64(post.Gallery[0].Height) }
+								} else {
+									width="100%"
+									height="100%"
+								}
+								alt={ T(ctx, "alt.gallery_image") }
+								data-src={ post.Gallery[0].URL }
+							/>
+						} else if post.Gallery[0].Width == 0 || post.Gallery[0].Height == 0 {
+							<img width="100%" height="100%" loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/>
+						} else {
+							<svg width={ i64(post.Gallery[0].Width) + "px" } height={ i64(post.Gallery[0].Height) + "px" } xmlns="http://www.w3.org/2000/svg">
+								<image width="100%" height="100%" href={ templ.SafeURL(post.Gallery[0].URL) }></image>
+								<desc><img loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/></desc>
+							</svg>
+						}
+						if len(post.Gallery) > 1 {
+							<span class="gallery_count">{ strconv.Itoa(len(post.Gallery)) }</span>
+						}
+					</a>
+				</div>
 			}
 		}
-		if post.PostType != "self" && post.PostType != "image" && post.PostType != "video" && post.PostType != "gif" {
+		if post.PostType != "self" && post.PostType != "image" && post.PostType != "video" && post.PostType != "gif" && post.PostType != "gallery" {
 			<a
 				class={ "post_thumbnail", templ.KV("no_thumbnail", post.Thumbnail.URL == "") }
 				if post.PostType == "link" {
@@ -304,6 +337,42 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>{ post.Comments[0] } { commentsWord(post.Comments[1]) }</a>
 		</div>
 	</div>
+}
+
+// repostVariants renders the cluster head's RepostMembers as a compact
+// navigable list under the post card. Each row is one variant of the same
+// content surfaced in a different sub (or under a slightly different title
+// from the same/another author). The shared media element above is loaded
+// ONCE for the entire cluster; this block only adds per-variant navigation
+// text — no media is re-fetched. Suppressed when the post is a singleton
+// (RepostMembers empty or len ≤ 1).
+templ repostVariants(post reddit.Post) {
+	if len(post.RepostMembers) > 1 {
+		<details class="repost_variants">
+			<summary>{ T(ctx, "post.repost_variants_summary", len(post.RepostMembers)) }</summary>
+			<ul>
+				for i, m := range post.RepostMembers {
+					if i > 0 || m.Permalink != post.Permalink {
+						<li>
+							<a class="repost_variant" href={ templ.SafeURL(m.Permalink) }>
+								<span class="repost_variant_sub">r/{ m.Community }</span>
+								<span class="repost_variant_sep">·</span>
+								<span class="repost_variant_title">{ m.Title }</span>
+								if m.Author.Name != "" {
+									<span class="repost_variant_sep">·</span>
+									<span class="repost_variant_author">u/{ m.Author.Name }</span>
+								}
+								if m.RelTime != "" {
+									<span class="repost_variant_sep">·</span>
+									<span class="repost_variant_time" title={ m.Created }>{ m.RelTime }</span>
+								}
+							</a>
+						</li>
+					}
+				}
+			</ul>
+		</details>
+	}
 }
 
 // bannerIcon resolves a lucide-style icon name to an inline SVG. Keeping the

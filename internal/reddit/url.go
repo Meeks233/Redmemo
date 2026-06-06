@@ -331,7 +331,7 @@ func RewriteEmotes(mediaMetadata map[string]interface{}, body string) string {
 			}
 		}
 
-		replacement := fmt.Sprintf(`<img src="%s" width="%d" height="%d" class="emote">`,
+		replacement := fmt.Sprintf(`<img loading="lazy" src="%s" width="%d" height="%d" class="emote">`,
 			localURL, width, height)
 		body = strings.ReplaceAll(body, emoteName, replacement)
 	}

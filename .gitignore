@@ -48,6 +48,9 @@ config.yaml
 # --- Claude Code (per-machine) ---
 .claude/
 .cc-turn-done
+.cc-rebuild-request
+.cc-rebuild-done
+.cc-rebuild-watcher.pid
 CLAUDE.md
 
 # --- OS junk ---

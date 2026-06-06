@@ -179,6 +179,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /user/{name}/comments/{id}/{title...}", h.handleUserPost)
 	mux.HandleFunc("POST /api/refresh/{sub}/{id}", h.handleRefreshPost)
 	mux.HandleFunc("GET /api/comments/{sub}/{id}", h.handleLoadMoreComments)
+	mux.HandleFunc("GET /api/replies/{sub}/{id}", h.handleLoadMoreReplies)
 	mux.HandleFunc("GET /user/{name}", h.handleUser)
 	mux.HandleFunc("GET /user/{name}/{listing}", h.handleUser)
 	mux.HandleFunc("GET /search", h.handleSearch)

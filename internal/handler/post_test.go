@@ -138,6 +138,11 @@ func (f *fakeRedditClient) FetchPostLimited(_ context.Context, _, _, _ string, _
 	return f.post, f.comments, f.err
 }
 
+func (f *fakeRedditClient) FetchMoreChildren(_ context.Context, _, _ string, _ []string, _ string) ([]reddit.Comment, error) {
+	atomic.AddInt32(&f.fetchCalls, 1)
+	return f.comments, f.err
+}
+
 func (f *fakeRedditClient) FetchSubreddit(context.Context, string, string, string, string, string, int) ([]reddit.Post, string, string, error) {
 	return nil, "", "", nil
 }
