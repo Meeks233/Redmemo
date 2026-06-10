@@ -2892,6 +2892,15 @@ th {
     opacity: 0.7;
 }
 
+/* Absolute wall-clock timestamp shown under a "in 2h" / "5h ago" relative
+   value when the interval is large enough to be hard to scan mentally. */
+#error .ps-time-abs {
+    display: inline-block;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8em;
+    opacity: 0.55;
+}
+
 /* Prefetch Event Log */
 #error .prefetch-log-section {
     margin-top: 1.5em;
@@ -2971,9 +2980,21 @@ th {
 
 #error .pl-time {
     white-space: nowrap;
-    width: 65px;
+    width: 100px;
     color: var(--text);
     opacity: 0.5;
+    vertical-align: top;
+    line-height: 1.2;
+}
+
+#error .pl-time-date,
+#error .pl-time-clock {
+    display: block;
+}
+
+#error .pl-time-date {
+    font-size: 0.85em;
+    opacity: 0.8;
 }
 
 #error .pl-level {

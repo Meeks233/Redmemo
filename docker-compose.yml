@@ -37,12 +37,26 @@ services:
       - REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS=on
       - REDMEMO_DEFAULT_BLUR_NSFW=off
 
-      # ---- Natural Prefetch: on, crawling r/golang for local L1/L2 coverage ---
-      # Swap the sub list for whatever you want to exercise — the unified
-      # search grammar accepts multi-sub lists like "sub:golang+rust".
+      # ---- Natural Prefetch: full L1+L2+L3 coverage of r/golang for local ---
+      # Default depth is "l2+l3" so the local container exercises the entire
+      # visit-like flow (listings + media downloads + comment fetches) out of
+      # the box. Override per-sub by appending `<sub>=depth:none|l2|l3|l2+l3`
+      # to REDMEMO_DEFAULT_PREFETCH_SUB_MODES, or flip the global default
+      # below.
       - REDMEMO_PREFETCH_ENABLED=true
       - REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH=on
       - REDMEMO_DEFAULT_PREFETCH_SUBS=sub:golang
+      - REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH=l2+l3
+      # L3 noise floor: posts with fewer than this many comments are frozen
+      # out of L3 (both bind and standalone). 50 is a sane LAN default — it
+      # skips drive-by 1-line threads while still covering real discussion.
+      # Set 0 to disable. Negative or non-integer → container refuses to start.
+      - REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS=50
+      # Initial in-cycle phase scatter ("Start after % of window elapsed") for
+      # each L1 bucket on first start. 20 keeps the first fetch comfortably
+      # inside the first window without burning it at t=0 — the scheduler
+      # rolls uniformly in [0, 20% × cycle period].
+      - REDMEMO_DEFAULT_PREFETCH_THRESHOLD=20
     volumes:
       # config.yaml is OPTIONAL — RedMemo runs on defaults + REDMEMO_* env
       # vars. Uncomment when pinning a value that has no env-var equivalent

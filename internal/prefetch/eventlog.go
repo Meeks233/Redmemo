@@ -23,8 +23,20 @@ type Event struct {
 	Message string
 }
 
+// DateStr and ClockStr split the wall-clock timestamp into two lines for the
+// debug page log: the date sits above the time so the time column stays narrow
+// and the message column has room to breathe. The single-line TimeStr is kept
+// for the copy-to-clipboard path so pasted lines remain greppable.
+func (e Event) DateStr() string {
+	return e.Time.Format("2006-01-02")
+}
+
+func (e Event) ClockStr() string {
+	return e.Time.Format("15:04:05 MST")
+}
+
 func (e Event) TimeStr() string {
-	return e.Time.Format("15:04:05")
+	return e.Time.Format("2006-01-02 15:04:05 MST")
 }
 
 func (e Event) RelativeTime() string {

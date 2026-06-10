@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // errorTitle is the <title> slot: rate-limit label, the raw message for 2xx
@@ -154,7 +155,13 @@ templ errorContent(d ErrorPageData) {
 							if d.PrefetchStatus.L1NextCycle != "" {
 								<tr>
 									<td class="ps-label">{ T(ctx, "error.next_cycle") }</td>
-									<td>{ d.PrefetchStatus.L1NextCycle }</td>
+									<td>
+										{ d.PrefetchStatus.L1NextCycle }
+										if d.PrefetchStatus.L1NextCycleAbs != "" {
+											<br/>
+											<span class="ps-time-abs">{ d.PrefetchStatus.L1NextCycleAbs }</span>
+										}
+									</td>
 								</tr>
 							}
 							for _, b := range d.PrefetchStatus.L1Buckets {
@@ -174,6 +181,10 @@ templ errorContent(d ErrorPageData) {
 												<span class="ps-cursor">r/{ c.Sub }: <code>{ c.Cursor }</code></span>{ " " }
 											}
 										}
+										if b.NextCycleAbs != "" {
+											<br/>
+											<span class="ps-time-abs">next { b.NextCycleAbs }</span>
+										}
 									</td>
 								</tr>
 							}
@@ -190,6 +201,58 @@ templ errorContent(d ErrorPageData) {
 									}
 								</td>
 							</tr>
+							<tr>
+								<td class="ps-label">bind L3</td>
+								<td>
+									if d.PrefetchStatus.L2BindMode {
+										<span class="ps-on">on</span>
+									} else {
+										<span class="ps-off">off</span>
+									}
+								</td>
+							</tr>
+							if len(d.PrefetchStatus.L2Cycles) > 0 {
+								for _, c := range d.PrefetchStatus.L2Cycles {
+									<tr>
+										<td class="ps-label">{ fmt.Sprintf("cycle %s/r/%s", c.TF, c.Sub) }</td>
+										<td>
+											{ fmt.Sprintf("wave %d/%d", c.CurrentWave, c.WaveCount) }
+											if c.PostCount != 0 {
+												{ fmt.Sprintf(" · %d posts", c.PostCount) }
+											}
+											if c.Period != "" {
+												{ " · period " + c.Period }
+											}
+											if c.StartedAgo != "" {
+												{ " · started " + c.StartedAgo }
+											}
+											if c.StartedAtAbs != "" {
+												<br/>
+												<span class="ps-time-abs">started { c.StartedAtAbs }</span>
+											}
+											<br/>
+											<span class="ps-cursor">offsets:
+												for i, off := range c.WaveOffsets {
+													if i == c.CurrentWave-1 {
+														<b>{ off }</b>
+													} else {
+														{ off }
+													}
+													if i < len(c.WaveOffsets)-1 {
+														{ " " }
+													}
+												}
+											</span>
+											<br/>
+											<span class="ps-cursor">intervals: { strings.Join(c.WaveIntervals, " / ") }</span>
+											if c.CycleID != "" {
+												<br/>
+												<span class="ps-cursor">cycle_id <code>{ c.CycleID }</code></span>
+											}
+										</td>
+									</tr>
+								}
+							}
 							<tr><td colspan="2" class="ps-divider">L3 — Deep Archive (Comments)</td></tr>
 							<tr>
 								<td class="ps-label">{ T(ctx, "error.phase") }</td>
@@ -200,16 +263,49 @@ templ errorContent(d ErrorPageData) {
 									}
 								</td>
 							</tr>
+							<tr>
+								<td class="ps-label">bind mode</td>
+								<td>
+									if d.PrefetchStatus.L3BindMode {
+										<span class="ps-on">on</span>
+									} else {
+										<span class="ps-off">off</span>
+									}
+								</td>
+							</tr>
 							if d.PrefetchStatus.L3LastAt != "" {
 								<tr>
 									<td class="ps-label">last fetch</td>
-									<td>{ d.PrefetchStatus.L3LastAt }</td>
+									<td>
+										{ d.PrefetchStatus.L3LastAt }
+										if d.PrefetchStatus.L3LastAtAbs != "" {
+											<br/>
+											<span class="ps-time-abs">{ d.PrefetchStatus.L3LastAtAbs }</span>
+										}
+									</td>
 								</tr>
 							}
 							if d.PrefetchStatus.L3Count != 0 {
 								<tr>
 									<td class="ps-label">archived</td>
 									<td>{ fmt.Sprintf("%d post(s) this run", d.PrefetchStatus.L3Count) }</td>
+								</tr>
+							}
+							if len(d.PrefetchStatus.L3Recent) > 0 {
+								<tr>
+									<td class="ps-label">recent binds</td>
+									<td>
+										for _, r := range d.PrefetchStatus.L3Recent {
+											<div>
+												<span class="ps-cursor">r/{ r.Sub }/{ r.PostID }</span>
+												{ fmt.Sprintf(" · %d cmts · %s · %s", r.Comments, r.Status, r.Ago) }
+												if r.AtAbs != "" {
+													<br/>
+													<span class="ps-time-abs">{ r.AtAbs }</span>
+												}
+											</div>
+										}
+									</td>
 								</tr>
 							}
 							<tr><td colspan="2" class="ps-divider">L4 — Icon Cache</td></tr>
@@ -228,7 +324,13 @@ templ errorContent(d ErrorPageData) {
 							if d.PrefetchStatus.L4NextTick != "" {
 								<tr>
 									<td class="ps-label">next tick</td>
-									<td>{ d.PrefetchStatus.L4NextTick }</td>
+									<td>
+										{ d.PrefetchStatus.L4NextTick }
+										if d.PrefetchStatus.L4NextTickAbs != "" {
+											<br/>
+											<span class="ps-time-abs">{ d.PrefetchStatus.L4NextTickAbs }</span>
+										}
+									</td>
 								</tr>
 							}
 							<tr><td colspan="2" class="ps-divider">L5 — Audio Remux</td></tr>
@@ -268,7 +370,7 @@ templ errorContent(d ErrorPageData) {
 								<tbody>
 									for _, ev := range d.PrefetchEvents {
 										<tr class={ "pl-row", "pl-" + ev.Level }>
-											<td class="pl-time" title={ ev.RelativeTime }>{ ev.Time }</td>
+											<td class="pl-time" title={ ev.RelativeTime } data-flat={ ev.Time }><span class="pl-time-date">{ ev.Date }</span><span class="pl-time-clock">{ ev.Clock }</span></td>
 											<td class="pl-level"><span class={ "pl-badge", "pl-badge-" + ev.Level }>{ ev.Level }</span></td>
 											<td class="pl-phase">{ ev.Phase }</td>
 											<td class="pl-msg">{ ev.Message }</td>
@@ -284,7 +386,7 @@ templ errorContent(d ErrorPageData) {
 							var lines = [];
 							rows.forEach(function(r) {
 								var cells = r.querySelectorAll('td');
-								lines.push([cells[0].textContent, cells[1].textContent, cells[2].textContent, cells[3].textContent].join('\t'));
+								lines.push([cells[0].dataset.flat || cells[0].textContent, cells[1].textContent, cells[2].textContent, cells[3].textContent].join('\t'));
 							});
 							var text = lines.join('\n');
 							navigator.clipboard.writeText(text).then(function() {

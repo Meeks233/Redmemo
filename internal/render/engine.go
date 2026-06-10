@@ -305,6 +305,8 @@ type TokenView struct {
 }
 
 type PrefetchEventView struct {
+	Date         string
+	Clock        string
 	Time         string
 	RelativeTime string
 	Level        string
@@ -495,22 +497,29 @@ type PrefetchStatusView struct {
 	L1Progress  string
 	L1Subs      string
 	L1Cursors   []PrefetchCursorView
-	L1NextCycle string
-	L1Buckets   []PrefetchBucketView
+	L1NextCycle    string
+	L1NextCycleAbs string
+	L1Buckets      []PrefetchBucketView
 	L2Phase     string
 	L2Sub       string
 	L2Pending   int
+	L2BindMode  bool
+	L2Cycles    []PrefetchL2CycleView
 	L5Phase     string
 	L5Current   string
 	L5Pending   int
 	L3Phase     string
 	L3Current   string
 	L3LastAt    string
+	L3LastAtAbs string
 	L3Count     int
+	L3BindMode  bool
+	L3Recent    []PrefetchL3BindView
 	L4Phase     string
 	L4Current   string
 	L4QueueLen  int
-	L4NextTick  string
+	L4NextTick    string
+	L4NextTickAbs string
 	NPPhase     string
 	NPCurrent   string
 	QueueLen    int
@@ -525,11 +534,42 @@ type PrefetchCursorView struct {
 // debug page: which subs ride it, when its next cycle fires, and the cursor
 // each (sub, sort, t) has accumulated across cycles.
 type PrefetchBucketView struct {
-	TF        string
-	Period    string
-	Subs      string
-	NextCycle string
-	Cursors   []PrefetchCursorView
+	TF           string
+	Period       string
+	Subs         string
+	NextCycle    string
+	NextCycleAbs string
+	Cursors      []PrefetchCursorView
+}
+
+// PrefetchL2CycleView surfaces one in-flight L2 cycle (per tf+sub) to /debug.
+// WaveOffsets are offsets from cycle-start ("+12m"); WaveIntervals are the
+// gaps between consecutive waves *with each wave's per-chunk size appended*
+// (e.g. "2h19m11s ×16") so the operator sees both the non-uniform timing
+// and the non-uniform request-volume distribution in a single line.
+type PrefetchL2CycleView struct {
+	TF            string
+	Sub           string
+	PostCount     int
+	WaveCount     int
+	CurrentWave   int
+	BindMode      bool
+	StartedAgo    string
+	StartedAtAbs  string
+	Period        string
+	WaveOffsets   []string
+	WaveIntervals []string
+	CycleID       string
+}
+
+// PrefetchL3BindView surfaces one historical bind-mode L3 fetch on /debug.
+type PrefetchL3BindView struct {
+	Sub      string
+	PostID   string
+	Comments int
+	Ago      string
+	AtAbs    string
+	Status   string
 }
 
 type DebugData struct {

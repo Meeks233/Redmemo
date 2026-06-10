@@ -228,6 +228,8 @@ type Preferences struct {
 	PrefetchSort                   string // global default sort for NP L1: hot|new|top|rising|controversial (default "hot")
 	PrefetchTimeframe              string // global default t for NP L1 (only honored by top/controversial): hour|day|week|month|year|all (empty = none)
 	PrefetchSubModes               string // per-sub overrides, one rule per line: "sub=sort[:timeframe]" (e.g. "golang=new\nrust=top:week")
+	PrefetchDefaultDepth           string // "none" | "l2" | "l3" | "l2+l3" (default "l2+l3"). Global NP depth: "none" leaves only L1 main fetch, "l2" adds media downloads, "l3" adds comment fetches without media, "l2+l3" runs the full visit-like flow. Per-sub overrides (prefetch_sub_modes) may set depth:... to deviate from this global default for a single subreddit.
+	PrefetchL3MinComments          string // integer >= 0 (default "0" = disabled). Posts with num_comments below this value are skipped by both standalone and bound L3 — surface noise filter for archives that should not waste budget on threads of size 1.
 	ScrollInterval                 string
 	LazyMedia                      string // default "on" — defer media requests until the post enters the viewport
 	VideoQuality                   string // preferred max v.redd.it height: "source" (default) | "1080" | "720" | "480" | "360" | "240"

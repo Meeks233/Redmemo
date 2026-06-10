@@ -26,7 +26,8 @@ var settingsKeys = []string{
 	"fetch_sub_about",
 	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
 	"prefetch_sort", "prefetch_timeframe", "prefetch_sub_modes",
-	"prefetch_unified",
+	"prefetch_unified", "prefetch_default_depth",
+	"prefetch_l3_min_comments",
 	"archive_control",
 	"prefetch_threshold", "scroll_interval", "lazy_media",
 	"video_quality", "mute_all_videos", "mute_nsfw_videos",
@@ -54,9 +55,105 @@ var validPrefetchTimeframe = map[string]bool{
 	"hour": true, "day": true, "week": true, "month": true, "year": true, "all": true,
 }
 
+// validPrefetchDepth enumerates the canonical NP depth values: none → L1 only;
+// l2 → L1 listings + L2 media; l3 → L1 listings + L3 comment fetch (no media);
+// l2+l3 → full L1 + L2 + L3 (visit-like). Used both as the global default
+// (prefetch_default_depth) and as the per-sub override value (depth:...).
+var validPrefetchDepth = map[string]bool{
+	"none": true, "l2": true, "l3": true, "l2+l3": true,
+}
+
+// CanonicalizeDepth normalises a raw depth string to the canonical form
+// (lowercased, "l3+l2" → "l2+l3", spaces stripped). Returns the canonical
+// value and true on success, or "" and false if the value is unrecognised.
+func CanonicalizeDepth(raw string) (string, bool) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	v = strings.ReplaceAll(v, " ", "")
+	switch v {
+	case "none", "off", "":
+		return "none", v != ""
+	case "l1":
+		// L1 alone is identical to "none" in NP depth semantics; accept the
+		// alias so an operator who writes depth:l1 (intending "main fetch
+		// only") gets the obvious result instead of a silent reject.
+		return "none", true
+	case "l2":
+		return "l2", true
+	case "l3":
+		return "l3", true
+	case "l2+l3", "l3+l2":
+		return "l2+l3", true
+	}
+	return "", false
+}
+
+// DepthHasL2 reports whether the canonical depth value covers L2 media downloads.
+func DepthHasL2(depth string) bool {
+	return depth == "l2" || depth == "l2+l3"
+}
+
+// DepthHasL3 reports whether the canonical depth value covers L3 comment fetches.
+func DepthHasL3(depth string) bool {
+	return depth == "l3" || depth == "l2+l3"
+}
+
 type prefetchSubModeReject struct {
 	raw    string
 	reason string
+}
+
+// splitTopLevelClauses splits raw on '+' EXCEPT when the '+' is part of a
+// depth value (e.g. `golang=depth:l2+l3`). Without this, the literal '+' in
+// `l2+l3` would split the depth value across two clauses and the parser
+// would see `golang=depth:l2` followed by a bare `l3` — both end up as
+// reject fragments. The lookaround is narrow on purpose: it only protects
+// `depth:l2`+`l3`, `depth:l3`+`l2`, and their `d:`/case variants. Anything
+// else (the user's `cats+dogs` bare-name list, ordinary sort/time clauses)
+// still splits identically to a strings.Split call.
+func splitTopLevelClauses(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	start := 0
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '+' {
+			continue
+		}
+		if isDepthValueJoin(raw, start, i) {
+			continue
+		}
+		out = append(out, raw[start:i])
+		start = i + 1
+	}
+	out = append(out, raw[start:])
+	return out
+}
+
+// isDepthValueJoin reports whether the '+' at index `plus` is the middle
+// character of a `depth:l2+l3` (or `l3+l2`, or `d:` alias, case-insensitive)
+// value rather than a clause separator. Examines just the most-recent
+// `=` / `&` token before `plus` and the `l2`/`l3` token after.
+func isDepthValueJoin(raw string, segStart, plus int) bool {
+	j := plus - 1
+	for j >= segStart && raw[j] != '=' && raw[j] != '&' {
+		j--
+	}
+	if j < segStart {
+		return false
+	}
+	kv := strings.ToLower(raw[j+1 : plus])
+	switch kv {
+	case "depth:l2", "depth:l3", "d:l2", "d:l3":
+	default:
+		return false
+	}
+	k := plus + 1
+	for k < len(raw) && raw[k] != '&' && raw[k] != '+' {
+		k++
+	}
+	tail := strings.ToLower(raw[plus+1 : k])
+	return tail == "l2" || tail == "l3"
 }
 
 // PrefetchSubOverride is one parsed per-sub override clause. Empty Sort or
@@ -65,6 +162,7 @@ type PrefetchSubOverride struct {
 	Sub       string
 	Sort      string
 	Timeframe string
+	Depth     string // canonical "none"|"l2"|"l3"|"l2+l3", or "" to inherit prefetch_default_depth
 }
 
 // ParsePrefetchSubModes parses the navbar-style query grammar used by the NP
@@ -89,7 +187,7 @@ func ParsePrefetchSubModes(raw string) ([]PrefetchSubOverride, []prefetchSubMode
 	byName := make(map[string]*PrefetchSubOverride)
 	var order []string
 
-	for _, clause := range strings.Split(raw, "+") {
+	for _, clause := range splitTopLevelClauses(raw) {
 		clause = strings.TrimSpace(clause)
 		if clause == "" {
 			continue
@@ -135,8 +233,16 @@ func ParsePrefetchSubModes(raw string) ([]PrefetchSubOverride, []prefetchSubMode
 				}
 				ov.Timeframe = val
 				anyOK = true
+			case "depth", "d":
+				canon, ok := CanonicalizeDepth(val)
+				if !ok {
+					bad = append(bad, prefetchSubModeReject{raw: kv, reason: "depth must be none/l2/l3/l2+l3"})
+					continue
+				}
+				ov.Depth = canon
+				anyOK = true
 			default:
-				bad = append(bad, prefetchSubModeReject{raw: kv, reason: "unknown key (expected sort or time)"})
+				bad = append(bad, prefetchSubModeReject{raw: kv, reason: "unknown key (expected sort, time, or depth)"})
 			}
 		}
 		if !anyOK {
@@ -171,6 +277,9 @@ func CanonicalPrefetchSubModes(overrides []PrefetchSubOverride) string {
 		if o.Timeframe != "" {
 			kvs = append(kvs, "time:"+o.Timeframe)
 		}
+		if o.Depth != "" {
+			kvs = append(kvs, "depth:"+o.Depth)
+		}
 		if len(kvs) == 0 {
 			continue
 		}
@@ -199,7 +308,7 @@ func splitPrefetchUnified(raw string) (subsCSV, modesRaw string) {
 	}
 	var modesOrder, allSubsOrder []string
 	seenSub := make(map[string]bool)
-	for _, clause := range strings.Split(raw, "+") {
+	for _, clause := range splitTopLevelClauses(raw) {
 		clause = strings.TrimSpace(clause)
 		if clause == "" {
 			continue
@@ -226,7 +335,7 @@ func splitPrefetchUnified(raw string) (subsCSV, modesRaw string) {
 // '+'. Empty inputs produce an empty string.
 func ComposePrefetchUnified(subsCSV, modesRaw string) string {
 	overrideSet := make(map[string]bool)
-	for _, clause := range strings.Split(modesRaw, "+") {
+	for _, clause := range splitTopLevelClauses(modesRaw) {
 		clause = strings.TrimSpace(clause)
 		if clause == "" {
 			continue
@@ -313,6 +422,18 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 		}
 	}
 
+	if v, ok := out["prefetch_l3_min_comments"]; ok {
+		// 0 disables the filter, so the lower bound is 0 (not 1). Upper bound
+		// 100000 matches Reddit's hard ceiling on visible per-thread comment
+		// count — anything past it is meaningless as a waterline.
+		if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 100000 {
+			delete(out, "prefetch_l3_min_comments")
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_l3_min_comments", Value: v, Reason: "must be an integer in [0, 100000]"})
+		} else {
+			out["prefetch_l3_min_comments"] = strconv.Itoa(n)
+		}
+	}
+
 	if v, ok := out["video_quality"]; ok {
 		if _, valid := reddit.VideoQualityHeights[v]; !valid && v != "source" {
 			delete(out, "video_quality")
@@ -355,6 +476,16 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 		}
 	}
 
+	if v, ok := out["prefetch_default_depth"]; ok && v != "" {
+		canon, valid := CanonicalizeDepth(v)
+		if !valid {
+			delete(out, "prefetch_default_depth")
+			rejected = append(rejected, RejectedSetting{Key: "prefetch_default_depth", Value: v, Reason: "must be none/l2/l3/l2+l3"})
+		} else {
+			out["prefetch_default_depth"] = canon
+		}
+	}
+
 	if v, ok := out["prefetch_sub_modes"]; ok && v != "" {
 		cleaned, bad := normalizePrefetchSubModes(v)
 		out["prefetch_sub_modes"] = cleaned
@@ -373,6 +504,21 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 	}
 
 	return out, rejected
+}
+
+// fatalSettingKeys lists settings whose env_override misconfiguration MUST
+// abort container startup rather than fall back to the build-in default. A
+// silent fallback would hide operator misconfig — and these keys directly
+// shape what NP archives, so the operator must see the failure on first boot.
+var fatalSettingKeys = map[string]bool{
+	"prefetch_l3_min_comments": true,
+}
+
+// IsFatalSettingKey reports whether an env_override rejection for key should
+// terminate the process at startup. Exposed so cmd/redmemo can run the gate
+// without depending on the internal map.
+func IsFatalSettingKey(key string) bool {
+	return fatalSettingKeys[key]
 }
 
 // RejectedSetting describes one key NormalizeSettings refused to accept,

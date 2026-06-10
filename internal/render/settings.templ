@@ -248,13 +248,26 @@ templ settingsContent(d SettingsPageData) {
 					<fieldset>
 						<legend>{ T(ctx, "settings.natural_prefetch") }</legend>
 						<div class="prefs-group">
-							<label for="enable_natural_prefetch">{ T(ctx, "settings.enable_np") }</label>
+							<label for="enable_natural_prefetch">{ T(ctx, "settings.enable_l1_main_fetch") }</label>
 							<input type="checkbox" id="enable_natural_prefetch" checked?={ d.Prefs.EnableNaturalPrefetch == "on" && d.Prefs.PrefetchSubs != "" } onchange="togglePrefetch(this)"/>
 						</div>
 						<div class="prefetch-picker" id="prefetch_picker" style={ displayNoneIf(d.Prefs.EnableNaturalPrefetch != "on" || d.Prefs.PrefetchSubs == "") }>
 							<div class="prefs-group">
 								<label for="prefetch_threshold">{ T(ctx, "settings.np_threshold") }</label>
 								<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value={ d.Prefs.PrefetchThreshold } style="width:60px" onchange="savePrefetchThreshold(this.value)"/>
+							</div>
+							<div class="prefs-group" title={ T(ctx, "settings.np_default_depth_title") }>
+								<label for="prefetch_default_depth">{ T(ctx, "settings.np_default_depth") }</label>
+								<select id="prefetch_default_depth" name="prefetch_default_depth" form="settings-form">
+									<option value="none" selected?={ d.Prefs.PrefetchDefaultDepth == "none" }>{ T(ctx, "settings.np_depth_none") }</option>
+									<option value="l2" selected?={ d.Prefs.PrefetchDefaultDepth == "l2" }>{ T(ctx, "settings.np_depth_l2") }</option>
+									<option value="l3" selected?={ d.Prefs.PrefetchDefaultDepth == "l3" }>{ T(ctx, "settings.np_depth_l3") }</option>
+									<option value="l2+l3" selected?={ d.Prefs.PrefetchDefaultDepth == "" || d.Prefs.PrefetchDefaultDepth == "l2+l3" }>{ T(ctx, "settings.np_depth_l2_l3") }</option>
+								</select>
+							</div>
+							<div class="prefs-group" title={ T(ctx, "settings.np_l3_min_comments_title") }>
+								<label for="prefetch_l3_min_comments">{ T(ctx, "settings.np_l3_min_comments") }</label>
+								<input type="number" id="prefetch_l3_min_comments" name="prefetch_l3_min_comments" form="settings-form" min="0" max="100000" step="1" value={ d.Prefs.PrefetchL3MinComments } style="width:80px"/>
 							</div>
 							<div class="prefs-group">
 								<label for="prefetch_sort">{ T(ctx, "settings.np_global_sort") }</label>
@@ -452,7 +465,7 @@ templ settingsContent(d SettingsPageData) {
 		// The homepage filter and its disable toggle live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
+		['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'prefetch_default_depth', 'prefetch_l3_min_comments', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});

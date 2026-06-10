@@ -140,7 +140,7 @@ func TestEvent_RelativeTime(t *testing.T) {
 
 func TestEvent_TimeStr(t *testing.T) {
 	e := Event{Time: time.Date(2026, 5, 16, 13, 7, 42, 0, time.UTC)}
-	if got := e.TimeStr(); got != "13:07:42" {
-		t.Errorf("TimeStr = %q, want 13:07:42", got)
+	if got := e.TimeStr(); got != "2026-05-16 13:07:42 UTC" {
+		t.Errorf("TimeStr = %q, want 2026-05-16 13:07:42 UTC", got)
 	}
 }

@@ -486,6 +486,8 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		for i := len(events) - 1; i >= 0; i-- {
 			e := events[i]
 			prefetchEvents = append(prefetchEvents, render.PrefetchEventView{
+				Date:         e.DateStr(),
+				Clock:        e.ClockStr(),
 				Time:         e.TimeStr(),
 				RelativeTime: e.RelativeTime(),
 				Level:        string(e.Level),
@@ -510,11 +512,40 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 				bc = append(bc, render.PrefetchCursorView{Sub: sub, Cursor: cur})
 			}
 			buckets = append(buckets, render.PrefetchBucketView{
-				TF:        b.TF,
-				Period:    b.Period,
-				Subs:      strings.Join(b.Subs, ", "),
-				NextCycle: b.NextCycle,
-				Cursors:   bc,
+				TF:           b.TF,
+				Period:       b.Period,
+				Subs:         strings.Join(b.Subs, ", "),
+				NextCycle:    b.NextCycle,
+				NextCycleAbs: b.NextCycleAbs,
+				Cursors:      bc,
+			})
+		}
+		l2Cycles := make([]render.PrefetchL2CycleView, 0, len(ps.L2Cycles))
+		for _, c := range ps.L2Cycles {
+			l2Cycles = append(l2Cycles, render.PrefetchL2CycleView{
+				TF:            c.TF,
+				Sub:           c.Sub,
+				PostCount:     c.PostCount,
+				WaveCount:     c.WaveCount,
+				CurrentWave:   c.CurrentWave,
+				BindMode:      c.BindMode,
+				StartedAgo:    c.StartedAgo,
+				StartedAtAbs:  c.StartedAtAbs,
+				Period:        c.Period,
+				WaveOffsets:   append([]string(nil), c.WaveOffsets...),
+				WaveIntervals: append([]string(nil), c.WaveIntervals...),
+				CycleID:       c.CycleID,
+			})
+		}
+		l3Recent := make([]render.PrefetchL3BindView, 0, len(ps.L3Recent))
+		for _, r := range ps.L3Recent {
+			l3Recent = append(l3Recent, render.PrefetchL3BindView{
+				Sub:      r.Sub,
+				PostID:   r.PostID,
+				Comments: r.Comments,
+				Ago:      r.Ago,
+				AtAbs:    r.AtAbs,
+				Status:   r.Status,
 			})
 		}
 		prefetchStatus = render.PrefetchStatusView{
@@ -524,22 +555,29 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L1Progress:  l1Progress,
 			L1Subs:      strings.Join(ps.L1Subs, ", "),
 			L1Cursors:   cursors,
-			L1NextCycle: ps.L1NextCycle,
-			L1Buckets:   buckets,
+			L1NextCycle:    ps.L1NextCycle,
+			L1NextCycleAbs: ps.L1NextCycleAbs,
+			L1Buckets:      buckets,
 			L2Phase:     ps.L2Phase,
 			L2Sub:       ps.L2Sub,
 			L2Pending:   ps.L2Pending,
+			L2BindMode:  ps.L2BindMode,
+			L2Cycles:    l2Cycles,
 			L5Phase:     ps.L5Phase,
 			L5Current:   ps.L5Current,
 			L5Pending:   ps.L5Pending,
 			L3Phase:     ps.L3Phase,
 			L3Current:   ps.L3Current,
 			L3LastAt:    ps.L3LastAt,
+			L3LastAtAbs: ps.L3LastAtAbs,
 			L3Count:     ps.L3Count,
+			L3BindMode:  ps.L3BindMode,
+			L3Recent:    l3Recent,
 			L4Phase:     ps.L4Phase,
 			L4Current:   ps.L4Current,
 			L4QueueLen:  ps.L4QueueLen,
-			L4NextTick:  ps.L4NextTick,
+			L4NextTick:    ps.L4NextTick,
+			L4NextTickAbs: ps.L4NextTickAbs,
 			NPPhase:     ps.NPPhase,
 			NPCurrent:   ps.NPCurrent,
 			QueueLen:    ps.QueueLen,

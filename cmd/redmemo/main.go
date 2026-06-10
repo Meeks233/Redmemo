@@ -142,6 +142,14 @@ func main() {
 	envSettings := config.ScanExplicitSettings()
 	envSettings, rejected := handler.NormalizeSettings(envSettings)
 	for _, r := range rejected {
+		// Certain keys are operator-critical: silently dropping a bad value
+		// would leave the deployment running with the build-in default and
+		// hide the misconfiguration. Refuse to start in that case so the
+		// docker container restarts loudly and the operator notices.
+		if handler.IsFatalSettingKey(r.Key) {
+			log.Fatalf("settings: REDMEMO_DEFAULT_%s=%q invalid — %s (refusing to start)",
+				strings.ToUpper(r.Key), r.Value, r.Reason)
+		}
 		log.Printf("settings: REDMEMO_DEFAULT_%s=%q ignored — %s",
 			strings.ToUpper(r.Key), r.Value, r.Reason)
 	}
@@ -229,10 +237,11 @@ func main() {
 		archiver.SetControlFromString(v)
 	}
 
+	prefetchRunStore := store.NewPrefetchRunStore(db)
 	prefetcher := prefetch.New(
 		cfg.Prefetch, oauthHolder, &settingsAdapter{store: settingsStore},
 		redditCli, publicCli, archiver, mediaProxy, subStatusStore, postStore,
-		subIconStore, hrLimiter,
+		prefetchRunStore, subIconStore, hrLimiter,
 	)
 
 	// 11. Start background tasks

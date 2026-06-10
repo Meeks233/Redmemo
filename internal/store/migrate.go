@@ -600,6 +600,51 @@ var migrations = []string{
 	        END
 	    ) STORED;
 	 CREATE INDEX idx_posts_repost_key ON posts (repost_key) WHERE repost_key IS NOT NULL;`,
+
+	// v31: unified prefetch run ledger covering L1 listing fetches, L2 media
+	// download waves and on-demand L3 comment fetches. Replaces the scattered
+	// settings-table cycle blobs and the previously implicit L2 schedule
+	// (fixed 25 per round, no persistence). Columns:
+	//   layer        — 'L1' | 'L2' | 'L3'
+	//   bucket       — L1 timeframe bucket (hour/day/.../all) when layer='L1'
+	//                  or the parent L1 fetch's bucket when layer='L2'
+	//   subreddit    — sub the run targets (NULL only for layer-wide rows we
+	//                  do not currently emit)
+	//   post_id      — set on L2 (one wave fans across many posts: NULL) and
+	//                  on L3 (one row per comment fetch)
+	//   cycle_id     — groups L2 sub-interval waves with their parent L1 fetch;
+	//                  '<bucket>:<sub>:<unix_ts>' on the L1 row and copied to
+	//                  every L2 wave it scheduled
+	//   sub_interval — 1..5 for L2 sub-interval waves; NULL for L1/L3
+	//   scheduled_at — wall-clock time the run is supposed to start
+	//   started_at / finished_at — actual execution stamps
+	//   status       — pending|running|ok|fail|skipped
+	//   payload      — layer-specific JSON (post counts, urls, etc.)
+	`CREATE TABLE IF NOT EXISTS prefetch_runs (
+	    id            BIGSERIAL PRIMARY KEY,
+	    layer         TEXT NOT NULL CHECK (layer IN ('L1','L2','L3')),
+	    bucket        TEXT,
+	    subreddit     TEXT,
+	    post_id       TEXT,
+	    cycle_id      TEXT,
+	    sub_interval  INTEGER,
+	    scheduled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	    started_at    TIMESTAMPTZ,
+	    finished_at   TIMESTAMPTZ,
+	    status        TEXT NOT NULL DEFAULT 'pending'
+	        CHECK (status IN ('pending','running','ok','fail','skipped')),
+	    payload       JSONB,
+	    error         TEXT
+	 );
+	 CREATE INDEX IF NOT EXISTS idx_prefetch_runs_layer_sched
+	    ON prefetch_runs (layer, scheduled_at DESC);
+	 CREATE INDEX IF NOT EXISTS idx_prefetch_runs_pending
+	    ON prefetch_runs (layer, scheduled_at)
+	    WHERE status = 'pending';
+	 CREATE INDEX IF NOT EXISTS idx_prefetch_runs_cycle
+	    ON prefetch_runs (cycle_id) WHERE cycle_id IS NOT NULL;
+	 CREATE INDEX IF NOT EXISTS idx_prefetch_runs_sub_post
+	    ON prefetch_runs (subreddit, post_id);`,
 }
 
 func RunMigrations(db *sql.DB) error {

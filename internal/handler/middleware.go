@@ -104,6 +104,8 @@ var prefDefaults = map[string]string{
 	"prefetch_sort":           "hot",
 	"prefetch_timeframe":      "day",
 	"prefetch_sub_modes":      "",
+	"prefetch_default_depth":  "l2+l3",
+	"prefetch_l3_min_comments": "0",
 	"scroll_interval":         "2",
 	"lazy_media":              "on",
 	"video_quality":           "source",
@@ -170,6 +172,8 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.PrefetchSort = pref("prefetch_sort")
 	p.PrefetchTimeframe = pref("prefetch_timeframe")
 	p.PrefetchSubModes = pref("prefetch_sub_modes")
+	p.PrefetchDefaultDepth = pref("prefetch_default_depth")
+	p.PrefetchL3MinComments = pref("prefetch_l3_min_comments")
 	p.ScrollInterval = pref("scroll_interval")
 	p.LazyMedia = pref("lazy_media")
 	p.VideoQuality = pref("video_quality")

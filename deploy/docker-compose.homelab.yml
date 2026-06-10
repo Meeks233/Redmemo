@@ -48,6 +48,16 @@ services:
       - REDMEMO_PREFETCH_ENABLED=true
       - REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH=on
       - REDMEMO_DEFAULT_PREFETCH_SUBS=
+      # Default depth across every crawled sub: l2+l3 = full visit-like flow
+      # (listings + media + comments). Set to "none" for L1 listings only,
+      # "l2" for media without comments, or "l3" for comments without media.
+      # Per-sub overrides may set depth: in REDMEMO_DEFAULT_PREFETCH_SUB_MODES.
+      - REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH=l2+l3
+      # L3 minimum comment count: posts with fewer than N comments are frozen
+      # out of L3 (bind + standalone). 50 is a sensible homelab default — drops
+      # drive-by 1-comment threads but still captures real discussion. Set 0
+      # to disable. Negative or non-integer → container refuses to start.
+      - REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS=50
     volumes:
       - media_data:/data/media
     depends_on:

@@ -175,6 +175,49 @@ func TestNormalizeSettings_PrefetchThreshold(t *testing.T) {
 	})
 }
 
+// TestNormalizeSettings_PrefetchL3MinComments pins the [0, 100000] bound. 0
+// is a valid value (= filter disabled) so the lower bound differs from the
+// other numeric prefs. Negative values must be rejected — and a rejection here
+// is fatal at startup (see IsFatalSettingKey + main.go's env loop) so the
+// validator absolutely cannot let a negative through.
+func TestNormalizeSettings_PrefetchL3MinComments(t *testing.T) {
+	runNumericNorm(t, "prefetch_l3_min_comments", []numericNormCase{
+		{"min boundary (zero disables)", "0", true, "0"},
+		{"interior", "5", true, "5"},
+		{"max boundary", "100000", true, "100000"},
+		{"above range", "100001", false, ""},
+		{"negative", "-1", false, ""},
+		{"large negative", "-9999", false, ""},
+		{"non-numeric", "five", false, ""},
+		{"empty", "", false, ""},
+		{"whitespace", " 5 ", false, ""},
+		{"float", "5.0", false, ""},
+		{"huge", "999999999", false, ""},
+		{"overflow", "99999999999999999999", false, ""},
+	})
+}
+
+// TestIsFatalSettingKey pins which keys cause a startup abort when their
+// env_override fails validation. Today only prefetch_l3_min_comments — but the
+// list MUST stay tight, so any addition surfaces here.
+func TestIsFatalSettingKey(t *testing.T) {
+	fatal := []string{"prefetch_l3_min_comments"}
+	nonFatal := []string{
+		"page_limit", "scroll_interval", "prefetch_threshold",
+		"settings_token_ttl", "prefetch_default_depth", "theme", "lang",
+	}
+	for _, k := range fatal {
+		if !IsFatalSettingKey(k) {
+			t.Errorf("IsFatalSettingKey(%q) = false, want true", k)
+		}
+	}
+	for _, k := range nonFatal {
+		if IsFatalSettingKey(k) {
+			t.Errorf("IsFatalSettingKey(%q) = true, want false", k)
+		}
+	}
+}
+
 // TestNormalizeSettings_ScrollInterval pins the [1, 60] bound (seconds). Without
 // an upper bound a user could enter 99999999 and starve the infinite-loader.
 func TestNormalizeSettings_ScrollInterval(t *testing.T) {

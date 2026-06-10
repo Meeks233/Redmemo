@@ -697,9 +697,9 @@ func TestRunL2_NilDependencies(t *testing.T) {
 		queue:  make(chan *workItem, 1),
 	}
 
-	err := s.submitL2(context.Background(), "test")
+	err := s.runL2Wave(context.Background(), "day", "test", 25, "test:0", 1)
 	if err != nil {
-		t.Errorf("submitL2 with nil deps should return nil, got: %v", err)
+		t.Errorf("runL2Wave with nil deps should return nil, got: %v", err)
 	}
 
 	events := s.Events.Snapshot()

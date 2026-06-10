@@ -15,6 +15,21 @@ Full design notes in [`docs/prefetch.md`](../docs/prefetch.md).
 | **L3** Deep archive | Passive — user visits a post page | 1 Reddit API request on demand | Comments are only ever fetched when a human asks for them. |
 | **L4** Icon cache | Startup + every 1 h + on `/archive` view | 1 Reddit API request per sub when stale | Keeps `sub_icons` fresh (default TTL 30 days). Icon image itself is a CDN download. |
 
+## Depth (which layers run per sub)
+
+NP exposes a **depth** dimension on top of the L1 / L2 / L3 layer split: it controls whether each crawled sub also runs media downloads and/or comment fetches. Resolved per sub, override > global:
+
+| Value | L1 (listings) | L2 (media) | L3 (comments) |
+|-------|---------------|------------|---------------|
+| `none` | yes | no | no |
+| `l2`   | yes | yes | no |
+| `l3`   | yes | no  | yes (each post in the wave) |
+| `l2+l3` | yes | yes | yes (visit-like, default) |
+
+- Global default: `prefetch_default_depth` (storage key) / `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` (env). The settings page renders it as the **Default depth** select on the NP fieldset.
+- Per-sub override: append `depth:<value>` inside a prefetch override clause, e.g. `golang=depth:l2+l3&sort:top` or `golang=depth:none`. Override wins per-sub. Unknown values are dropped.
+- Common pattern: set the global default to `none` and opt specific subs into media+comments via `<sub>=depth:l2+l3` — this is how the settings page documents single-sub deep crawls.
+
 ## Per-timeframe bucket cadence
 
 L1 no longer runs a single global cycle. Each subreddit's resolved timeframe (per-sub `time:` clause in `prefetch_sub_modes`, else the global `prefetch_timeframe`, else `day`) maps it to one of six fixed-period buckets:

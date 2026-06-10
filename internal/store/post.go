@@ -825,6 +825,50 @@ func (s *PostStore) ListNeedingMedia(sub string, limit int) ([]*StoredPost, erro
 	return scanPosts(rows)
 }
 
+// ListL3Candidates returns posts in sub eligible for an L3 (comments) fetch
+// under the cycle-freeze + min-comments rules:
+//
+//   - Cycle freeze: a post whose most recent successful L3 fetch was during the
+//     *current* L1 cycle (currentCycleID) or the *previous* one (prevCycleID for
+//     this sub) is skipped — so a post archived in cycle N stays frozen during
+//     cycle N+1 and naturally unfreezes at cycle N+2 if L1 re-surfaces it.
+//   - Min comments: a post whose stored num_comments is < minComments is
+//     skipped at the SQL layer; the count is parsed from the archived
+//     reddit.Post JSON (Comments[1] is the raw numeric string). 0 disables the
+//     filter.
+//
+// Pass "" for prevCycleID when no prior L1 cycle exists yet (fresh sub). The
+// query never returns posts whose subreddit name does not match (case-insensitive).
+func (s *PostStore) ListL3Candidates(sub, currentCycleID, prevCycleID string, limit, minComments int) ([]*StoredPost, error) {
+	rows, err := s.db.Query(`
+		WITH last_l3 AS (
+			SELECT DISTINCT ON (post_id) post_id, cycle_id
+			FROM prefetch_runs
+			WHERE layer = 'L3'
+			  AND post_id IS NOT NULL
+			  AND status = 'ok'
+			  AND LOWER(subreddit) = LOWER($1)
+			ORDER BY post_id, scheduled_at DESC
+		)
+		SELECT p.url_path, p.subreddit, p.post_id, p.title, p.json_data, p.rendered_html,
+		       p.author, p.score, p.created_utc, p.first_seen, p.last_updated, p.source, p.media_done
+		FROM posts p
+		LEFT JOIN last_l3 ll ON ll.post_id = p.post_id
+		WHERE LOWER(p.subreddit) = LOWER($1)
+		  AND ($5 = 0
+		       OR COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) >= $5)
+		  AND (ll.cycle_id IS NULL
+		       OR (ll.cycle_id <> $2 AND ll.cycle_id <> NULLIF($3, '')))
+		ORDER BY p.created_utc DESC
+		LIMIT $4`, sub, currentCycleID, prevCycleID, limit, minComments,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list L3 candidates: %w", err)
+	}
+	defer rows.Close()
+	return scanPosts(rows)
+}
+
 func (s *PostStore) SaveHTML(urlPath string, html []byte) error {
 	htmlStr := string(html)
 	_, err := s.db.Exec(`
