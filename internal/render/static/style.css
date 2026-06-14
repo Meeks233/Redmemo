@@ -1566,7 +1566,11 @@ video.lazy-media:not([src]) {
 
 .gallery_preview {
     position: relative;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
 }
 
 .gallery_preview .gallery_count {
@@ -1585,6 +1589,88 @@ video.lazy-media:not([src]) {
 
 .gallery_preview .gallery_count::before {
     content: "⊞ ";
+}
+
+.post_media_content:has(.gallery_slider) {
+    width: calc(100% - 40px);
+}
+
+.gallery_slider {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    width: 100%;
+}
+
+.gallery_nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 22px;
+    line-height: 36px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 2;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none;
+}
+
+.gallery_nav.gallery_nav_hidden {
+    display: none;
+}
+
+.gallery_slider:hover .gallery_nav:not(.gallery_nav_hidden) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.gallery_nav:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.gallery_prev {
+    left: 8px;
+}
+
+.gallery_next {
+    right: 8px;
+}
+
+@keyframes gallery-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.gallery_loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: inherit;
+    color: var(--text);
+    opacity: 0.5;
+}
+
+.gallery_loading svg {
+    animation: gallery-spin 0.8s linear infinite;
+}
+
+.gallery_all {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gallery_all .post_media_image {
+    display: block;
 }
 
 .gallery .outbound_url {
@@ -3027,6 +3113,29 @@ th {
 #error .pl-badge-error { background: rgba(239,68,68,0.15);  color: #f87171; }
 #error .pl-badge-skip  { background: rgba(148,163,184,0.15); color: #94a3b8; }
 
+#error .pl-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+#error .pl-sortable:hover {
+    opacity: 1;
+}
+#error .pl-sort-arrows {
+    display: inline-flex;
+    flex-direction: column;
+    line-height: 0.6;
+    font-size: 0.6em;
+    vertical-align: middle;
+    margin-left: 3px;
+}
+#error .pl-arrow-up,
+#error .pl-arrow-down {
+    opacity: 0.25;
+    transition: opacity 0.15s;
+}
+#error .pl-sort-asc .pl-arrow-up { opacity: 1; }
+#error .pl-sort-desc .pl-arrow-down { opacity: 1; }
+
 #error .pl-row.pl-error td { opacity: 1; }
 #error .pl-row.pl-warn td  { opacity: 1; }
 #error .pl-row.pl-skip td.pl-msg { opacity: 0.6; }
@@ -4168,4 +4277,78 @@ a.warning-banner--caution:hover {
     font-size: 0.8rem;
     color: var(--muted, var(--text));
     opacity: 0.7;
+}
+
+/* Long-video gate: rendered for clips longer than 5 minutes instead of a live
+ * <video> element so the page never auto-fetches multi-MB streams the viewer
+ * didn't ask for. Card mirrors .media-unavailable-card so the look is familiar,
+ * but the icon is interactive — clicking the cloud-download SVG swaps the gate
+ * for a real <video controls> driven by longVideoGate.js. */
+.long-video-gate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 28px 16px;
+    margin: 8px 0;
+    border: 1px dashed var(--highlighted);
+    border-radius: 6px;
+    background: var(--background);
+    color: var(--text);
+    text-align: center;
+    min-height: 180px;
+    cursor: pointer;
+}
+.long-video-gate:hover,
+.long-video-gate:focus-visible {
+    outline: none;
+    border-style: solid;
+    background: var(--highlighted);
+}
+.long-video-gate-button {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    color: var(--accent, #d54455);
+    cursor: pointer;
+    line-height: 0;
+}
+.long-video-gate-button:hover {
+    opacity: 0.85;
+}
+.long-video-gate-button svg {
+    display: block;
+}
+.long-video-gate-hint {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text);
+    opacity: 0.85;
+    max-width: 32ch;
+}
+.long-video-active {
+    position: relative;
+}
+.long-video-stop {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.6);
+    border: none;
+    border-radius: 4px;
+    padding: 6px;
+    color: #fff;
+    cursor: pointer;
+    line-height: 0;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.long-video-active:hover .long-video-stop,
+.long-video-stop:focus-visible {
+    opacity: 1;
+}
+.long-video-stop:hover {
+    background: rgba(213, 68, 85, 0.85);
 }

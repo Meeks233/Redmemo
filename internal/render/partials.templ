@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -83,6 +84,23 @@ templ degradedBanner(reason string) {
 			Items: []WarningItem{{Pre: T(ctx, "banner.degraded")}},
 		})
 	}
+}
+
+// longVideoGate replaces the live <video> element for clips longer than the
+// user-configured long_video_threshold. The placeholder fetches nothing on its
+// own — no poster, no preload, no source — so dozens of long clips on a feed
+// page cost zero bytes until the viewer opts in. A click on the cloud-download
+// SVG swaps the gate for a real <video controls src=... &long=1> element;
+// longVideoGate.js handles the swap. The src URL already carries `long=1` so
+// the backend priority gate (Priority.Long) drops these CDN downloads behind
+// every short-media request — see internal/media/prio.go.
+templ longVideoGate(src, hint string) {
+	<div class="long-video-gate" data-long-src={ src } role="button" tabindex="0" aria-label={ hint }>
+		<button type="button" class="long-video-gate-button" aria-label={ hint }>
+			<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-download"><path d="M12 13v8l-4-4"></path><path d="m12 21 4-4"></path><path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"></path></svg>
+		</button>
+		<p class="long-video-gate-hint">{ hint }</p>
+	</div>
 }
 
 // renderFlair renders rich-text flair parts (emoji spans + text spans).
@@ -214,7 +232,11 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 					</a>
 				</div>
 			} else if post.PostType == "gif" || post.PostType == "video" {
-				if playAsGif(post) {
+				if isLongVideo(post, longVideoThreshold(prefs)) {
+					<div class="post_media_content">
+						@longVideoGate(WithLongMark(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)), T(ctx, "media.long_video_hint", durationMinutes(post.Media.Duration)))
+					</div>
+				} else if playAsGif(post) {
 					<div class="post_media_content">
 						<video
 							class={ "post_media_video short", templ.KV("lazy-media", lazy) }
@@ -261,34 +283,61 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 					</div>
 				}
 			} else if post.PostType == "gallery" && len(post.Gallery) > 0 {
-				<div class="post_media_content">
-					<a href={ templ.SafeURL(post.Permalink) } class="post_media_image gallery_preview">
-						if lazy {
-							<img
-								class="lazy-media"
-								if post.Gallery[0].Width > 0 && post.Gallery[0].Height > 0 {
-									width={ i64(post.Gallery[0].Width) }
-									height={ i64(post.Gallery[0].Height) }
+				if prefs.ShowAllGalleryMedia == "on" {
+					<div class="post_media_content gallery_all">
+						for _, g := range post.Gallery {
+							<a href={ templ.SafeURL(post.Permalink) } class="post_media_image">
+								<img
+									loading="lazy"
+									if g.Width > 0 && g.Height > 0 {
+										width={ i64(g.Width) }
+										height={ i64(g.Height) }
+									} else {
+										width="100%"
+										height="100%"
+									}
+									alt={ T(ctx, "alt.gallery_image") }
+									src={ g.URL }
+								/>
+							</a>
+						}
+					</div>
+				} else {
+					<div class="post_media_content">
+						<div class="gallery_slider" data-gallery-urls={ galleryJSON(post.Gallery) }>
+							<a href={ templ.SafeURL(post.Permalink) } class="post_media_image gallery_preview">
+								if lazy {
+									<img
+										class="lazy-media"
+										if post.Gallery[0].Width > 0 && post.Gallery[0].Height > 0 {
+											width={ i64(post.Gallery[0].Width) }
+											height={ i64(post.Gallery[0].Height) }
+										} else {
+											width="100%"
+											height="100%"
+										}
+										alt={ T(ctx, "alt.gallery_image") }
+										data-src={ post.Gallery[0].URL }
+									/>
+								} else if post.Gallery[0].Width == 0 || post.Gallery[0].Height == 0 {
+									<img width="100%" height="100%" loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/>
 								} else {
-									width="100%"
-									height="100%"
+									<svg width={ i64(post.Gallery[0].Width) + "px" } height={ i64(post.Gallery[0].Height) + "px" } xmlns="http://www.w3.org/2000/svg">
+										<image width="100%" height="100%" href={ templ.SafeURL(post.Gallery[0].URL) }></image>
+										<desc><img loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/></desc>
+									</svg>
 								}
-								alt={ T(ctx, "alt.gallery_image") }
-								data-src={ post.Gallery[0].URL }
-							/>
-						} else if post.Gallery[0].Width == 0 || post.Gallery[0].Height == 0 {
-							<img width="100%" height="100%" loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/>
-						} else {
-							<svg width={ i64(post.Gallery[0].Width) + "px" } height={ i64(post.Gallery[0].Height) + "px" } xmlns="http://www.w3.org/2000/svg">
-								<image width="100%" height="100%" href={ templ.SafeURL(post.Gallery[0].URL) }></image>
-								<desc><img loading="lazy" alt={ T(ctx, "alt.gallery_image") } src={ post.Gallery[0].URL }/></desc>
-							</svg>
-						}
-						if len(post.Gallery) > 1 {
-							<span class="gallery_count">{ strconv.Itoa(len(post.Gallery)) }</span>
-						}
-					</a>
-				</div>
+								if len(post.Gallery) > 1 {
+									<span class="gallery_count">{ strconv.Itoa(len(post.Gallery)) }</span>
+								}
+							</a>
+							if len(post.Gallery) > 1 {
+								<button class="gallery_nav gallery_prev gallery_nav_hidden" type="button" aria-label="Previous">&#x2039;</button>
+								<button class="gallery_nav gallery_next" type="button" aria-label="Next">&#x203A;</button>
+							}
+						</div>
+					</div>
+				}
 			}
 		}
 		if post.PostType != "self" && post.PostType != "image" && post.PostType != "video" && post.PostType != "gif" && post.PostType != "gallery" {
@@ -437,4 +486,19 @@ func bannerKind(k string) string {
 		return "warning"
 	}
 	return k
+}
+
+type galleryItem struct {
+	URL string `json:"u"`
+	W   int64  `json:"w"`
+	H   int64  `json:"h"`
+}
+
+func galleryJSON(g []reddit.GalleryMedia) string {
+	items := make([]galleryItem, len(g))
+	for i, m := range g {
+		items[i] = galleryItem{URL: m.URL, W: m.Width, H: m.Height}
+	}
+	b, _ := json.Marshal(items)
+	return string(b)
 }

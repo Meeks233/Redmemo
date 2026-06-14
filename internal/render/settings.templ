@@ -169,6 +169,11 @@ templ settingsContent(d SettingsPageData) {
 								<input type="checkbox" name="lazy_media" id="lazy_media" checked?={ d.Prefs.LazyMedia == "on" }/>
 							</div>
 							<div class="prefs-group">
+								<label for="show_all_gallery_media" title={ T(ctx, "settings.show_all_gallery_media_title") }>{ T(ctx, "settings.show_all_gallery_media") }</label>
+								<input type="hidden" value="off" name="show_all_gallery_media"/>
+								<input type="checkbox" name="show_all_gallery_media" id="show_all_gallery_media" checked?={ d.Prefs.ShowAllGalleryMedia == "on" }/>
+							</div>
+							<div class="prefs-group">
 								<label for="video_quality" title={ T(ctx, "settings.video_quality_title") }>{ T(ctx, "settings.video_quality") }</label>
 								<select name="video_quality" id="video_quality">
 									<option value="source" selected?={ d.Prefs.VideoQuality == "source" }>{ T(ctx, "video_quality.source") }</option>
@@ -188,6 +193,10 @@ templ settingsContent(d SettingsPageData) {
 								<label for="mute_nsfw_videos" title={ T(ctx, "settings.mute_nsfw_videos_title") }>{ T(ctx, "settings.mute_nsfw_videos") }</label>
 								<input type="hidden" value="off" name="mute_nsfw_videos"/>
 								<input type="checkbox" name="mute_nsfw_videos" id="mute_nsfw_videos" checked?={ d.Prefs.MuteNSFWVideos == "on" }/>
+							</div>
+							<div class="prefs-group">
+								<label for="long_video_threshold" title={ T(ctx, "settings.long_video_threshold_title") }>{ T(ctx, "settings.long_video_threshold") }</label>
+								<input type="number" name="long_video_threshold" id="long_video_threshold" min="0" max="99" step="1" value={ d.Prefs.LongVideoThreshold } style="width:60px"/>
 							</div>
 							<div class="prefs-group">
 								<label for="fixed_navbar">{ T(ctx, "settings.fixed_navbar") }</label>

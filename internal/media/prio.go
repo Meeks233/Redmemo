@@ -18,14 +18,26 @@ const (
 // Generation is a process-monotonic counter incremented on every new media
 // request, so a freshly-issued request has the highest generation and
 // preempts older in-flight downloads. Within one generation, audio wins.
+//
+// Long marks a "large video" download — a video exceeding the user-configured
+// explicitly opted into. Any non-long writer (image, audio, short video)
+// strictly beats any long writer regardless of generation, so an in-flight
+// 30-minute clip never holds up an image thumbnail or a fresh short video
+// the user just scrolled to. Among long writers, the standard Gen/Kind rule
+// applies — newer long requests preempt older long requests.
 type Priority struct {
 	Gen  int64
 	Kind int
+	Long bool
 }
 
-// better reports whether a is strictly higher priority than b. Higher Gen
-// wins; on tie, lower Kind (audio = 0) wins.
+// better reports whether a is strictly higher priority than b. Non-long
+// always beats long. Among same-Long: higher Gen wins; on tie, lower Kind
+// (audio = 0) wins.
 func (a Priority) better(b Priority) bool {
+	if a.Long != b.Long {
+		return !a.Long
+	}
 	if a.Gen != b.Gen {
 		return a.Gen > b.Gen
 	}

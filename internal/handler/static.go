@@ -48,7 +48,7 @@ func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	// the raw query in place — re-encoding via url.Values would alphabetically
 	// sort the params, which invalidates Reddit's HMAC `s=` signature on
 	// preview.redd.it / external-preview.redd.it URLs and yields a 403.
-	dlTitle, upstreamQuery := splitDLTitle(r.URL.RawQuery)
+	dlTitle, long, upstreamQuery := splitClientParams(r.URL.RawQuery)
 	cdnURL := pathToCDNURL(r.URL.Path, upstreamQuery)
 	if cdnURL == "" {
 		http.NotFound(w, r)
@@ -58,6 +58,9 @@ func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	newQuery := "url=" + url.QueryEscape(cdnURL)
 	if dlTitle != "" {
 		newQuery += "&dl_title=" + url.QueryEscape(dlTitle)
+	}
+	if long {
+		newQuery += "&long=1"
 	}
 	r.URL.RawQuery = newQuery
 	h.mediaProxy.ServeMedia(w, r)
@@ -71,8 +74,18 @@ func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 // URL-decoded; the returned query is the remainder, still URL-encoded and
 // in original order.
 func splitDLTitle(raw string) (title, rest string) {
+	title, _, rest = splitClientParams(raw)
+	return title, rest
+}
+
+// splitClientParams strips frontend-only query params (dl_title and long)
+// from raw so they never leak to Reddit's signed media hosts, returning the
+// decoded dl_title, whether long=1 was present, and the remainder query
+// (still URL-encoded, original parameter order preserved — Reddit's HMAC `s=`
+// signature on preview.redd.it / external-preview.redd.it depends on it).
+func splitClientParams(raw string) (title string, long bool, rest string) {
 	if raw == "" {
-		return "", ""
+		return "", false, ""
 	}
 	var parts []string
 	for _, p := range strings.Split(raw, "&") {
@@ -83,17 +96,27 @@ func splitDLTitle(raw string) (title, rest string) {
 		if i := strings.IndexByte(p, '='); i >= 0 {
 			k = p[:i]
 		}
-		if k == "dl_title" {
+		switch k {
+		case "dl_title":
 			if i := strings.IndexByte(p, '='); i >= 0 {
 				if v, err := url.QueryUnescape(p[i+1:]); err == nil {
 					title = v
 				}
 			}
 			continue
+		case "long":
+			// Only consume the param when it is the exact client marker
+			// (long=1); a stray `long` or `long=other` is left in place so
+			// upstream Reddit (or future signed-query schemes) keep their
+			// parameters intact.
+			if i := strings.IndexByte(p, '='); i >= 0 && p[i+1:] == "1" {
+				long = true
+				continue
+			}
 		}
 		parts = append(parts, p)
 	}
-	return title, strings.Join(parts, "&")
+	return title, long, strings.Join(parts, "&")
 }
 
 func pathToCDNURL(path, rawQuery string) string {
@@ -142,9 +165,20 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	// params). Preserve the original query order: re-encoding via url.Values
 	// sorts the params alphabetically, which breaks HMAC signature validation
 	// on Reddit's signed media hosts.
-	dlTitle, upstreamRaw := splitDLTitle(r.URL.RawQuery)
+	dlTitle, long, upstreamRaw := splitClientParams(r.URL.RawQuery)
 	if upstreamRaw != "" {
 		upstream += "?" + upstreamRaw
+	}
+
+	// Re-attach the long=1 hint to the request URL so downstream ServeMedia /
+	// ServeMuxed can tag the priority — Reddit's CDN never sees it (upstream is
+	// already composed above without it).
+	if long {
+		if r.URL.RawQuery == "" {
+			r.URL.RawQuery = "long=1"
+		} else if !strings.Contains(r.URL.RawQuery, "long=1") {
+			r.URL.RawQuery += "&long=1"
+		}
 	}
 
 	if strings.HasSuffix(path, ".m3u8") || strings.Contains(path, "HLSPlaylist") {
@@ -164,6 +198,9 @@ func (h *Handler) handleVideoProxy(w http.ResponseWriter, r *http.Request) {
 	newQuery := "url=" + url.QueryEscape(upstream)
 	if dlTitle != "" {
 		newQuery += "&dl_title=" + url.QueryEscape(dlTitle)
+	}
+	if long {
+		newQuery += "&long=1"
 	}
 	r.URL.RawQuery = newQuery
 	h.mediaProxy.ServeMedia(w, r)
@@ -471,7 +508,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 	} else {
 		details = append(details, "Prefetch: scheduler not initialised")
 	}
-	details = append(details, fmt.Sprintf("Media cap: %d GB", h.cfg.Media.MaxSizeGB))
+	details = append(details, fmt.Sprintf("Media cap: %.1f GB", h.cfg.Media.MaxSizeGB))
 
 	// Redis
 	details = append(details, fmt.Sprintf("Redis: %s", h.cfg.Redis.Addr))
@@ -584,12 +621,30 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var cleanupEvents []render.PrefetchEventView
+	if h.evictor != nil {
+		events := h.evictor.Events.Snapshot()
+		for i := len(events) - 1; i >= 0; i-- {
+			e := events[i]
+			cleanupEvents = append(cleanupEvents, render.PrefetchEventView{
+				Date:         e.DateStr(),
+				Clock:        e.ClockStr(),
+				Time:         e.TimeStr(),
+				RelativeTime: e.RelativeTime(),
+				Level:        string(e.Level),
+				Phase:        e.Phase,
+				Message:      e.Message,
+			})
+		}
+	}
+
 	dd := render.DebugData{
 		Details:        details,
 		TokenBudget:    budget,
 		Tokens:         tokenViews,
 		PrefetchStatus: prefetchStatus,
 		PrefetchEvents: prefetchEvents,
+		CleanupEvents:  cleanupEvents,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

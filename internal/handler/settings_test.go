@@ -197,6 +197,20 @@ func TestNormalizeSettings_PrefetchL3MinComments(t *testing.T) {
 	})
 }
 
+func TestNormalizeSettings_LongVideoThreshold(t *testing.T) {
+	runNumericNorm(t, "long_video_threshold", []numericNormCase{
+		{"zero disables gate", "0", true, "0"},
+		{"min positive", "1", true, "1"},
+		{"max boundary", "99", true, "99"},
+		{"default", "5", true, "5"},
+		{"above range", "100", false, ""},
+		{"negative", "-1", false, ""},
+		{"non-numeric", "five", false, ""},
+		{"empty", "", false, ""},
+		{"float", "5.0", false, ""},
+	})
+}
+
 // TestIsFatalSettingKey pins which keys cause a startup abort when their
 // env_override fails validation. Today only prefetch_l3_min_comments — but the
 // list MUST stay tight, so any addition surfaces here.

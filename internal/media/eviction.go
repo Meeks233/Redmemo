@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +11,19 @@ import (
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
 )
+
+func humanBytes(b int64) string {
+	switch {
+	case b >= 1024*1024*1024:
+		return fmt.Sprintf("%.1f GB", float64(b)/(1024*1024*1024))
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}
 
 // evictionFreeFraction is the share of the configured cap reclaimed in one
 // pass once usage reaches the cap. 0.10 → free 10% of the allowance (e.g. a
@@ -25,6 +39,7 @@ type Evictor struct {
 	cfg        config.MediaConfig
 	mediaStore *store.MediaIndexStore
 	rootPath   string
+	Events     *EventLog
 }
 
 func NewEvictor(cfg config.MediaConfig, mediaStore *store.MediaIndexStore) *Evictor {
@@ -32,10 +47,13 @@ func NewEvictor(cfg config.MediaConfig, mediaStore *store.MediaIndexStore) *Evic
 		cfg:        cfg,
 		mediaStore: mediaStore,
 		rootPath:   cfg.RootPath,
+		Events:     NewEventLog(50),
 	}
 }
 
 func (e *Evictor) Start(ctx context.Context) {
+	e.Events.Addf(LevelInfo, "init", "evictor started, cap %.1f GB, check interval %s",
+		e.cfg.MaxSizeGB, e.cfg.EvictionCheckInterval)
 	go func() {
 		ticker := time.NewTicker(e.cfg.EvictionCheckInterval)
 		defer ticker.Stop()
@@ -65,10 +83,13 @@ func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
 		return 0, 0, err
 	}
 
-	maxBytes := int64(e.cfg.MaxSizeGB) * 1024 * 1024 * 1024
+	maxBytes := int64(e.cfg.MaxSizeGB * 1024 * 1024 * 1024)
 	if maxBytes <= 0 || usedBytes < maxBytes {
 		return 0, 0, nil
 	}
+
+	e.Events.Addf(LevelInfo, "evict", "usage %s exceeds cap %s, starting eviction pass",
+		humanBytes(usedBytes), humanBytes(maxBytes))
 
 	targetFree := int64(float64(maxBytes) * evictionFreeFraction)
 	if targetFree <= 0 {
@@ -77,19 +98,23 @@ func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
 
 	candidates, err := e.mediaStore.SelectEvictionBatch(targetFree, evictionCandidateCap)
 	if err != nil {
+		e.Events.Addf(LevelError, "evict", "select batch: %v", err)
 		return 0, 0, err
 	}
 	if len(candidates) == 0 {
+		e.Events.Add(LevelSkip, "evict", "no eviction candidates found")
 		return 0, 0, nil
 	}
 
 	hashes := make([]string, 0, len(candidates))
+	var removeFails int
 	for _, meta := range candidates {
 		if meta.FilePath == nil {
 			continue
 		}
 		if err := os.Remove(*meta.FilePath); err != nil && !os.IsNotExist(err) {
 			log.Printf("eviction: remove %s: %v", *meta.FilePath, err)
+			removeFails++
 			continue
 		}
 		hashes = append(hashes, meta.Hash)
@@ -100,8 +125,18 @@ func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
 	if len(hashes) > 0 {
 		if err := e.mediaStore.BatchMarkEvicted(hashes); err != nil {
 			log.Printf("eviction: batch mark evicted: %v", err)
+			e.Events.Addf(LevelError, "evict", "batch mark evicted: %v", err)
 		}
 	}
+
+	level := LevelOK
+	msg := fmt.Sprintf("freed %s from %d files (target %s)",
+		humanBytes(freedBytes), evictedCount, humanBytes(targetFree))
+	if removeFails > 0 {
+		level = LevelWarn
+		msg += fmt.Sprintf(", %d remove errors", removeFails)
+	}
+	e.Events.Add(level, "evict", msg)
 	return freedBytes, evictedCount, nil
 }
 

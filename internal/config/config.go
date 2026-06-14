@@ -105,7 +105,7 @@ type RedisConfig struct {
 
 type MediaConfig struct {
 	RootPath              string        `yaml:"root_path"`
-	MaxSizeGB             int           `yaml:"max_size_gb"`
+	MaxSizeGB             float64       `yaml:"max_size_gb"`
 	EvictionCheckInterval time.Duration `yaml:"eviction_check_interval"`
 	EvictionThreshold     float64       `yaml:"eviction_threshold"`
 }
@@ -160,7 +160,7 @@ func defaults() *Config {
 		},
 		Media: MediaConfig{
 			RootPath:              "/data/media",
-			MaxSizeGB:             50,
+			MaxSizeGB:             50.0,
 			EvictionCheckInterval: 5 * time.Minute,
 			EvictionThreshold:     0.8,
 		},
@@ -342,7 +342,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 
 	intEnv := map[string]*int{
-		"REDMEMO_MEDIA_MAX_SIZE_GB":       &cfg.Media.MaxSizeGB,
 		"REDMEMO_RATELIMIT_WINDOW_SIZE":   &cfg.RateLimit.WindowSize,
 		"REDMEMO_RATELIMIT_SAFETY_BUFFER": &cfg.RateLimit.SafetyBuffer,
 		"REDMEMO_HRLIMIT_L1_THRESHOLD":    &cfg.HRLimit.L1Threshold,
@@ -379,6 +378,13 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 
+	if v := os.Getenv("REDMEMO_MEDIA_MAX_SIZE_GB"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Media.MaxSizeGB = f
+		} else {
+			log.Printf("config: REDMEMO_MEDIA_MAX_SIZE_GB=%q is not a valid float; ignoring", v)
+		}
+	}
 	if v := os.Getenv("REDMEMO_MEDIA_EVICTION_THRESHOLD"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.Media.EvictionThreshold = f
@@ -446,7 +452,7 @@ func parseBool(s string) bool {
 // String returns a redacted summary of the config for logging.
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config{server=%s, legacy_sync=%v/%s, postgres=***, redis=%s, media=%s/%dGB, oauth=%d tokens, prefetch=%v}",
+		"Config{server=%s, legacy_sync=%v/%s, postgres=***, redis=%s, media=%s/%.1fGB, oauth=%d tokens, prefetch=%v}",
 		c.Server.Listen,
 		c.Legacy.SyncEnabled, c.Legacy.ResolvedInstance(),
 		c.Redis.Addr,

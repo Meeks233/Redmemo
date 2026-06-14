@@ -43,6 +43,8 @@ type Proxy struct {
 	// is eventually retried.
 	failMu   sync.Mutex
 	failures map[string]time.Time
+
+	cleanupLog *EventLog
 }
 
 const permFailureTTL = 1 * time.Hour
@@ -87,7 +89,14 @@ func (p *Proxy) ServeMedia(w http.ResponseWriter, r *http.Request) {
 	// Every freshly-arrived media request gets a new generation so it preempts
 	// older in-flight downloads at the global priority gate. Images/video go in
 	// at video tier; standalone audio uses ServeSeparateAudio which tags audio.
-	r = r.WithContext(WithPriority(r.Context(), Priority{Gen: NextGen(), Kind: KindVideo}))
+	// long=1 marks a long clip the frontend has explicitly unlocked — those
+	// fall to the bottom of the gate so they never block short media (see
+	// Priority.better).
+	r = r.WithContext(WithPriority(r.Context(), Priority{
+		Gen:  NextGen(),
+		Kind: KindVideo,
+		Long: r.URL.Query().Get("long") == "1",
+	}))
 	originalURL := html.UnescapeString(r.URL.Query().Get("url"))
 	if originalURL == "" {
 		http.Error(w, "missing url parameter", http.StatusBadRequest)
@@ -213,15 +222,23 @@ func isNonMediaMIME(mime string) bool {
 	}
 }
 
+func (p *Proxy) SetCleanupLog(l *EventLog) { p.cleanupLog = l }
+
 // purge drops the media_index row (and its on-disk file) for originalURL.
 func (p *Proxy) purge(originalURL string) {
 	fp, err := p.mediaStore.Delete(originalURL)
 	if err != nil {
 		log.Printf("media: purge poisoned row for %s: %v", originalURL, err)
+		if p.cleanupLog != nil {
+			p.cleanupLog.Addf(LevelError, "purge", "delete %s: %v", originalURL, err)
+		}
 		return
 	}
 	if fp != nil {
 		os.Remove(*fp)
+		if p.cleanupLog != nil {
+			p.cleanupLog.Addf(LevelOK, "purge", "removed poisoned cache entry: %s", originalURL)
+		}
 	}
 }
 

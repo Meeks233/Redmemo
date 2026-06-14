@@ -1606,201 +1606,229 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				return templ_7745c5c3_Err
 			}
 		} else if post.PostType == "video" || post.PostType == "gif" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, "<div class=\"post_media_content\"><video class=\"post_media_video\" src=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, "<div class=\"post_media_content\"><video class=\"post_media_video\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var95 string
-			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 276, Col: 100}
+			if isLongVideo(post, longVideoThreshold(prefs)) {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, " src=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var95 string
+				templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithLongMark(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 277, Col: 115}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, "\" preload=\"none\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, " src=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var96 string
+				templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 280, Col: 101}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "\" controls")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, " controls")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if videoMuted(post, prefs) {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, " muted")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, " muted")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			if prefs.AutoplayVideos == "on" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, " data-viewport-autoplay")
+			if !isLongVideo(post, longVideoThreshold(prefs)) && prefs.AutoplayVideos == "on" {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, " data-viewport-autoplay")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, " loop><a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, " loop><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var96 templ.SafeURL
-			templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)))
+			var templ_7745c5c3_Var97 templ.SafeURL
+			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 285, Col: 75}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var97 string
-			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "media.video"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 285, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 290, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, "</a></video></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var98 string
+			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "media.video"))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 290, Col: 101}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "</a></video></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if post.PostType == "gallery" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, "<div class=\"gallery\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, "<div class=\"gallery\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, g := range post.Gallery {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "<figure><a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, "<figure><a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var98 templ.SafeURL
-				templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(g.URL))
+				var templ_7745c5c3_Var99 templ.SafeURL
+				templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(g.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 291, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 296, Col: 36}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, "\"><img loading=\"lazy\" alt=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var99 string
-				templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.gallery_image"))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 291, Col: 92}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "\" src=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, "\"><img loading=\"lazy\" alt=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var100 string
-				templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(g.URL)
+				templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.gallery_image"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 291, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 296, Col: 92}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, "\"></a><figcaption><p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, "\" src=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var101 string
-				templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(g.Caption)
+				templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(g.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 293, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 296, Col: 106}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, "</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "\"></a><figcaption><p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var102 string
+				templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(g.Caption)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 298, Col: 21}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, "</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if g.OutboundURL != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, "<p><a class=\"outbound_url\" href=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, "<p><a class=\"outbound_url\" href=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var102 templ.SafeURL
-					templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(g.OutboundURL))
+					var templ_7745c5c3_Var103 templ.SafeURL
+					templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(g.OutboundURL))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 295, Col: 70}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, "\" rel=\"nofollow\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var103 string
-					templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinStringErrs(g.OutboundURL)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 295, Col: 103}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 300, Col: 70}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "</a></p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "\" rel=\"nofollow\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var104 string
+					templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(g.OutboundURL)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 300, Col: 103}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "</a></p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, "</figcaption></figure>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "</figcaption></figure>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if post.PostType == "link" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "<a id=\"post_url\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "<a id=\"post_url\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var104 templ.SafeURL
-			templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
+			var templ_7745c5c3_Var105 templ.SafeURL
+			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 302, Col: 56}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "\" rel=\"nofollow\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var105 string
-			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(post.Media.URL)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 302, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 307, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "</a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\" rel=\"nofollow\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var106 string
+			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(post.Media.URL)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 307, Col: 90}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, "<div class=\"post_body\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "<div class=\"post_body\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1812,274 +1840,274 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "</div><div class=\"post_score\" title=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "</div><div class=\"post_score\" title=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var106 string
-		templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Score[1])
+		var templ_7745c5c3_Var107 string
+		templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Score[1])
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 308, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 313, Col: 47}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if prefs.HideScore != "on" {
-			var templ_7745c5c3_Var107 string
-			templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(post.Score[0])
+			var templ_7745c5c3_Var108 string
+			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(post.Score[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 310, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 315, Col: 19}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "&#x2022; ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "&#x2022; ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "<span class=\"label\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "<span class=\"label\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var108 string
-		templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvotes"))
+		var templ_7745c5c3_Var109 string
+		templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvotes"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 314, Col: 53}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "</span></div><div class=\"post_footer\"><ul id=\"post_links\"><li><a href=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var109 templ.SafeURL
-		templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 318, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 319, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "\"><span class=\"desktop_item\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "</span></div><div class=\"post_footer\"><ul id=\"post_links\"><li><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var110 string
-		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink"))
+		var templ_7745c5c3_Var110 templ.SafeURL
+		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 318, Col: 103}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 323, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "</span><span class=\"mobile_item\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\"><span class=\"desktop_item\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var111 string
-		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink_short"))
+		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 318, Col: 170}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 323, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "</span></a></li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "</span><span class=\"mobile_item\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var112 string
+		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink_short"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 323, Col: 170}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "</span></a></li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if post.NumDuplicates > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "<li><a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "<li><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var112 templ.SafeURL
-			templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/r/" + post.Community + "/duplicates/" + post.ID))
+			var templ_7745c5c3_Var113 templ.SafeURL
+			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/r/" + post.Community + "/duplicates/" + post.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 320, Col: 83}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "\"><span class=\"desktop_item\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var113 string
-			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates"))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 320, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 325, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "</span><span class=\"mobile_item\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "\"><span class=\"desktop_item\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var114 string
-			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates_short"))
+			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 320, Col: 208}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 325, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "</span></a></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "</span><span class=\"mobile_item\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		if post.PostType == "link" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "<li class=\"desktop_item\"><a target=\"_blank\" href=\"")
+			var templ_7745c5c3_Var115 string
+			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var115 templ.SafeURL
-			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 323, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 325, Col: 208}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "</span></a></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var116 string
-			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archiveis"))
+		}
+		if post.PostType == "link" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<li class=\"desktop_item\"><a target=\"_blank\" href=\"")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 323, Col: 145}
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var116 templ.SafeURL
+			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 328, Col: 116}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, "</a></li><li class=\"mobile_item\"><a target=\"_blank\" href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var117 templ.SafeURL
-			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
+			var templ_7745c5c3_Var117 string
+			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archiveis"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 324, Col: 115}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 328, Col: 145}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "</a></li><li class=\"mobile_item\"><a target=\"_blank\" href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var118 string
-			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archive_short"))
+			var templ_7745c5c3_Var118 templ.SafeURL
+			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 324, Col: 148}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 115}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "</a></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		if post.PostType == "video" || post.PostType == "gif" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "<li><a href=\"")
+			var templ_7745c5c3_Var119 string
+			templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archive_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var119 templ.SafeURL
-			templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 328, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 148}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "\" download><span class=\"mobile_item\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "</a></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var120 string
-			templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download_short"))
+		}
+		if post.PostType == "video" || post.PostType == "gif" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "<li><a href=\"")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 64}
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var120 templ.SafeURL
+			templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 333, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "</span> <span class=\"desktop_item\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "\" download><span class=\"mobile_item\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var121 string
-			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download"))
+			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 330, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 334, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "</span></a></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "</span> <span class=\"desktop_item\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var122 string
+			templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download"))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 335, Col: 59}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "</span></a></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, "</ul><p>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var122 string
-		templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(i64(post.UpvoteRatio))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 335, Col: 29}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "%<span id=\"upvoted\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "</ul><p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var123 string
-		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvoted"))
+		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(i64(post.UpvoteRatio))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 335, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 340, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "</span></p></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "%<span id=\"upvoted\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var124 string
+		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvoted"))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 340, Col: 81}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "</span></p></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2111,12 +2139,12 @@ func deeperRepliesScript() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var124 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var124 == nil {
-			templ_7745c5c3_Var124 = templ.NopComponent
+		templ_7745c5c3_Var125 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var125 == nil {
+			templ_7745c5c3_Var125 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "<script>\n\t(function(){\n\t\tvar list = document.getElementById('commentList');\n\t\tif (!list) return;\n\t\tvar sortSel = document.getElementById('commentSortSelect');\n\t\tfunction currentSort(){ return sortSel ? sortSel.value : ''; }\n\t\tfunction parsePostLink(link){\n\t\t\tvar m = /^\\/r\\/([^/]+)\\/comments\\/([^/]+)\\//.exec(link || '');\n\t\t\treturn m ? { sub: m[1], postId: m[2] } : null;\n\t\t}\n\t\tfunction applyLabel(btn, step){\n\t\t\tvar tpl = btn.dataset.labelTpl || '';\n\t\t\tif (!tpl) return;\n\t\t\tbtn.textContent = '→ ' + tpl.replace('{n}', String(step));\n\t\t}\n\t\tfunction updateRemainingBadge(btn, remaining){\n\t\t\tvar sib = btn.nextElementSibling;\n\t\t\tvar hasBadge = sib && sib.classList && sib.classList.contains('deeper_replies_remaining');\n\t\t\tif (remaining > 5) {\n\t\t\t\tvar tpl = btn.dataset.remainingTpl || '';\n\t\t\t\tvar text = tpl ? tpl.replace('{n}', String(remaining)) : (remaining + ' left');\n\t\t\t\tif (hasBadge) {\n\t\t\t\t\tsib.textContent = text;\n\t\t\t\t} else {\n\t\t\t\t\tvar span = document.createElement('span');\n\t\t\t\t\tspan.className = 'deeper_replies_remaining';\n\t\t\t\t\tspan.textContent = text;\n\t\t\t\t\tbtn.parentNode.insertBefore(span, btn.nextSibling);\n\t\t\t\t}\n\t\t\t} else if (hasBadge) {\n\t\t\t\tsib.remove();\n\t\t\t}\n\t\t}\n\t\tlist.addEventListener('click', function(ev){\n\t\t\tvar btn = ev.target.closest('.deeper_replies');\n\t\t\tif (!btn || !list.contains(btn) || btn.disabled) return;\n\t\t\tev.preventDefault();\n\t\t\tvar info = parsePostLink(btn.dataset.postlink);\n\t\t\tif (!info) return;\n\t\t\t// `children` is the FULL list of hidden child IDs from the original\n\t\t\t// Reddit \"more\" stub. Each click pops the first `step` IDs off the\n\t\t\t// front, sends just those to /api/morechildren, then trims them out\n\t\t\t// of data-children so the next click picks up where this one left\n\t\t\t// off. One Reddit call per click, exactly N comments per call.\n\t\t\tvar remainingIDs = (btn.dataset.children || '').split(',').filter(Boolean);\n\t\t\tif (remainingIDs.length === 0) { btn.remove(); return; }\n\t\t\tbtn.disabled = true;\n\t\t\tvar step = parseInt(btn.dataset.step, 10) || 5;\n\t\t\tif (step > remainingIDs.length) step = remainingIDs.length;\n\t\t\tvar batch = remainingIDs.slice(0, step);\n\t\t\tvar url = '/api/replies/' + info.sub + '/' + info.postId +\n\t\t\t\t'?sort=' + encodeURIComponent(currentSort()) +\n\t\t\t\t'&children=' + encodeURIComponent(batch.join(','));\n\t\t\tfetch(url).then(function(r){\n\t\t\t\tif (r.headers.get('X-Degraded')) { btn.disabled = false; return null; }\n\t\t\t\treturn r.text().then(function(html){ return {\n\t\t\t\t\thtml: html,\n\t\t\t\t\tadded: parseInt(r.headers.get('X-Added'), 10) || 0,\n\t\t\t\t}; });\n\t\t\t}).then(function(res){\n\t\t\t\tif (res === null) return;\n\t\t\t\tif (res.added > 0 && res.html.trim()) {\n\t\t\t\t\tvar tmp = document.createElement('div');\n\t\t\t\t\ttmp.innerHTML = res.html;\n\t\t\t\t\twhile (tmp.firstChild) btn.parentNode.insertBefore(tmp.firstChild, btn);\n\t\t\t\t}\n\t\t\t\tvar leftover = remainingIDs.slice(step);\n\t\t\t\tif (leftover.length === 0) {\n\t\t\t\t\tvar sib = btn.nextElementSibling;\n\t\t\t\t\tif (sib && sib.classList && sib.classList.contains('deeper_replies_remaining')) sib.remove();\n\t\t\t\t\tbtn.remove();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tbtn.dataset.children = leftover.join(',');\n\t\t\t\tvar next = leftover.length > 100 ? 100 : leftover.length;\n\t\t\t\tbtn.dataset.step = next;\n\t\t\t\tapplyLabel(btn, next);\n\t\t\t\tupdateRemainingBadge(btn, leftover.length);\n\t\t\t\tbtn.disabled = false;\n\t\t\t}).catch(function(){ btn.disabled = false; });\n\t\t});\n\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "<script>\n\t(function(){\n\t\tvar list = document.getElementById('commentList');\n\t\tif (!list) return;\n\t\tvar sortSel = document.getElementById('commentSortSelect');\n\t\tfunction currentSort(){ return sortSel ? sortSel.value : ''; }\n\t\tfunction parsePostLink(link){\n\t\t\tvar m = /^\\/r\\/([^/]+)\\/comments\\/([^/]+)\\//.exec(link || '');\n\t\t\treturn m ? { sub: m[1], postId: m[2] } : null;\n\t\t}\n\t\tfunction applyLabel(btn, step){\n\t\t\tvar tpl = btn.dataset.labelTpl || '';\n\t\t\tif (!tpl) return;\n\t\t\tbtn.textContent = '→ ' + tpl.replace('{n}', String(step));\n\t\t}\n\t\tfunction updateRemainingBadge(btn, remaining){\n\t\t\tvar sib = btn.nextElementSibling;\n\t\t\tvar hasBadge = sib && sib.classList && sib.classList.contains('deeper_replies_remaining');\n\t\t\tif (remaining > 5) {\n\t\t\t\tvar tpl = btn.dataset.remainingTpl || '';\n\t\t\t\tvar text = tpl ? tpl.replace('{n}', String(remaining)) : (remaining + ' left');\n\t\t\t\tif (hasBadge) {\n\t\t\t\t\tsib.textContent = text;\n\t\t\t\t} else {\n\t\t\t\t\tvar span = document.createElement('span');\n\t\t\t\t\tspan.className = 'deeper_replies_remaining';\n\t\t\t\t\tspan.textContent = text;\n\t\t\t\t\tbtn.parentNode.insertBefore(span, btn.nextSibling);\n\t\t\t\t}\n\t\t\t} else if (hasBadge) {\n\t\t\t\tsib.remove();\n\t\t\t}\n\t\t}\n\t\tlist.addEventListener('click', function(ev){\n\t\t\tvar btn = ev.target.closest('.deeper_replies');\n\t\t\tif (!btn || !list.contains(btn) || btn.disabled) return;\n\t\t\tev.preventDefault();\n\t\t\tvar info = parsePostLink(btn.dataset.postlink);\n\t\t\tif (!info) return;\n\t\t\t// `children` is the FULL list of hidden child IDs from the original\n\t\t\t// Reddit \"more\" stub. Each click pops the first `step` IDs off the\n\t\t\t// front, sends just those to /api/morechildren, then trims them out\n\t\t\t// of data-children so the next click picks up where this one left\n\t\t\t// off. One Reddit call per click, exactly N comments per call.\n\t\t\tvar remainingIDs = (btn.dataset.children || '').split(',').filter(Boolean);\n\t\t\tif (remainingIDs.length === 0) { btn.remove(); return; }\n\t\t\tbtn.disabled = true;\n\t\t\tvar step = parseInt(btn.dataset.step, 10) || 5;\n\t\t\tif (step > remainingIDs.length) step = remainingIDs.length;\n\t\t\tvar batch = remainingIDs.slice(0, step);\n\t\t\tvar url = '/api/replies/' + info.sub + '/' + info.postId +\n\t\t\t\t'?sort=' + encodeURIComponent(currentSort()) +\n\t\t\t\t'&children=' + encodeURIComponent(batch.join(','));\n\t\t\tfetch(url).then(function(r){\n\t\t\t\tif (r.headers.get('X-Degraded')) { btn.disabled = false; return null; }\n\t\t\t\treturn r.text().then(function(html){ return {\n\t\t\t\t\thtml: html,\n\t\t\t\t\tadded: parseInt(r.headers.get('X-Added'), 10) || 0,\n\t\t\t\t}; });\n\t\t\t}).then(function(res){\n\t\t\t\tif (res === null) return;\n\t\t\t\tif (res.added > 0 && res.html.trim()) {\n\t\t\t\t\tvar tmp = document.createElement('div');\n\t\t\t\t\ttmp.innerHTML = res.html;\n\t\t\t\t\twhile (tmp.firstChild) btn.parentNode.insertBefore(tmp.firstChild, btn);\n\t\t\t\t}\n\t\t\t\tvar leftover = remainingIDs.slice(step);\n\t\t\t\tif (leftover.length === 0) {\n\t\t\t\t\tvar sib = btn.nextElementSibling;\n\t\t\t\t\tif (sib && sib.classList && sib.classList.contains('deeper_replies_remaining')) sib.remove();\n\t\t\t\t\tbtn.remove();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tbtn.dataset.children = leftover.join(',');\n\t\t\t\tvar next = leftover.length > 100 ? 100 : leftover.length;\n\t\t\t\tbtn.dataset.step = next;\n\t\t\t\tapplyLabel(btn, next);\n\t\t\t\tupdateRemainingBadge(btn, leftover.length);\n\t\t\t\tbtn.disabled = false;\n\t\t\t}).catch(function(){ btn.disabled = false; });\n\t\t});\n\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2146,117 +2174,117 @@ func loadMoreComments(d PostPageData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var125 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var125 == nil {
-			templ_7745c5c3_Var125 = templ.NopComponent
+		templ_7745c5c3_Var126 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var126 == nil {
+			templ_7745c5c3_Var126 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline && d.MoreComments > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "<div id=\"loadMoreCommentsWrap\" style=\"text-align:center;margin:20px 0;\"><button id=\"loadMoreCommentsBtn\" data-sub=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var126 string
-			templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.Community)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 444, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var126)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\" data-postid=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "<div id=\"loadMoreCommentsWrap\" style=\"text-align:center;margin:20px 0;\"><button id=\"loadMoreCommentsBtn\" data-sub=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var127 string
-			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.ID)
+			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.Community)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 445, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 449, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" data-sort=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "\" data-postid=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var128 string
-			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Sort)
+			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 446, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 450, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\" data-loaded=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "\" data-sort=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var129 string
-			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(len(d.Comments)))
+			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Sort)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 447, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 451, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var129)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "\" data-step=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "\" data-loaded=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var130 string
-			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(loadMoreStep(d.MoreComments)))
+			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(len(d.Comments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 448, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 452, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var130)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "\" data-remaining=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "\" data-step=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var131 string
-			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(d.MoreComments))
+			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(loadMoreStep(d.MoreComments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 449, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 453, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "\" data-label-tpl=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "\" data-remaining=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var132 string
-			templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "comments.load_more", "{n}"))
+			templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(d.MoreComments))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 450, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 454, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var132)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "\" data-label-tpl=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var133 string
-			templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.load_more", loadMoreStep(d.MoreComments)))
+			templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "comments.load_more", "{n}"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 451, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 455, Col: 56}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "</button> <span id=\"loadMoreCommentsStatus\" style=\"margin-left:8px;color:var(--muted)\"></span></div><script>\n\t\t(function(){\n\t\t\tvar btn = document.getElementById('loadMoreCommentsBtn');\n\t\t\tif (!btn) return;\n\t\t\tvar list = document.getElementById('commentList');\n\t\t\tvar status = document.getElementById('loadMoreCommentsStatus');\n\t\t\tvar labelTpl = btn.dataset.labelTpl || '';\n\t\t\tfunction applyLabel(step){\n\t\t\t\tif (!labelTpl) return;\n\t\t\t\tbtn.textContent = labelTpl.replace('{n}', String(step));\n\t\t\t}\n\t\t\tbtn.addEventListener('click', function(){\n\t\t\t\tif (btn.disabled) return;\n\t\t\t\tbtn.disabled = true;\n\t\t\t\tstatus.textContent = '...';\n\t\t\t\tvar loaded = parseInt(btn.dataset.loaded, 10) || 0;\n\t\t\t\tvar step = parseInt(btn.dataset.step, 10) || 5;\n\t\t\t\tvar url = '/api/comments/' + btn.dataset.sub + '/' + btn.dataset.postid +\n\t\t\t\t\t'?sort=' + encodeURIComponent(btn.dataset.sort || '') +\n\t\t\t\t\t'&loaded=' + loaded + '&step=' + step;\n\t\t\t\tfetch(url).then(function(r){\n\t\t\t\t\tvar reason = r.headers.get('X-Degraded');\n\t\t\t\t\tif (reason) { status.textContent = reason; btn.disabled = false; return null; }\n\t\t\t\t\treturn r.text().then(function(html){ return {\n\t\t\t\t\t\thtml: html,\n\t\t\t\t\t\thasMore: r.headers.get('X-Has-More'),\n\t\t\t\t\t\tadded: parseInt(r.headers.get('X-Added'), 10) || 0,\n\t\t\t\t\t\tremaining: parseInt(r.headers.get('X-Remaining'), 10) || 0,\n\t\t\t\t\t}; });\n\t\t\t\t}).then(function(res){\n\t\t\t\t\tif (res === null) return;\n\t\t\t\t\tif (res.added > 0 && res.html.trim()) {\n\t\t\t\t\t\tvar tmp = document.createElement('div');\n\t\t\t\t\t\ttmp.innerHTML = res.html;\n\t\t\t\t\t\twhile (tmp.firstChild) list.appendChild(tmp.firstChild);\n\t\t\t\t\t\tbtn.dataset.loaded = (loaded + res.added);\n\t\t\t\t\t}\n\t\t\t\t\tif (res.hasMore === '1' && res.remaining > 0) {\n\t\t\t\t\t\tvar next = res.remaining > 500 ? 500 : res.remaining;\n\t\t\t\t\t\tbtn.dataset.step = next;\n\t\t\t\t\t\tbtn.dataset.remaining = res.remaining;\n\t\t\t\t\t\tapplyLabel(next);\n\t\t\t\t\t\tstatus.textContent = '';\n\t\t\t\t\t\tbtn.disabled = false;\n\t\t\t\t\t} else {\n\t\t\t\t\t\tvar wrap = document.getElementById('loadMoreCommentsWrap');\n\t\t\t\t\t\tif (wrap) wrap.remove();\n\t\t\t\t\t}\n\t\t\t\t}).catch(function(){ status.textContent = 'error'; btn.disabled = false; });\n\t\t\t});\n\t\t})();\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var134 string
+			templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.load_more", loadMoreStep(d.MoreComments)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 456, Col: 64}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "</button> <span id=\"loadMoreCommentsStatus\" style=\"margin-left:8px;color:var(--muted)\"></span></div><script>\n\t\t(function(){\n\t\t\tvar btn = document.getElementById('loadMoreCommentsBtn');\n\t\t\tif (!btn) return;\n\t\t\tvar list = document.getElementById('commentList');\n\t\t\tvar status = document.getElementById('loadMoreCommentsStatus');\n\t\t\tvar labelTpl = btn.dataset.labelTpl || '';\n\t\t\tfunction applyLabel(step){\n\t\t\t\tif (!labelTpl) return;\n\t\t\t\tbtn.textContent = labelTpl.replace('{n}', String(step));\n\t\t\t}\n\t\t\tbtn.addEventListener('click', function(){\n\t\t\t\tif (btn.disabled) return;\n\t\t\t\tbtn.disabled = true;\n\t\t\t\tstatus.textContent = '...';\n\t\t\t\tvar loaded = parseInt(btn.dataset.loaded, 10) || 0;\n\t\t\t\tvar step = parseInt(btn.dataset.step, 10) || 5;\n\t\t\t\tvar url = '/api/comments/' + btn.dataset.sub + '/' + btn.dataset.postid +\n\t\t\t\t\t'?sort=' + encodeURIComponent(btn.dataset.sort || '') +\n\t\t\t\t\t'&loaded=' + loaded + '&step=' + step;\n\t\t\t\tfetch(url).then(function(r){\n\t\t\t\t\tvar reason = r.headers.get('X-Degraded');\n\t\t\t\t\tif (reason) { status.textContent = reason; btn.disabled = false; return null; }\n\t\t\t\t\treturn r.text().then(function(html){ return {\n\t\t\t\t\t\thtml: html,\n\t\t\t\t\t\thasMore: r.headers.get('X-Has-More'),\n\t\t\t\t\t\tadded: parseInt(r.headers.get('X-Added'), 10) || 0,\n\t\t\t\t\t\tremaining: parseInt(r.headers.get('X-Remaining'), 10) || 0,\n\t\t\t\t\t}; });\n\t\t\t\t}).then(function(res){\n\t\t\t\t\tif (res === null) return;\n\t\t\t\t\tif (res.added > 0 && res.html.trim()) {\n\t\t\t\t\t\tvar tmp = document.createElement('div');\n\t\t\t\t\t\ttmp.innerHTML = res.html;\n\t\t\t\t\t\twhile (tmp.firstChild) list.appendChild(tmp.firstChild);\n\t\t\t\t\t\tbtn.dataset.loaded = (loaded + res.added);\n\t\t\t\t\t}\n\t\t\t\t\tif (res.hasMore === '1' && res.remaining > 0) {\n\t\t\t\t\t\tvar next = res.remaining > 500 ? 500 : res.remaining;\n\t\t\t\t\t\tbtn.dataset.step = next;\n\t\t\t\t\t\tbtn.dataset.remaining = res.remaining;\n\t\t\t\t\t\tapplyLabel(next);\n\t\t\t\t\t\tstatus.textContent = '';\n\t\t\t\t\t\tbtn.disabled = false;\n\t\t\t\t\t} else {\n\t\t\t\t\t\tvar wrap = document.getElementById('loadMoreCommentsWrap');\n\t\t\t\t\t\tif (wrap) wrap.remove();\n\t\t\t\t\t}\n\t\t\t\t}).catch(function(){ status.textContent = 'error'; btn.disabled = false; });\n\t\t\t});\n\t\t})();\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

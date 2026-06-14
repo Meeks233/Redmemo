@@ -225,6 +225,13 @@ func main() {
 
 	mediaProxy := media.NewProxy(cfg.Media, mediaIndexStore, mediaUnavailableStore, redisCache, sessionUA)
 	evictor := media.NewEvictor(cfg.Media, mediaIndexStore)
+	mediaProxy.SetCleanupLog(evictor.Events)
+
+	// Let the long-video gate consult the on-disk cache: a long clip whose
+	// bytes are already resident skips the click-to-load placeholder and renders
+	// as a live <video> that streams from local cache — no upstream fetch to
+	// defer, nothing the gate would protect.
+	renderer.SetMediaCachedFn(mediaProxy.IsCached)
 
 	archiver := archive.NewService(postStore, commentStore, subStore)
 	subStatusStore := store.NewSubStatusStore(db)
@@ -260,7 +267,7 @@ func main() {
 	h := handler.New(
 		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
-		mediaProxy, archiver, prefetcher, subStatusStore, subIconStore, cfg,
+		mediaProxy, archiver, prefetcher, evictor, subStatusStore, subIconStore, cfg,
 	).WithAuth(authMgr)
 
 	srv := &http.Server{

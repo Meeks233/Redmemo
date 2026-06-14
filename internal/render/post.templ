@@ -273,12 +273,17 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 			<div class="post_media_content">
 				<video
 					class="post_media_video"
-					src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
+					if isLongVideo(post, longVideoThreshold(prefs)) {
+						src={ WithLongMark(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)) }
+						preload="none"
+					} else {
+						src={ WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title) }
+					}
 					controls
 					if videoMuted(post, prefs) {
 						muted
 					}
-					if prefs.AutoplayVideos == "on" {
+					if !isLongVideo(post, longVideoThreshold(prefs)) && prefs.AutoplayVideos == "on" {
 						data-viewport-autoplay
 					}
 					loop

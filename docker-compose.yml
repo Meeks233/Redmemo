@@ -29,6 +29,9 @@ services:
       - REDMEMO_AUTH_BYPASS=on
       - REDMEMO_SERVER_SECRET=${SERVER_SECRET:-test-secret-do-not-use-in-prod}
 
+      # ---- Media cache cap (500 MB for eviction testing) ----------------
+      - REDMEMO_MEDIA_MAX_SIZE_GB=0.5
+
       # ---- Test-friendly defaults --------------------------------------
       - REDMEMO_DEFAULT_ENABLE_DEBUG=on
       - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=off

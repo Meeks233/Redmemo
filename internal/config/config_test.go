@@ -83,8 +83,8 @@ media:
 	if cfg.RateLimit.SafetyBuffer != 50 {
 		t.Errorf("default SafetyBuffer = %d, want 50", cfg.RateLimit.SafetyBuffer)
 	}
-	if cfg.Media.MaxSizeGB != 50 {
-		t.Errorf("default MaxSizeGB = %d, want 50", cfg.Media.MaxSizeGB)
+	if cfg.Media.MaxSizeGB != 50.0 {
+		t.Errorf("default MaxSizeGB = %f, want 50", cfg.Media.MaxSizeGB)
 	}
 	if cfg.Media.EvictionThreshold != 0.8 {
 		t.Errorf("default EvictionThreshold = %f, want 0.8", cfg.Media.EvictionThreshold)

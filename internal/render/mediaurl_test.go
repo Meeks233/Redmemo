@@ -65,6 +65,26 @@ func TestWithDownloadTitle(t *testing.T) {
 	}
 }
 
+func TestWithLongMark(t *testing.T) {
+	cases := []struct {
+		name, url, want string
+	}{
+		{"empty", "", ""},
+		{"appends_with_qmark", "/vid/abc.mp4", "/vid/abc.mp4?long=1"},
+		{"appends_with_amp", "/vid/abc.mp4?source=tag", "/vid/abc.mp4?source=tag&long=1"},
+		{"already_marked", "/vid/abc.mp4?long=1", "/vid/abc.mp4?long=1"},
+		{"already_marked_with_others", "/vid/abc.mp4?s=1&long=1&t=2", "/vid/abc.mp4?s=1&long=1&t=2"},
+		{"fragment_untouched", "/vid/abc.mp4#xyz", "/vid/abc.mp4#xyz"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := WithLongMark(c.url); got != c.want {
+				t.Fatalf("WithLongMark(%q) = %q, want %q", c.url, got, c.want)
+			}
+		})
+	}
+}
+
 func TestQueryEscape(t *testing.T) {
 	// Sanity: every byte 0..255 either passes through unchanged (unreserved)
 	// or becomes a 3-byte %HH sequence. Output must always be ASCII-printable.

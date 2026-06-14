@@ -92,6 +92,13 @@ type seenEntry struct {
 	Cursor   string   `json:"c"`
 	Tokens   []string `json:"t"`
 	MediaKey string   `json:"m,omitempty"`
+	// Author is the lowercased author name of the cluster head. When
+	// non-empty it acts as a secondary fold key: a later post by the same
+	// author with very-high title similarity is treated as the same
+	// content even if its MediaKey drifted (Reddit mints a fresh asset ID
+	// for every re-upload, so spam-crossposting the same image to N subs
+	// yields N different MediaKeys for visually identical content).
+	Author string `json:"a,omitempty"`
 }
 
 // seenTitles maps titleFingerprint → entry. The fingerprint stays the same
@@ -166,31 +173,48 @@ func applySessionDedup(posts []reddit.Post, seen seenTitles, cursor string) []re
 			continue
 		}
 		mk := reddit.PrimaryMediaKey(&posts[i])
-		if matchesSeen(tokens, mk, seen) {
+		author := strings.ToLower(strings.TrimSpace(p.Author.Name))
+		if author == "[deleted]" || author == "deleted" {
+			author = ""
+		}
+		if matchesSeen(tokens, mk, author, seen) {
 			continue
 		}
 		fp := titleFingerprint(strings.Join(tokens, " ") + "\x00" + mk)
-		seen[fp] = seenEntry{Cursor: cursor, Tokens: tokens, MediaKey: mk}
+		seen[fp] = seenEntry{Cursor: cursor, Tokens: tokens, MediaKey: mk, Author: author}
 		out = append(out, p)
 	}
 	return out
 }
 
-// matchesSeen reports whether (tokens, mediaKey) collides with any entry in
-// the session's seen set. Title-token Jaccard must clear the cluster
-// threshold AND the media keys must match — different media is different
-// content even when the wording lines up, so a coincidental title overlap
-// (or a genuine second repost of distinct media) is allowed through.
+// matchesSeen reports whether (tokens, mediaKey, author) collides with any
+// entry in the session's seen set. Two ways to match — the same shape as
+// FoldReposts so in-page and cross-page folding agree:
+//
+//  1. Same MediaKey AND title-Jaccard ≥ JaccardThreshold — a genuine
+//     repost of the same asset.
+//  2. Same Author AND title-Jaccard ≥ jaccardThresholdSameAuthor — the
+//     spam-crossposting case where one user re-uploads the same image
+//     to N subs; Reddit assigns each upload its own asset ID so MediaKey
+//     drifts even though the content is identical.
 //
 // Callers must already have dropped same-cursor entries before invoking
 // this. O(|seen| · t) per candidate; for realistic session sizes (≤ a few
 // hundred entries) this is negligible.
-func matchesSeen(tokens []string, mediaKey string, seen seenTitles) bool {
+func matchesSeen(tokens []string, mediaKey, author string, seen seenTitles) bool {
 	for _, e := range seen {
-		if e.MediaKey != mediaKey {
-			continue
+		sim := reddit.JaccardTokens(tokens, e.Tokens)
+		if sim >= reddit.JaccardThreshold() {
+			if e.MediaKey == mediaKey {
+				return true
+			}
+			if author != "" && e.Author == author && sim >= reddit.JaccardThresholdSameAuthor() {
+				return true
+			}
 		}
-		if reddit.JaccardTokens(tokens, e.Tokens) >= reddit.JaccardThreshold() {
+		if author != "" && e.Author == author &&
+			len(tokens) >= reddit.MinContainmentTokens() && len(e.Tokens) >= reddit.MinContainmentTokens() &&
+			reddit.ContainmentTokens(tokens, e.Tokens) >= reddit.ContainmentThresholdSameAuthor() {
 			return true
 		}
 	}

@@ -32,10 +32,47 @@ const minClusterTokens = 3
 // agree mainly on "gay/linux/python/porn" and otherwise diverge).
 const jaccardThreshold = 0.72
 
+// jaccardThresholdSameAuthor is the token-similarity cutoff used to fold
+// posts that share an AUTHOR but have different primary media keys. Same
+// author + title similarity at the general threshold is itself the signal
+// that it's the same content re-submitted (Reddit mints a fresh asset ID
+// per upload, so PrimaryMediaKey drifts). Matches jaccardThreshold — the
+// author match is a sufficient extra signal that the stricter bar from
+// earlier versions (0.85) is no longer needed.
+const jaccardThresholdSameAuthor = 0.72
+
+// containmentThresholdSameAuthor is the token-set containment floor for
+// folding same-author posts whose titles are too long and divergent for
+// Jaccard (which penalizes symmetric differences) but share a dense core
+// of distinctive tokens. Containment = |A∩B| / min(|A|, |B|) measures
+// whether the smaller set is mostly absorbed by the larger one. Gated on
+// minContainmentTokens to avoid false positives on short titles where a
+// handful of shared topic words inflate the ratio.
+const containmentThresholdSameAuthor = 0.55
+
+// minContainmentTokens is the per-post token count floor for the
+// containment path. Both posts must meet this floor before containment
+// similarity is even considered — short titles with few tokens produce
+// inflated containment scores (e.g. 4/6 = 0.67) and would fold
+// legitimately different content.
+const minContainmentTokens = 15
+
 // JaccardThreshold exposes the cluster similarity cutoff so callers in other
 // packages (notably the cross-page session dedup) can share the same value
 // without re-declaring it.
 func JaccardThreshold() float64 { return jaccardThreshold }
+
+// JaccardThresholdSameAuthor exposes the stricter same-author fold cutoff
+// so the cross-page session dedup applies the same policy as FoldReposts.
+func JaccardThresholdSameAuthor() float64 { return jaccardThresholdSameAuthor }
+
+// ContainmentThresholdSameAuthor exposes the containment fold cutoff for
+// same-author posts so the cross-page session dedup can share the policy.
+func ContainmentThresholdSameAuthor() float64 { return containmentThresholdSameAuthor }
+
+// MinContainmentTokens exposes the token-count floor for the containment
+// path so session dedup can apply the same gate.
+func MinContainmentTokens() int { return minContainmentTokens }
 
 // RepostKey returns the SQL-side normalization used by the v30 generated
 // column: whitespace-collapsed lowercase title with a length floor. The
@@ -162,6 +199,39 @@ func JaccardTokens(a, b []string) float64 {
 	return float64(inter) / float64(union)
 }
 
+// ContainmentTokens returns the containment similarity |A∩B| / min(|A|, |B|)
+// of two SORTED deduplicated token slices. Both inputs must come from
+// TitleTokens (or equivalently normalized). Returns 0 on either-empty input.
+// Containment measures how much the smaller set is absorbed by the larger
+// one — it's less sensitive to length differences than Jaccard, making it
+// suitable for comparing long verbose titles that share a distinctive core.
+func ContainmentTokens(a, b []string) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	i, j, inter := 0, 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case a[i] == b[j]:
+			inter++
+			i++
+			j++
+		case a[i] < b[j]:
+			i++
+		default:
+			j++
+		}
+	}
+	minLen := len(a)
+	if len(b) < minLen {
+		minLen = len(b)
+	}
+	if minLen == 0 {
+		return 0
+	}
+	return float64(inter) / float64(minLen)
+}
+
 // PrimaryMediaKey returns a stable identity for the post's primary media
 // resource — the post's main media URL, or the first gallery image URL.
 // Returns "" for text-only posts (selftext, link cards without preview).
@@ -212,6 +282,7 @@ func FoldReposts(posts []Post) []Post {
 		head     int      // index in posts whose card represents this cluster
 		tokens   []string // token set of the current head (used for matching)
 		mediaKey string   // primary media URL of the head; "" for text-only
+		author   string   // lowercased author name of the head; "" if anon/deleted
 		members  []RepostMember
 	}
 	clusters := make([]cluster, 0, len(posts))
@@ -225,21 +296,30 @@ func FoldReposts(posts []Post) []Post {
 	for i := range posts {
 		tokens := TitleTokens(posts[i].Title)
 		mk := PrimaryMediaKey(&posts[i])
+		author := authorKey(posts[i].Author.Name)
 		matched := -1
 		if tokens != nil {
 			for ci := range clusters {
 				if clusters[ci].tokens == nil {
 					continue
 				}
-				// Both title-similar AND media-equal. Different media ⇒
-				// different content, even if titles are word-for-word
-				// identical. A genuine repost of the SAME media will
-				// share PrimaryMediaKey (Reddit echoes the original CDN
-				// URL for crossposts and image-mirror reposts).
-				if clusters[ci].mediaKey != mk {
-					continue
+				sim := JaccardTokens(tokens, clusters[ci].tokens)
+				if sim >= jaccardThreshold {
+					if clusters[ci].mediaKey == mk {
+						matched = ci
+						break
+					}
+					if author != "" && clusters[ci].author == author && sim >= jaccardThresholdSameAuthor {
+						matched = ci
+						break
+					}
 				}
-				if JaccardTokens(tokens, clusters[ci].tokens) >= jaccardThreshold {
+				// Containment path: long verbose titles by the same author
+				// that share a dense core of distinctive tokens but diverge
+				// enough to drop Jaccard below the general threshold.
+				if author != "" && clusters[ci].author == author &&
+					len(tokens) >= minContainmentTokens && len(clusters[ci].tokens) >= minContainmentTokens &&
+					ContainmentTokens(tokens, clusters[ci].tokens) >= containmentThresholdSameAuthor {
 					matched = ci
 					break
 				}
@@ -251,6 +331,7 @@ func FoldReposts(posts []Post) []Post {
 				head:     i,
 				tokens:   tokens,
 				mediaKey: mk,
+				author:   author,
 				members:  []RepostMember{memberFromPost(posts[i])},
 			})
 			isHead[i] = true
@@ -262,8 +343,11 @@ func FoldReposts(posts []Post) []Post {
 			isHead[clusters[matched].head] = false
 			clusters[matched].head = i
 			clusters[matched].tokens = tokens
-			// mediaKey stays the same — head swap only happens when the
-			// new candidate's mediaKey already matched the cluster's.
+			// mediaKey / author follow the head — head swap only happens
+			// after we've already established a same-cluster match, so
+			// updating them keeps later matches anchored to the survivor.
+			clusters[matched].mediaKey = mk
+			clusters[matched].author = author
 			isHead[i] = true
 		}
 	}
@@ -279,6 +363,17 @@ func FoldReposts(posts []Post) []Post {
 		out = append(out, posts[i])
 	}
 	return out
+}
+
+// authorKey normalizes an author name for same-author cluster matching.
+// Deleted/anonymous authors return "" so a cluster of u/[deleted] posts
+// doesn't fold across unrelated content the way a real username would.
+func authorKey(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" || n == "[deleted]" || n == "deleted" {
+		return ""
+	}
+	return n
 }
 
 func memberFromPost(p Post) RepostMember {

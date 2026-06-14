@@ -395,13 +395,155 @@ func TestGateContextCancel(t *testing.T) {
 // round-trip and that the default is the worst-loss tag.
 func TestPriorityFromContextRoundTrip(t *testing.T) {
 	def := PriorityFromContext(context.Background())
-	if def.Gen != 0 || def.Kind != KindVideo {
-		t.Fatalf("default = %+v, want gen=0 kind=video", def)
+	if def.Gen != 0 || def.Kind != KindVideo || def.Long {
+		t.Fatalf("default = %+v, want gen=0 kind=video long=false", def)
 	}
-	p := Priority{Gen: 42, Kind: KindAudio}
+	p := Priority{Gen: 42, Kind: KindAudio, Long: true}
 	got := PriorityFromContext(WithPriority(context.Background(), p))
 	if got != p {
 		t.Fatalf("round-trip = %+v, want %+v", got, p)
+	}
+}
+
+// TestPrioGateLongLosesToShort verifies that any non-long writer beats any
+// long writer regardless of generation: an old image beats a fresh long video,
+// a fresh short video beats a fresh long video, and audio beats long video
+// even when audio's gen is older. Among long-vs-long, the standard Gen/Kind
+// rule still applies — newer long wins.
+func TestPrioGateLongLosesToShort(t *testing.T) {
+	oldShort := Priority{Gen: 1, Kind: KindVideo}
+	freshLong := Priority{Gen: 99, Kind: KindVideo, Long: true}
+	if !oldShort.better(freshLong) {
+		t.Fatal("old short video should beat fresh long video")
+	}
+	if freshLong.better(oldShort) {
+		t.Fatal("fresh long video must not beat old short video")
+	}
+
+	freshShort := Priority{Gen: 100, Kind: KindVideo}
+	if !freshShort.better(freshLong) {
+		t.Fatal("fresh short video should beat fresh long video")
+	}
+
+	oldAudio := Priority{Gen: 1, Kind: KindAudio}
+	if !oldAudio.better(freshLong) {
+		t.Fatal("audio at any gen should beat long video")
+	}
+
+	olderLong := Priority{Gen: 5, Kind: KindVideo, Long: true}
+	newerLong := Priority{Gen: 6, Kind: KindVideo, Long: true}
+	if !newerLong.better(olderLong) {
+		t.Fatal("newer long should beat older long (preemption inside long tier)")
+	}
+	if olderLong.better(newerLong) {
+		t.Fatal("older long must not beat newer long")
+	}
+}
+
+// TestShortPreemptsInFlightLongVideo is the wall-clock scenario the gate is
+// for: a long video is mid-download when a short video request arrives later.
+// The short writer must run to completion before the long writer makes
+// further progress, regardless of who arrived first.
+func TestShortPreemptsInFlightLongVideo(t *testing.T) {
+	gate := newPrioGate()
+	bucket := newTokenBucket(1<<20, 1<<20)
+	rec := newRecorder()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	// Long video starts first at gen 1.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runFakeStream(t, ctx, gate, bucket,
+			Priority{Gen: 1, Kind: KindVideo, Long: true}, "long", rec, 512<<10)
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	preemptAt := time.Since(rec.start)
+
+	// Short video arrives later — even though gen 2 would already beat gen 1,
+	// the point of this test is that Long=true would lose even at gen 100.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runFakeStream(t, ctx, gate, bucket,
+			Priority{Gen: 2, Kind: KindVideo}, "short", rec, 128<<10)
+	}()
+
+	wg.Wait()
+
+	var firstShort time.Duration
+	gotShort := false
+	longAfterShort := 0
+	for _, r := range rec.snapshot() {
+		if r.label == "short" {
+			if !gotShort {
+				firstShort = r.at
+				gotShort = true
+			}
+		} else if gotShort && r.at > firstShort {
+			longAfterShort++
+		}
+	}
+	if !gotShort {
+		t.Fatal("expected short writer to make progress")
+	}
+	if firstShort < preemptAt {
+		t.Fatalf("short writer started before launch: firstShort=%v preemptAt=%v", firstShort, preemptAt)
+	}
+	if longAfterShort > 1 {
+		t.Fatalf("long video kept running after short arrived (%d writes after firstShort=%v)",
+			longAfterShort, firstShort)
+	}
+}
+
+// TestNewerLongPreemptsOlderLong mirrors the same-tier preemption test for
+// the long-video tier: among Long=true writers, a fresh-gen one preempts an
+// in-flight older-gen one.
+func TestNewerLongPreemptsOlderLong(t *testing.T) {
+	gate := newPrioGate()
+	bucket := newTokenBucket(1<<20, 1<<20)
+	rec := newRecorder()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runFakeStream(t, ctx, gate, bucket,
+			Priority{Gen: 1, Kind: KindVideo, Long: true}, "oldLong", rec, 512<<10)
+	}()
+	time.Sleep(40 * time.Millisecond)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runFakeStream(t, ctx, gate, bucket,
+			Priority{Gen: 2, Kind: KindVideo, Long: true}, "newLong", rec, 128<<10)
+	}()
+	wg.Wait()
+
+	var firstNew time.Duration
+	gotNew := false
+	oldAfterNew := 0
+	for _, r := range rec.snapshot() {
+		if r.label == "newLong" {
+			if !gotNew {
+				firstNew = r.at
+				gotNew = true
+			}
+		} else if gotNew && r.at > firstNew {
+			oldAfterNew++
+		}
+	}
+	if !gotNew {
+		t.Fatal("expected newLong to make progress")
+	}
+	if oldAfterNew > 1 {
+		t.Fatalf("oldLong kept running after newLong arrived (%d writes)", oldAfterNew)
 	}
 }
 

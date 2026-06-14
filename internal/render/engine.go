@@ -36,6 +36,8 @@ func buildMediaBundle() []byte {
 		"static/audioSync.js",
 		"static/imageReload.js",
 		"static/videoReload.js",
+		"static/longVideoGate.js",
+		"static/galleryNav.js",
 	}
 	var buf []byte
 	for _, p := range parts {
@@ -94,6 +96,47 @@ type Engine struct {
 	// templ render path (which reads it from context via i18nContext).
 	translators map[string]func(key string, args ...any) string
 	cfg         config.RenderConfig
+	// mediaCached reports whether the original CDN URL has a complete cached
+	// copy on disk. Injected at startup (main.go wires mediaProxy.IsCached).
+	// nil-safe: when unset every post is treated as not-yet-cached, matching
+	// the historical behavior that always rendered the long-video gate above
+	// the duration threshold.
+	mediaCached func(originalURL string) bool
+}
+
+// SetMediaCachedFn injects the on-disk-cache predicate used by isLongVideo to
+// skip the >5min click-to-load gate for clips whose bytes are already resident.
+// Called once during startup wiring; concurrent reads are racy by intent —
+// reassignment after server start is not supported.
+func (e *Engine) SetMediaCachedFn(fn func(originalURL string) bool) {
+	e.mediaCached = fn
+}
+
+// markLocalCache flips the LocalCached flag on every video/gif post whose
+// quality-clamped CDN URL is already complete on disk. Runs in O(N) over the
+// page's posts via one indexed Resolve per video — cheap compared to the
+// rendering itself, and only the videos pay the lookup (images / link posts
+// are skipped). quality threads the viewer's Video Quality preference through
+// VideoQualityURL so a 720-clamped clip checks the 720 cache key, not the
+// source-quality one Reddit's fallback_url advertises.
+func (e *Engine) markLocalCache(posts []reddit.Post, quality string) {
+	if e.mediaCached == nil {
+		return
+	}
+	for i := range posts {
+		p := &posts[i]
+		if p.PostType != "video" && p.PostType != "gif" {
+			continue
+		}
+		if p.Media.URL == "" {
+			continue
+		}
+		clamped := reddit.VideoQualityURL(p.Media.URL, quality)
+		cdn := reddit.UnformatURL(clamped)
+		if e.mediaCached(cdn) {
+			p.Media.LocalCached = true
+		}
+	}
 }
 
 func New(cfg config.RenderConfig) (*Engine, error) {
@@ -326,6 +369,7 @@ type ErrorPageData struct {
 	Tokens         []TokenView
 	PrefetchStatus PrefetchStatusView
 	PrefetchEvents []PrefetchEventView
+	CleanupEvents  []PrefetchEventView
 }
 
 type SubredditStatView struct {
@@ -373,11 +417,13 @@ func (e *Engine) RenderSubreddit(w io.Writer, data SubredditPageData) error {
 	if hidden {
 		data.AllPostsHiddenNSFW = true
 	}
+	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
 	return subredditPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
 func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
 	posts, _ = filterNSFW(posts, prefs)
+	e.markLocalCache(posts, prefs.VideoQuality)
 	ctx := e.i18nContext(prefs.Lang)
 	lazy := prefs.LazyMedia == "on"
 	for i, p := range posts {
@@ -395,6 +441,9 @@ func (e *Engine) RenderPost(w io.Writer, data PostPageData) error {
 	if data.BrandName == "" {
 		data.BrandName = e.cfg.BrandName
 	}
+	single := []reddit.Post{data.Post}
+	e.markLocalCache(single, data.Prefs.VideoQuality)
+	data.Post = single[0]
 	return postPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
@@ -407,6 +456,7 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 	if hidden {
 		data.AllPostsHiddenNSFW = true
 	}
+	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
 	return searchPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
@@ -415,6 +465,7 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 // "Load More" button's partial=1 requests.
 func (e *Engine) RenderSearchPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
 	posts, _ = filterNSFW(posts, prefs)
+	e.markLocalCache(posts, prefs.VideoQuality)
 	return searchPostList(posts, prefs, prefs.LazyMedia == "on").Render(e.i18nContext(prefs.Lang), w)
 }
 
@@ -460,6 +511,7 @@ func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 	if hidden {
 		data.AllPostsHiddenNSFW = true
 	}
+	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
 	return userPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
@@ -468,6 +520,7 @@ func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
 		data.BrandName = e.cfg.BrandName
 	}
 	data.SearchPosts, _ = filterNSFW(data.SearchPosts, data.Prefs)
+	e.markLocalCache(data.SearchPosts, data.Prefs.VideoQuality)
 	return archiveHubPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
@@ -480,6 +533,7 @@ func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
 	if hidden {
 		data.AllPostsHiddenNSFW = true
 	}
+	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
 	return archivePage(data).Render(e.i18nContext(data.Prefs.Lang), w)
 }
 
@@ -578,6 +632,7 @@ type DebugData struct {
 	Tokens         []TokenView
 	PrefetchStatus PrefetchStatusView
 	PrefetchEvents []PrefetchEventView
+	CleanupEvents  []PrefetchEventView
 }
 
 func (e *Engine) RenderDebug(w io.Writer, msg string, prefs reddit.Preferences, d DebugData) {
@@ -591,6 +646,7 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, prefs reddit.Preferences, 
 		Tokens:         d.Tokens,
 		PrefetchStatus: d.PrefetchStatus,
 		PrefetchEvents: d.PrefetchEvents,
+		CleanupEvents:  d.CleanupEvents,
 	}
 	errorPage(data).Render(e.i18nContext(prefs.Lang), w)
 }

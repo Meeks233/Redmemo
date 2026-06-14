@@ -21,7 +21,10 @@ templ errorTitle(d ErrorPageData) {
 
 // errorPage renders the full error/debug page through the base layout.
 templ errorPage(d ErrorPageData) {
-	@layout(d.BasePage, pageSlots{Title: errorTitle(d), Content: errorContent(d)})
+	// Debug page hosts a long-video-gate puppet for click-handler testing,
+	// which only works when /media.bundle.js (carrying longVideoGate.js) is
+	// shipped — so flip Media on for the diagnostics build of this surface.
+	@layout(d.BasePage, pageSlots{Title: errorTitle(d), Content: errorContent(d), Media: d.IsDebug})
 }
 
 templ errorContent(d ErrorPageData) {
@@ -353,7 +356,7 @@ templ errorContent(d ErrorPageData) {
 					<div class="error-diagnostics prefetch-log-section">
 						<div class="prefetch-log-header">
 							<h4>{ T(ctx, "error.event_log", len(d.PrefetchEvents)) }</h4>
-							<button class="prefetch-copy-btn" onclick="copyPrefetchLog()" title={ T(ctx, "error.copy_title") } data-copied-label={ T(ctx, "error.copied") }>
+							<button class="prefetch-copy-btn" onclick="copyLogTable('prefetch-log', this)" title={ T(ctx, "error.copy_title") } data-copied-label={ T(ctx, "error.copied") }>
 								<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
 							</button>
 						</div>
@@ -362,8 +365,8 @@ templ errorContent(d ErrorPageData) {
 								<thead>
 									<tr>
 										<th class="pl-time">{ T(ctx, "error.th_time") }</th>
-										<th class="pl-level">{ T(ctx, "error.th_level") }</th>
-										<th class="pl-phase">{ T(ctx, "error.th_phase") }</th>
+										<th class="pl-level pl-sortable" data-sort-col="1" onclick="sortLogTable('prefetch-log', this, 1)">{ T(ctx, "error.th_level") } <span class="pl-sort-arrows"><span class="pl-arrow-up">▲</span><span class="pl-arrow-down">▼</span></span></th>
+										<th class="pl-phase pl-sortable" data-sort-col="2" onclick="sortLogTable('prefetch-log', this, 2)">{ T(ctx, "error.th_phase") } <span class="pl-sort-arrows"><span class="pl-arrow-up">▲</span><span class="pl-arrow-down">▼</span></span></th>
 										<th class="pl-msg">{ T(ctx, "error.th_message") }</th>
 									</tr>
 								</thead>
@@ -380,20 +383,70 @@ templ errorContent(d ErrorPageData) {
 							</table>
 						</div>
 					</div>
+				}
+				if len(d.CleanupEvents) > 0 {
+					<div class="error-diagnostics prefetch-log-section">
+						<div class="prefetch-log-header">
+							<h4>{ T(ctx, "error.cleanup_log", len(d.CleanupEvents)) }</h4>
+							<button class="prefetch-copy-btn" onclick="copyLogTable('cleanup-log', this)" title={ T(ctx, "error.copy_title") } data-copied-label={ T(ctx, "error.copied") }>
+								<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+							</button>
+						</div>
+						<div class="prefetch-log-scroll" id="cleanup-log">
+							<table class="prefetch-log-table">
+								<thead>
+									<tr>
+										<th class="pl-time">{ T(ctx, "error.th_time") }</th>
+										<th class="pl-level pl-sortable" data-sort-col="1" onclick="sortLogTable('cleanup-log', this, 1)">{ T(ctx, "error.th_level") } <span class="pl-sort-arrows"><span class="pl-arrow-up">▲</span><span class="pl-arrow-down">▼</span></span></th>
+										<th class="pl-phase pl-sortable" data-sort-col="2" onclick="sortLogTable('cleanup-log', this, 2)">{ T(ctx, "error.th_phase") } <span class="pl-sort-arrows"><span class="pl-arrow-up">▲</span><span class="pl-arrow-down">▼</span></span></th>
+										<th class="pl-msg">{ T(ctx, "error.th_message") }</th>
+									</tr>
+								</thead>
+								<tbody>
+									for _, ev := range d.CleanupEvents {
+										<tr class={ "pl-row", "pl-" + ev.Level }>
+											<td class="pl-time" title={ ev.RelativeTime } data-flat={ ev.Time }><span class="pl-time-date">{ ev.Date }</span><span class="pl-time-clock">{ ev.Clock }</span></td>
+											<td class="pl-level"><span class={ "pl-badge", "pl-badge-" + ev.Level }>{ ev.Level }</span></td>
+											<td class="pl-phase">{ ev.Phase }</td>
+											<td class="pl-msg">{ ev.Message }</td>
+										</tr>
+									}
+								</tbody>
+							</table>
+						</div>
+					</div>
+				}
+				if len(d.PrefetchEvents) > 0 || len(d.CleanupEvents) > 0 {
 					<script>
-						function copyPrefetchLog() {
-							var rows = document.querySelectorAll('#prefetch-log .pl-row');
+						function copyLogTable(tableId, btn) {
+							var rows = document.querySelectorAll('#' + tableId + ' .pl-row');
 							var lines = [];
 							rows.forEach(function(r) {
 								var cells = r.querySelectorAll('td');
 								lines.push([cells[0].dataset.flat || cells[0].textContent, cells[1].textContent, cells[2].textContent, cells[3].textContent].join('\t'));
 							});
-							var text = lines.join('\n');
-							navigator.clipboard.writeText(text).then(function() {
-								var btn = document.querySelector('.prefetch-copy-btn');
-								btn.textContent = btn.dataset.copiedLabel;
+							navigator.clipboard.writeText(lines.join('\n')).then(function() {
+								var label = btn.dataset.copiedLabel;
+								btn.textContent = label;
 								setTimeout(function() { btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'; }, 1500);
 							});
+						}
+						function sortLogTable(tableId, th, colIdx) {
+							var table = document.querySelector('#' + tableId + ' table');
+							var tbody = table.querySelector('tbody');
+							var rows = Array.from(tbody.querySelectorAll('tr'));
+							table.querySelectorAll('.pl-sortable').forEach(function(h) { if (h !== th) { h.classList.remove('pl-sort-asc', 'pl-sort-desc'); } });
+							var asc = !th.classList.contains('pl-sort-asc');
+							th.classList.toggle('pl-sort-asc', asc);
+							th.classList.toggle('pl-sort-desc', !asc);
+							rows.sort(function(a, b) {
+								var av = a.querySelectorAll('td')[colIdx].textContent.trim().toLowerCase();
+								var bv = b.querySelectorAll('td')[colIdx].textContent.trim().toLowerCase();
+								if (av < bv) return asc ? -1 : 1;
+								if (av > bv) return asc ? 1 : -1;
+								return 0;
+							});
+							rows.forEach(function(r) { tbody.appendChild(r); });
 						}
 					</script>
 				}
@@ -445,6 +498,13 @@ templ errorContent(d ErrorPageData) {
 							<svg class="debug-loader-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
 							<svg class="debug-loader-spin" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
 							<svg class="debug-loader-spin" xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+						</div>
+					</div>
+					<div class="error-diagnostics debug-puppet-section">
+						<h4>Long Video Gate (puppet)</h4>
+						<p>Click the cloud-download to swap the placeholder for a real <code>&lt;video&gt;</code>. Wired via <code>longVideoGate.js</code> in <code>/media.bundle.js</code>; this puppet uses a small Big Buck Bunny clip so the click visibly hydrates a working player.</p>
+						<div class="post_media_content">
+							@longVideoGate("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4?long=1", "puppet — click to load")
 						</div>
 					</div>
 					<div class="error-diagnostics debug-puppet-section">

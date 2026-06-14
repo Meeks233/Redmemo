@@ -165,3 +165,33 @@ func TestRedirectFuckReddit(t *testing.T) {
 		}
 	})
 }
+
+func TestSplitClientParams(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       string
+		wantTitle string
+		wantLong  bool
+		wantRest  string
+	}{
+		{"empty", "", "", false, ""},
+		{"only_signed", "s=abc&t=1", "", false, "s=abc&t=1"},
+		{"only_dl_title", "dl_title=hello", "hello", false, ""},
+		{"only_long", "long=1", "", true, ""},
+		{"long_not_one_preserved", "long=2", "", false, "long=2"},
+		{"both_client", "dl_title=foo&long=1", "foo", true, ""},
+		// Order preservation: Reddit's HMAC on signed URLs depends on it.
+		{"interleaved_preserve_order", "s=AAA&dl_title=hi&t=99&long=1&v=ok", "hi", true, "s=AAA&t=99&v=ok"},
+		{"long_no_value", "long&s=x", "", false, "long&s=x"},
+		{"dl_title_url_encoded", "dl_title=hello%20world&s=1", "hello world", false, "s=1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			title, long, rest := splitClientParams(c.raw)
+			if title != c.wantTitle || long != c.wantLong || rest != c.wantRest {
+				t.Errorf("splitClientParams(%q) = (%q, %v, %q), want (%q, %v, %q)",
+					c.raw, title, long, rest, c.wantTitle, c.wantLong, c.wantRest)
+			}
+		})
+	}
+}

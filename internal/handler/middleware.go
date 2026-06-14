@@ -117,6 +117,7 @@ var prefDefaults = map[string]string{
 	"auto_theme_day":          "light",
 	"auto_theme_night":        "black",
 	"lang":                    render.DefaultLang,
+	"long_video_threshold":    "5",
 }
 
 func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
@@ -182,6 +183,8 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.DisableInitiativeUpstreamAccess = pref("disable_initiative_upstream_access")
 	p.SettingsTokenTTL = pref("settings_token_ttl")
 	p.PageLimit = pref("page_limit")
+	p.ShowAllGalleryMedia = pref("show_all_gallery_media")
+	p.LongVideoThreshold = pref("long_video_threshold")
 
 	p.AvailableThemes = render.AvailableThemes()
 

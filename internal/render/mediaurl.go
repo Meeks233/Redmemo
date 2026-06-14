@@ -28,6 +28,25 @@ func WithDownloadTitle(rawURL, title string) string {
 	return rawURL + sep + "dl_title=" + queryEscape(title)
 }
 
+// WithLongMark appends `long=1` to rawURL — a marker the media proxy reads to
+// drop the priority of the resulting CDN download to the bottom of the gate
+// (Priority.Long). Used only for clips exceeding the user-configured
+// unlocked via the long-video gate. Returns rawURL unchanged on empty input
+// or when the marker is already present.
+func WithLongMark(rawURL string) string {
+	if rawURL == "" || strings.Contains(rawURL, "long=1") {
+		return rawURL
+	}
+	if strings.Contains(rawURL, "#") {
+		return rawURL
+	}
+	sep := "?"
+	if strings.Contains(rawURL, "?") {
+		sep = "&"
+	}
+	return rawURL + sep + "long=1"
+}
+
 // queryEscape percent-encodes the bytes that must not appear in a query value.
 // We avoid net/url.QueryEscape so spaces become %20 (not +) — the proxy treats
 // either as a separator-to-underscore, but %20 reads cleaner in source view.

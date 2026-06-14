@@ -35,6 +35,8 @@ var settingsKeys = []string{
 	"disable_initiative_upstream_access",
 	"settings_token_ttl",
 	"page_limit",
+	"show_all_gallery_media",
+	"long_video_threshold",
 }
 
 // allowedSettingsTokenTTL is the whitelist of valid /settings auth-cookie
@@ -451,6 +453,15 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 	if v, ok := out["settings_token_ttl"]; ok && !allowedSettingsTokenTTL[v] {
 		delete(out, "settings_token_ttl")
 		rejected = append(rejected, RejectedSetting{Key: "settings_token_ttl", Value: v, Reason: "must be one of 5, 10, 15, 30, 60"})
+	}
+
+	if v, ok := out["long_video_threshold"]; ok {
+		if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 99 {
+			delete(out, "long_video_threshold")
+			rejected = append(rejected, RejectedSetting{Key: "long_video_threshold", Value: v, Reason: "must be an integer in [0, 99]"})
+		} else {
+			out["long_video_threshold"] = strconv.Itoa(n)
+		}
 	}
 
 	if v, ok := out["page_limit"]; ok {

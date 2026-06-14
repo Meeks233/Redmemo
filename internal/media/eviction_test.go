@@ -256,6 +256,50 @@ func TestSimulateEviction_ExactlyAtTarget(t *testing.T) {
 	}
 }
 
+// TestSimulateEviction_FractionalGB — a 0.5 GB cap (500 MB) must compute the
+// correct maxBytes and 10% target (~50 MB). This exercises the float64
+// MaxSizeGB path introduced when the config field changed from int.
+func TestSimulateEviction_FractionalGB(t *testing.T) {
+	var maxBytes int64 = int64(0.5 * 1024 * 1024 * 1024) // 536870912
+	target := int64(float64(maxBytes) * evictionFreeFraction)
+	if maxBytes != 536870912 {
+		t.Fatalf("0.5 GB maxBytes = %d, want 536870912", maxBytes)
+	}
+	if target != 53687091 {
+		t.Fatalf("10%% of 0.5 GB = %d, want 53687091", target)
+	}
+
+	// 600 MB used, 500 MB cap → should evict ~50 MB
+	usedBytes := int64(600 * mib)
+	cands := make([]*store.MediaMeta, 0, 100)
+	for i := 0; i < 100; i++ {
+		cands = append(cands, makeCandidate(i, mib, 100.0-float64(i)*0.01))
+	}
+	sel, hashes, freed := simulateEviction(cands, usedBytes, maxBytes)
+	if freed < target {
+		t.Fatalf("freed %d < target %d", freed, target)
+	}
+	if freed-int64(mib) >= target {
+		t.Fatalf("over-selected: freed=%d, target=%d", freed, target)
+	}
+	if len(sel) != len(hashes) {
+		t.Fatalf("hash count %d != selection count %d", len(hashes), len(sel))
+	}
+	// ~51 rows of 1 MiB each to cross ~50 MiB target
+	if len(sel) < 50 || len(sel) > 55 {
+		t.Fatalf("fractional-GB selection size %d outside expected 50..55", len(sel))
+	}
+}
+
+// TestSimulateEviction_ZeroCap — a zero cap must be a no-op (unlimited).
+func TestSimulateEviction_ZeroCap(t *testing.T) {
+	cands := sortedDesc(makeCandidate(1, 100*mib, 99))
+	sel, hashes, freed := simulateEviction(cands, 200*mib, 0)
+	if len(sel) != 0 || len(hashes) != 0 || freed != 0 {
+		t.Fatalf("zero cap should be unlimited; got %d rows, %d hashes, %d freed", len(sel), len(hashes), freed)
+	}
+}
+
 // TestSelectByCumulativeSize_EmptyTarget — a zero/negative target is a no-op.
 func TestSelectByCumulativeSize_EmptyTarget(t *testing.T) {
 	cands := sortedDesc(makeCandidate(1, mib, 50))

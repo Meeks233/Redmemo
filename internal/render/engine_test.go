@@ -299,6 +299,109 @@ func TestRenderSettings(t *testing.T) {
 	}
 }
 
+// TestLongVideoGateRendering covers the two surfaces independently:
+//
+//   - Listing view (RenderPostList): a >5min clip renders the long-video gate
+//     placeholder instead of a live <video>, so a feed full of long clips
+//     never auto-buffers a single byte. Short clips stay as live videos.
+//
+//   - Permalink view (RenderPost): the user explicitly opened the post to
+//     watch it, so the <video> element is always rendered — but for long
+//     clips it carries `preload="none"` and the `&long=1` priority marker
+//     so nothing buffers until the user hits play and the backend gate
+//     deprioritizes the resulting CDN download.
+func TestLongVideoGateRendering(t *testing.T) {
+	e := newTestEngine(t)
+
+	listing := func(dur float64) string {
+		var buf bytes.Buffer
+		post := reddit.Post{
+			ID:        "v1",
+			Title:     "Clip",
+			Community: "videos",
+			PostType:  "video",
+			Score:     [2]string{"1", "1"},
+			Comments:  [2]string{"0", "0"},
+			Author:    reddit.Author{Name: "u"},
+			RelTime:   "1h ago",
+			Media: reddit.Media{
+				URL:      "https://v.redd.it/abc/DASH_720.mp4",
+				Duration: dur,
+			},
+		}
+		if err := e.RenderPostList(&buf, []reddit.Post{post}, reddit.Preferences{}); err != nil {
+			t.Fatalf("RenderPostList: %v", err)
+		}
+		return buf.String()
+	}
+
+	long := listing(600)
+	if !strings.Contains(long, "long-video-gate") {
+		t.Errorf("long video in listing should render the gate placeholder")
+	}
+	if strings.Contains(long, "<video") {
+		t.Errorf("long video in listing must not render a live <video> (would auto-buffer)")
+	}
+	if !strings.Contains(long, "long=1") {
+		t.Errorf("listing gate URL should carry long=1 priority marker")
+	}
+
+	short := listing(60)
+	if strings.Contains(short, "long-video-gate") {
+		t.Errorf("short video must not render the long-video gate")
+	}
+	if !strings.Contains(short, "<video") {
+		t.Errorf("short video in listing should render a live <video>")
+	}
+
+	permalink := func(dur float64) string {
+		var buf bytes.Buffer
+		data := PostPageData{
+			BasePage: BasePage{URL: "/r/x/comments/v1/clip", BrandName: "TestBrand", Version: "0.1.0"},
+			Post: reddit.Post{
+				ID:        "v1",
+				Title:     "Clip",
+				Community: "videos",
+				PostType:  "video",
+				Score:     [2]string{"1", "1"},
+				Comments:  [2]string{"0", "0"},
+				Author:    reddit.Author{Name: "u"},
+				RelTime:   "1h ago",
+				Media: reddit.Media{
+					URL:      "https://v.redd.it/abc/DASH_720.mp4",
+					Duration: dur,
+				},
+			},
+		}
+		if err := e.RenderPost(&buf, data); err != nil {
+			t.Fatalf("RenderPost: %v", err)
+		}
+		return buf.String()
+	}
+
+	longPerma := permalink(600)
+	if strings.Contains(longPerma, "long-video-gate") {
+		t.Errorf("permalink page should NOT render the gate — user explicitly opened the post")
+	}
+	if !strings.Contains(longPerma, "<video") {
+		t.Errorf("permalink page should render a live <video> element for long clips")
+	}
+	if !strings.Contains(longPerma, `preload="none"`) {
+		t.Errorf("long video permalink must use preload=none so bytes only fetch on user gesture")
+	}
+	if !strings.Contains(longPerma, "long=1") {
+		t.Errorf("long video permalink src must carry long=1 for backend priority deprioritization")
+	}
+
+	shortPerma := permalink(60)
+	if strings.Contains(shortPerma, `preload="none"`) {
+		t.Errorf("short video permalink must not gate buffering")
+	}
+	if strings.Contains(shortPerma, "long=1") {
+		t.Errorf("short video permalink must not carry long=1")
+	}
+}
+
 func TestStaticHandler(t *testing.T) {
 	e := newTestEngine(t)
 	h := e.StaticHandler()

@@ -134,7 +134,11 @@ func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL stri
 	// Tag every fresh muxed-video request as video at a new generation. Audio
 	// for the same video is separately requested via ServeSeparateAudio at the
 	// same gen window, so audio bytes preempt these video bytes (KindAudio < KindVideo).
-	r = r.WithContext(WithPriority(r.Context(), Priority{Gen: NextGen(), Kind: KindVideo}))
+	r = r.WithContext(WithPriority(r.Context(), Priority{
+		Gen:  NextGen(),
+		Kind: KindVideo,
+		Long: r.URL.Query().Get("long") == "1",
+	}))
 	// Persistent ledger gate. Render the placeholder picked by state — the
 	// soft question-mark for marked URLs (user reopening the post still
 	// revives), the X "Sorry, we missed it" for dead URLs (terminal, no more
@@ -517,15 +521,29 @@ func (p *Proxy) SweepSupersededPlainRows() {
 	paths, err := p.mediaStore.DeleteSupersededPlainRows()
 	if err != nil {
 		log.Printf("media: sweep superseded plain rows: %v", err)
+		if p.cleanupLog != nil {
+			p.cleanupLog.Addf(LevelError, "sweep", "superseded plain rows: %v", err)
+		}
 		return
 	}
+	var removeFails int
 	for _, fp := range paths {
 		if err := os.Remove(fp); err != nil && !os.IsNotExist(err) {
 			log.Printf("media: remove superseded file %s: %v", fp, err)
+			removeFails++
 		}
 	}
 	if len(paths) > 0 {
 		log.Printf("media: swept %d superseded silent video-only cache entries", len(paths))
+		if p.cleanupLog != nil {
+			level := LevelOK
+			msg := fmt.Sprintf("swept %d superseded silent video-only entries", len(paths))
+			if removeFails > 0 {
+				level = LevelWarn
+				msg += fmt.Sprintf(", %d remove errors", removeFails)
+			}
+			p.cleanupLog.Add(level, "sweep", msg)
+		}
 	}
 }
 

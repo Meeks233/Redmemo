@@ -132,6 +132,12 @@ type Media struct {
 	Height       int64
 	Poster       string // video poster image
 	Duration     float64
+	// LocalCached is set by the render layer right before a post template runs
+	// when the on-disk media proxy already has a complete copy of this clip.
+	// The long-video gate uses it to bypass the click-to-load placeholder
+	// for clips whose bytes are already resident — there is nothing to "save the
+	// viewer from downloading", so we render a live <video> and serve from cache.
+	LocalCached bool
 }
 
 // GalleryMedia represents one item in a gallery post.
@@ -238,6 +244,8 @@ type Preferences struct {
 	DisableInitiativeUpstreamAccess string // default "off" — when "on", user-driven session-token requests never hit Reddit, only the local archive (CDN media still flows, governed by the global limiter)
 	SettingsTokenTTL               string // /settings auth-cookie lifetime in minutes — discrete choices "5","10" (default),"15","30","60"; capped at 60
 	PageLimit                      string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 100], default "50". Reddit's OAuth quota is per-request, so larger pages are strictly cheaper.
+	ShowAllGalleryMedia            string // default "off" — when "on", listing pages render all gallery items inline with left/right navigation instead of only the first image
+	LongVideoThreshold             string // gate threshold in minutes — videos longer than this render a click-to-download placeholder instead of a live <video>; "0" disables the gate entirely; default "5"
 }
 
 // Params holds common query parameters for listing endpoints.

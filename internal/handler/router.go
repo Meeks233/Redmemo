@@ -35,6 +35,7 @@ type Handler struct {
 	mediaProxy     *media.Proxy
 	archiver       archiverService
 	prefetcher     *prefetch.Scheduler
+	evictor        *media.Evictor
 	subStatusStore *store.SubStatusStore
 	subIconStore   *store.SubIconStore
 	// spoofedClient carries the uTLS/HTTP-2 Reddit-app fingerprint for the few
@@ -77,6 +78,7 @@ func New(
 	mp *media.Proxy,
 	arc *archive.Service,
 	pf *prefetch.Scheduler,
+	ev *media.Evictor,
 	sss *store.SubStatusStore,
 	sis *store.SubIconStore,
 	cfg *config.Config,
@@ -100,6 +102,7 @@ func New(
 		mediaProxy:     mp,
 		archiver:       arc,
 		prefetcher:     pf,
+		evictor:        ev,
 		subStatusStore: sss,
 		subIconStore:   sis,
 		spoofedClient:  transport.NewSpoofedClient(30 * time.Second),

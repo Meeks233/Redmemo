@@ -272,6 +272,36 @@ func playAsGif(p reddit.Post) bool {
 	return p.Media.Duration > 0 && p.Media.Duration <= 3.0
 }
 
+// isLongVideo reports whether a post's video clip is longer than the
+// user-configured gate threshold AND not already cached locally. Long clips
+// render as a click-to-download placeholder instead of a live <video> element
+// so the page never auto-fetches multi-MB streams the viewer didn't ask for,
+// and so the backend priority gate keeps short media flowing past the long
+// clip's bytes. thresholdMin is the gate threshold in minutes (from the
+// long_video_threshold preference); 0 disables the gate entirely.
+func longVideoThreshold(prefs reddit.Preferences) int {
+	n, err := strconv.Atoi(prefs.LongVideoThreshold)
+	if err != nil || n < 0 || n > 99 {
+		return 5
+	}
+	return n
+}
+
+func durationMinutes(seconds float64) int {
+	m := int(seconds / 60)
+	if m < 1 && seconds > 0 {
+		return 1
+	}
+	return m
+}
+
+func isLongVideo(p reddit.Post, thresholdMin int) bool {
+	if thresholdMin <= 0 {
+		return false
+	}
+	return p.Media.Duration > float64(thresholdMin)*60.0 && !p.Media.LocalCached
+}
+
 // videoMuted reports whether a post's <video controls> player should start
 // muted, honoring the user's mute prefs: "mute all videos" mutes everything,
 // otherwise "mute NSFW videos" mutes only posts flagged NSFW. GIF-style clips
