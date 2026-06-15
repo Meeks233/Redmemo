@@ -38,6 +38,11 @@ var (
 func main() {
 	log.Printf("redmemo: version=%s commit=%s built=%s", version, commit, date)
 
+	// Propagate the build-injected version into the render layer, which is the
+	// single source of truth for the version shown in page footers. Set before
+	// any page is served so every request reflects the release tag.
+	render.Version = version
+
 	configPath := "config.yaml"
 	resetTOTP := false
 	for _, arg := range os.Args[1:] {

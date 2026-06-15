@@ -88,13 +88,13 @@ func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, nam
 			URL:       urlPath,
 			Prefs:     prefs,
 			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			Version:   render.Version,
 		},
-		User:               user,
-		Posts:              posts,
-		Listing:            listing,
-		Sort:               [2]string{sort, r.URL.Query().Get("t")},
-		NoPosts:            len(posts) == 0,
+		User:    user,
+		Posts:   posts,
+		Listing: listing,
+		Sort:    [2]string{sort, r.URL.Query().Get("t")},
+		NoPosts: len(posts) == 0,
 	}
 
 	var buf bytes.Buffer

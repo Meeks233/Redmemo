@@ -13,6 +13,12 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 )
 
+// Version is the single source of truth for the display version shown in page
+// footers. It defaults to "dev" and is overwritten at startup by main() with
+// the value GoReleaser injects via -ldflags "-X main.version=<git tag>". A
+// release is therefore driven entirely by the git tag — no code edit needed.
+var Version = "dev"
+
 //go:embed static
 var staticFS embed.FS
 
@@ -56,9 +62,10 @@ func buildMediaBundle() []byte {
 func MediaBundle() []byte { return mediaBundle }
 
 // assetETag is a content hash of every embedded static asset, computed once at
-// startup and sent as the ETag for all of them. The display Version is hardcoded
-// ("0.1.0") and never changes, so versioning asset URLs by it (or marking them
-// "immutable") froze stale CSS/JS in browsers forever across rebuilds. With this
+// startup and sent as the ETag for all of them. The display Version is build-
+// injected (and is "dev" in dev builds), so versioning asset URLs by it (or
+// marking them "immutable") froze stale CSS/JS in browsers forever across
+// rebuilds. With this
 // ETag plus must-revalidate, browsers still cache but check in on every load:
 // they get a cheap 304 while nothing changed, and the fresh file the instant a
 // rebuild alters the embedded assets (the hash, and thus the ETag, changes).
@@ -382,7 +389,7 @@ func (e *Engine) basePage(url string, prefs reddit.Preferences) BasePage {
 		URL:       url,
 		Prefs:     prefs,
 		BrandName: e.cfg.BrandName,
-		Version:   "0.1.0",
+		Version:   Version,
 	}
 }
 
@@ -545,35 +552,35 @@ func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {
 }
 
 type PrefetchStatusView struct {
-	Enabled     bool
-	ActiveSubs  string
-	L1Phase     string
-	L1Progress  string
-	L1Subs      string
-	L1Cursors   []PrefetchCursorView
+	Enabled        bool
+	ActiveSubs     string
+	L1Phase        string
+	L1Progress     string
+	L1Subs         string
+	L1Cursors      []PrefetchCursorView
 	L1NextCycle    string
 	L1NextCycleAbs string
 	L1Buckets      []PrefetchBucketView
-	L2Phase     string
-	L2Sub       string
-	L2Pending   int
-	L2BindMode  bool
-	L2Cycles    []PrefetchL2CycleView
-	L5Phase     string
-	L5Current   string
-	L5Pending   int
-	L3Phase     string
-	L3Current   string
-	L3LastAt    string
-	L3LastAtAbs string
-	L3Count     int
-	L3BindMode  bool
-	L3Recent    []PrefetchL3BindView
-	L4Phase     string
-	L4Current   string
-	L4QueueLen  int
-	L4NextTick    string
-	L4NextTickAbs string
+	L2Phase        string
+	L2Sub          string
+	L2Pending      int
+	L2BindMode     bool
+	L2Cycles       []PrefetchL2CycleView
+	L5Phase        string
+	L5Current      string
+	L5Pending      int
+	L3Phase        string
+	L3Current      string
+	L3LastAt       string
+	L3LastAtAbs    string
+	L3Count        int
+	L3BindMode     bool
+	L3Recent       []PrefetchL3BindView
+	L4Phase        string
+	L4Current      string
+	L4QueueLen     int
+	L4NextTick     string
+	L4NextTickAbs  string
 	NPPhase        string
 	NPCurrent      string
 	QueueLen       int

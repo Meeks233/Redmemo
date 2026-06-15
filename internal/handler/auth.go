@@ -551,7 +551,7 @@ type authPageView struct {
 	Stage           string
 	Err             string
 	Secret          string
-	QRDataURI       string
+	QRDataURI       template.URL
 	Theme           string
 	BodyClass       string
 	HasTOTP         bool
@@ -603,7 +603,10 @@ func (h *Handler) renderEnrollment(w http.ResponseWriter, r *http.Request, secre
 		http.Error(w, "qr gen failed", http.StatusInternalServerError)
 		return
 	}
-	v := authPageView{Stage: "enroll", Secret: secret, QRDataURI: dataURI, Err: errMsg}
+	// dataURI is a server-generated data:image/png URI. html/template's URL
+	// filter only trusts http/https/mailto and would rewrite a plain-string
+	// data: URI to "#ZgotmplZ", blanking the QR. template.URL marks it trusted.
+	v := authPageView{Stage: "enroll", Secret: secret, QRDataURI: template.URL(dataURI), Err: errMsg}
 	h.themeView(r, &v)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

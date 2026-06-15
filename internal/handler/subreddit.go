@@ -195,12 +195,12 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 			URL:       r.URL.Path,
 			Prefs:     prefs,
 			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			Version:   render.Version,
 		},
-		Posts:              posts,
-		HomepageSort:       sort,
-		NoPosts:            len(posts) == 0,
-		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
+		Posts:        posts,
+		HomepageSort: sort,
+		NoPosts:      len(posts) == 0,
+		HasOAuth:     h.oauthHolder.HasAvailableTokens(),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -306,10 +306,10 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 	// recordUpstream + archiver + MarkLive only fire in the leader's closure
 	// so they happen once per real Reddit hit, not once per merged caller.
 	type subFetchResult struct {
-		posts        []reddit.Post
-		before       string
-		after        string
-		err          error
+		posts  []reddit.Post
+		before string
+		after  string
+		err    error
 	}
 	flightKey := "sub|" + sub + "|" + sort + "|" + t + "|" + after + "|" + before + "|" + strconv.Itoa(limit)
 	raw, _, _ := h.upstreamFlight.Do(flightKey, func() (any, error) {
@@ -362,14 +362,14 @@ func (h *Handler) renderSubredditFallback(w http.ResponseWriter, r *http.Request
 			URL:       r.URL.Path,
 			Prefs:     prefs,
 			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			Version:   render.Version,
 		},
-		Sub:                subInfo,
-		Posts:              posts,
-		Sort:               [2]string{sort, t},
-		Ends:               [2]string{prevCursor, afterCursor},
-		NoPosts:            len(posts) == 0,
-		HasOAuth:           h.oauthHolder.HasAvailableTokens(),
+		Sub:      subInfo,
+		Posts:    posts,
+		Sort:     [2]string{sort, t},
+		Ends:     [2]string{prevCursor, afterCursor},
+		NoPosts:  len(posts) == 0,
+		HasOAuth: h.oauthHolder.HasAvailableTokens(),
 	}
 
 	var buf bytes.Buffer
@@ -399,7 +399,7 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 			URL:            r.URL.Path,
 			Prefs:          prefs,
 			BrandName:      h.cfg.Render.BrandName,
-			Version:        "0.1.0",
+			Version:        render.Version,
 			DegradedReason: degradedReason,
 		},
 		Posts:     posts,

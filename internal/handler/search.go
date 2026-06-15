@@ -200,7 +200,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					URL:       urlPath,
 					Prefs:     prefs,
 					BrandName: h.cfg.Render.BrandName,
-					Version:   "0.1.0",
+					Version:   render.Version,
 				},
 				Posts:      posts,
 				Subreddits: subs,
@@ -279,7 +279,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					URL:            urlPath,
 					Prefs:          prefs,
 					BrandName:      h.cfg.Render.BrandName,
-					Version:        "0.1.0",
+					Version:        render.Version,
 					DegradedReason: reason,
 				},
 				Posts: posts,
@@ -287,7 +287,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 					Query: query,
 					Sort:  sort,
 				},
-				Sub:         sub,
+				Sub:     sub,
 				NoPosts: len(posts) == 0,
 				// "Offline" reflects a *failed* upstream attempt, not any
 				// path that fell through to the archive. A constraint-only
@@ -332,7 +332,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 				URL:            urlPath,
 				Prefs:          prefs,
 				BrandName:      h.cfg.Render.BrandName,
-				Version:        "0.1.0",
+				Version:        render.Version,
 				DegradedReason: reason,
 			},
 			Params: reddit.SearchParams{
@@ -374,7 +374,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			URL:       urlPath,
 			Prefs:     prefs,
 			BrandName: h.cfg.Render.BrandName,
-			Version:   "0.1.0",
+			Version:   render.Version,
 		},
 		Params: reddit.SearchParams{
 			Query:     displayQuery,
