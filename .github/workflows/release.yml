@@ -6,9 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write   # create GitHub Release
-  packages: write   # push to GHCR
-  id-token: write
+  contents: read    # read source only — no GitHub Release is created
+  packages: write   # push multi-arch image to GHCR
 
 jobs:
   goreleaser:
@@ -17,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # GoReleaser needs full history for changelog
+          fetch-depth: 0   # GoReleaser needs tags + history to resolve the version
 
       - name: Set up Go
         uses: actions/setup-go@v5

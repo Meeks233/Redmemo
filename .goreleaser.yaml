@@ -20,66 +20,25 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
       - -X main.date={{.CommitDate}}
+    # Docker-only project: the only binary we need is the linux one that gets
+    # baked into the container image. No standalone darwin/windows builds —
+    # RedMemo is a compose stack (postgres + redis + redlib), so a lone binary
+    # is unusable, and the tarballs only existed to populate a GitHub Release.
     goos:
       - linux
-      - windows
-      - darwin
     goarch:
       - amd64
       - arm64
 
-archives:
-  - id: default
-    name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_
-      {{- .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else }}{{ .Arch }}{{ end }}
-    formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
-    files:
-      - LICENSE*
-      - README*
-      - config.example.yaml
-      - docs/**/*
-
-checksum:
-  name_template: "checksums.txt"
-
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
+# Do NOT auto-generate a commit changelog: GoReleaser's git/github changelog
+# prints each line as "hash: message (Name <email>)", and since the commit
+# email is not linked to a GitHub account it leaks the raw address on every
+# line. Disable it entirely; the footer's compare link covers the diff.
 changelog:
-  sort: asc
-  use: github
-  groups:
-    - title: Features
-      regexp: '^.*?feat(\(.+\))??!?:.+$'
-      order: 0
-    - title: Bug fixes
-      regexp: '^.*?(fix|bug)(\(.+\))??!?:.+$'
-      order: 1
-    - title: Security
-      regexp: '^.*?sec(urity)?(\(.+\))??!?:.+$'
-      order: 2
-    - title: Performance
-      regexp: '^.*?perf(\(.+\))??!?:.+$'
-      order: 3
-    - title: Refactor
-      regexp: '^.*?refactor(\(.+\))??!?:.+$'
-      order: 4
-    - title: Others
-      order: 999
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^ci:"
-      - "Merge pull request"
-      - "Merge branch"
+  disable: true
 
 dockers:
   - image_templates:
@@ -127,19 +86,9 @@ docker_manifests:
       - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
       - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
 
+# No GitHub Release page. Distribution is the GHCR image published by the
+# `dockers`/`docker_manifests` stages above; users deploy via docker compose
+# (see docs/Quick-Deployment.md). Disabling the release also removes the only
+# surface that ever printed commit author emails.
 release:
-  github:
-    owner: Meeks233
-    name: Redmemo
-  prerelease: auto
-  draft: false
-  header: |
-    ## RedMemo {{ .Tag }}
-
-    Self-hosted Reddit privacy solution with persistent archive.
-
-    ### Install
-    - Docker: `docker pull ghcr.io/meeks233/redmemo:{{ .Version }}`
-    - Binary: download below for your platform
-  footer: |
-    **Full Changelog**: https://github.com/Meeks233/Redmemo/compare/{{ .PreviousTag }}...{{ .Tag }}
+  disable: true

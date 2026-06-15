@@ -31,7 +31,7 @@
 
 ```bash
 mkdir redmemo && cd redmemo
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.homelab.yml
+curl -O https://raw.githubusercontent.com/Meeks233/Redmemo/main/deploy/docker-compose.homelab.yml
 mv docker-compose.homelab.yml docker-compose.yml
 echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
 docker compose up -d
@@ -47,7 +47,7 @@ docker compose up -d
 
 ```bash
 mkdir redmemo && cd redmemo
-curl -O https://raw.githubusercontent.com/redmemo/redmemo/main/deploy/docker-compose.public.yml
+curl -O https://raw.githubusercontent.com/Meeks233/Redmemo/main/deploy/docker-compose.public.yml
 mv docker-compose.public.yml docker-compose.yml
 cat > .env <<EOF
 PG_PASSWORD=$(openssl rand -hex 24)
