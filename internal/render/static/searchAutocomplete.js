@@ -112,6 +112,7 @@
             suffixSpan.textContent = pendingSuffix;
         }
         function refresh() {
+            if (document.activeElement !== input) { pendingSuffix = ''; render(); return; }
             pendingSuffix = suggestFor(input.value, input.selectionStart, refresh);
             render();
         }
@@ -218,6 +219,10 @@
         }
 
         function refresh() {
+            // A late lazy-fetch onReady callback can fire after the field is
+            // blurred; never re-establish a ghost on an unfocused element or it
+            // gets promoted to real text on the next focus.
+            if (document.activeElement !== el) return;
             // Treat the field as having only the committed (real) text; the
             // suggestion engine should never see the previous ghost suffix.
             var real = ghosting ? el.value.slice(0, committed) : el.value;

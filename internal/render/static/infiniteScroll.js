@@ -13,6 +13,8 @@
 	var interval = (parseInt(loader.dataset.interval, 10) || 2) * 1000;
 	var loading = false;
 	var done = false;
+	var gen = 0;
+	var pending429 = null;
 
 	function buildURL(off, sortOverride) {
 		var parts = [];
@@ -25,22 +27,31 @@
 	}
 
 	function doFetch(url, cb) {
+		var myGen = ++gen;
 		loading = true;
 		spinner.style.display = '';
 		fetch(url)
 			.then(function(r) {
+				if (myGen !== gen) return null;
 				if (r.status === 429) {
-					setTimeout(function() { loading = false; doFetch(url, cb); }, interval);
+					pending429 = setTimeout(function() { loading = false; doFetch(url, cb); }, interval);
+					return null;
+				}
+				if (!r.ok) {
+					spinner.style.display = 'none';
+					loading = false;
 					return null;
 				}
 				return r.text();
 			})
 			.then(function(html) {
+				if (myGen !== gen) return;
 				if (html === null) return;
 				spinner.style.display = 'none';
 				cb(html);
 			})
 			.catch(function() {
+				if (myGen !== gen) return;
 				spinner.style.display = 'none';
 				loading = false;
 			});
@@ -65,6 +76,8 @@
 
 	window.switchSort = function(el, newSort) {
 		if (sort === newSort) return false;
+		gen++;
+		if (pending429) { clearTimeout(pending429); pending429 = null; }
 		sort = newSort;
 		offset = 0;
 		done = false;

@@ -587,7 +587,7 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 			s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: superseded by newer cycle — skipped",
 				sub, subInterval, l2WavesPerCycle)
 			if r.Layer == "L2" {
-				s.maybeDropL2Cycle(tf, sub, subInterval)
+				s.maybeDropL2Cycle(tf, sub, cycleID, subInterval)
 			}
 			return false
 		}
@@ -596,7 +596,7 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 		sub, subInterval, l2WavesPerCycle, chunk, cycleID)
 
 	if r.Layer == "L2" {
-		s.advanceL2Wave(tf, sub, subInterval)
+		s.advanceL2Wave(tf, sub, cycleID, subInterval)
 	}
 
 	var runErr error
@@ -607,7 +607,7 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 			if s.runStore != nil {
 				_ = s.runStore.MarkFinished(r.ID, "skipped", "depth no longer covers L2")
 			}
-			s.maybeDropL2Cycle(tf, sub, subInterval)
+			s.maybeDropL2Cycle(tf, sub, cycleID, subInterval)
 			return true
 		}
 		runErr = s.runL2Wave(ctx, tf, sub, chunk, cycleID, subInterval)
@@ -622,7 +622,7 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 		}
 	}
 	if r.Layer == "L2" {
-		s.maybeDropL2Cycle(tf, sub, subInterval)
+		s.maybeDropL2Cycle(tf, sub, cycleID, subInterval)
 	}
 	return true
 }
@@ -630,9 +630,9 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 // maybeDropL2Cycle clears the in-memory snapshot once the last wave has
 // fired — outside the original runL2Cycle goroutine we have to do this by
 // hand instead of via its defer.
-func (s *Scheduler) maybeDropL2Cycle(tf, sub string, justFired int) {
+func (s *Scheduler) maybeDropL2Cycle(tf, sub, cycleID string, justFired int) {
 	if justFired >= l2WavesPerCycle {
-		s.dropL2Cycle(tf, sub)
+		s.dropL2Cycle(tf, sub, cycleID)
 	}
 }
 
@@ -1704,9 +1704,9 @@ func (s *Scheduler) runL2Cycle(ctx context.Context, tf, sub string, postCount in
 	chunks, offsets := planWaves(postCount, period)
 	cycleStart := time.Now()
 	s.recordL2CycleStart(tf, sub, postCount, chunks, depthHasL3(depth), cycleStart, period, offsets, cycleID)
-	defer s.dropL2Cycle(tf, sub)
+	defer s.dropL2Cycle(tf, sub, cycleID)
 	s.driveWaves(ctx, "L2", tf, sub, cycleID, chunks, offsets, cycleStart, period, postCount, nil,
-		func(wave int) { s.advanceL2Wave(tf, sub, wave) },
+		func(wave int) { s.advanceL2Wave(tf, sub, cycleID, wave) },
 		s.runL2Wave)
 }
 
@@ -2741,9 +2741,9 @@ func (s *Scheduler) recordL2CycleStart(tf, sub string, postCount int, chunks []i
 }
 
 // advanceL2Wave bumps the live wave pointer once a wave begins firing.
-func (s *Scheduler) advanceL2Wave(tf, sub string, wave int) {
+func (s *Scheduler) advanceL2Wave(tf, sub, cycleID string, wave int) {
 	s.statusMu.Lock()
-	if c, ok := s.l2Cycles[l2CycleKey(tf, sub)]; ok {
+	if c, ok := s.l2Cycles[l2CycleKey(tf, sub)]; ok && c.cycleID == cycleID {
 		c.currentWave = wave
 	}
 	s.statusMu.Unlock()
@@ -2751,9 +2751,12 @@ func (s *Scheduler) advanceL2Wave(tf, sub string, wave int) {
 
 // dropL2Cycle removes the cycle entry once all waves have fired (or the cycle
 // aborted) so /debug only shows in-flight cycles.
-func (s *Scheduler) dropL2Cycle(tf, sub string) {
+func (s *Scheduler) dropL2Cycle(tf, sub, cycleID string) {
 	s.statusMu.Lock()
-	if s.l2Cycles != nil {
+	// cycleID guard: a stale, still-draining previous cycle's deferred drop must
+	// not delete the snapshot of a newer cycle that took over the (tf,sub) slot
+	// one period later (overlapping cycles share the same map key).
+	if c, ok := s.l2Cycles[l2CycleKey(tf, sub)]; ok && c.cycleID == cycleID {
 		delete(s.l2Cycles, l2CycleKey(tf, sub))
 	}
 	s.statusMu.Unlock()

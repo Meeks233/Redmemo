@@ -41,6 +41,11 @@ const (
 	maxTokenTTL     = 60 * time.Minute
 	maxAttempts     = 3
 	lockoutWindow   = totp.Period * time.Second
+	// triesRetention bounds how long an idle per-IP attempt record is kept. The
+	// sweep in registerFailure drops entries past this with no active lockout, so
+	// a flood of one-off failures from many distinct source IPs cannot grow
+	// a.tries without bound (mirrors the tokens / usedCodes GC).
+	triesRetention = 10 * time.Minute
 	// safeEnvCookieTTL keeps the "this environment is safe" answer short-lived
 	// (was 1 year). A day-long ack respects the user's intent without freezing
 	// in a stale answer — if they later open /settings from a coffee shop,
@@ -61,6 +66,7 @@ type AuthManager struct {
 type attempt struct {
 	count      int
 	lockedUntil time.Time
+	lastSeen    time.Time
 }
 
 func NewAuthManager(serverSecret string, s *store.TOTPStore) *AuthManager {
@@ -151,7 +157,7 @@ func isTLSRequest(r *http.Request) bool {
 // clamp here keeps a hand-edited DB or stale value from issuing an out-of-band
 // cookie lifetime.
 func (h *Handler) resolveTokenTTL() time.Duration {
-	v := h.siteDefaults["settings_token_ttl"]
+	v := h.siteDefault("settings_token_ttl")
 	if v == "" {
 		return defaultTokenTTL
 	}
@@ -183,14 +189,24 @@ func (a *AuthManager) clearToken(w http.ResponseWriter) {
 func (a *AuthManager) registerFailure(ip string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	now := time.Now()
+	// Opportunistic GC: drop stale, un-locked attempt records so a stream of
+	// failed attempts from many distinct source IPs cannot grow a.tries without
+	// bound (the tokens / usedCodes maps sweep the same way).
+	for k, t := range a.tries {
+		if now.After(t.lockedUntil) && now.Sub(t.lastSeen) > triesRetention {
+			delete(a.tries, k)
+		}
+	}
 	st := a.tries[ip]
 	if st == nil {
 		st = &attempt{}
 		a.tries[ip] = st
 	}
 	st.count++
+	st.lastSeen = now
 	if st.count >= maxAttempts {
-		st.lockedUntil = time.Now().Add(lockoutWindow)
+		st.lockedUntil = now.Add(lockoutWindow)
 		st.count = 0
 		return true
 	}
@@ -327,9 +343,24 @@ func (h *Handler) currentStage(r *http.Request) authStage {
 	// stageServerSecret is implicit — the gate only advances past it when the
 	// secret has been submitted in the same request. Stateless on purpose:
 	// the server secret must be re-entered on every fresh round (no cookie).
-	secret, _ := h.auth.store.Secret()
+	secret, err := h.auth.store.Secret()
+	if err != nil {
+		// Fail closed: a transient DB read error must NOT be read as "not
+		// enrolled" - that path would let the server_secret POST mint a brand
+		// new secret over an existing enrollment. Show the server-secret form;
+		// its POST handler fails closed on a read error too.
+		return stageServerSecret
+	}
 	if secret == "" {
 		return stageServerSecret // first enrollment needs server-secret first
+	}
+	// A persisted-but-unconfirmed secret means enrollment was interrupted after
+	// the QR was shown. Re-show the QR (stageEnrollTOTP) so the owner can finish
+	// instead of being stranded at a bare code prompt for a secret they never
+	// captured. On a confirmed-flag read error, assume confirmed so a transient
+	// blip can't re-expose the QR.
+	if confirmed, cerr := h.auth.store.Confirmed(); cerr == nil && !confirmed {
+		return stageEnrollTOTP
 	}
 	return stageTOTPCode
 }
@@ -387,7 +418,16 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 		// rotate the second factor and lock the legitimate owner out. The
 		// admin escape hatch stays `redmemo --reset-totp` (clears the secret
 		// from the DB, after which the next server_secret POST enrolls fresh).
-		if existing, _ := h.auth.store.Secret(); existing != "" {
+		existing, err := h.auth.store.Secret()
+		if err != nil {
+			// Fail closed: a DB read error here must never be treated as "no
+			// secret enrolled" - that path mints a fresh secret and would let a
+			// leaked server secret silently rotate the second factor whenever the
+			// read transiently fails.
+			http.Error(w, "auth backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if existing != "" {
 			code := strings.TrimSpace(r.FormValue("current_code"))
 			if code == "" {
 				h.renderAuthPage(w, r, stageServerSecret, "TOTP is already enrolled — also enter the current 6-digit code to rotate it, or run `redmemo --reset-totp` first")
@@ -441,6 +481,13 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		h.auth.resetAttempts(ip)
+		// Mark enrollment confirmed so an interrupted enrollment (secret
+		// persisted but first code never entered) is no longer mistaken for a
+		// completed one. A persist failure here is non-fatal: the worst case is
+		// the QR is re-shown on the next visit, which is recoverable.
+		if err := h.auth.store.MarkConfirmed(); err != nil {
+			log.Printf("[auth] mark TOTP confirmed: %v", err)
+		}
 		h.auth.issueToken(w, r, h.resolveTokenTTL())
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 
@@ -577,6 +624,16 @@ func (h *Handler) themeView(r *http.Request, v *authPageView) {
 }
 
 func (h *Handler) renderAuthPage(w http.ResponseWriter, r *http.Request, stage authStage, errMsg string) {
+	if stage == stageEnrollTOTP {
+		// Re-display the one-time enrollment QR for an interrupted (persisted but
+		// unconfirmed) enrollment so it stays recoverable. Fall back to the
+		// server-secret form if the secret can't be read right now.
+		if secret, err := h.auth.store.Secret(); err == nil && secret != "" {
+			h.renderEnrollment(w, r, secret, errMsg)
+			return
+		}
+		stage = stageServerSecret
+	}
 	v := authPageView{Err: errMsg}
 	switch stage {
 	case stageSafeEnv:

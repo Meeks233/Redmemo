@@ -645,6 +645,17 @@ var migrations = []string{
 	    ON prefetch_runs (cycle_id) WHERE cycle_id IS NOT NULL;
 	 CREATE INDEX IF NOT EXISTS idx_prefetch_runs_sub_post
 	    ON prefetch_runs (subreddit, post_id);`,
+
+	// v32: backfill the TOTP enrollment-confirmed marker. Any instance that
+	// already has a persisted _totp_secret was enrolled before this marker
+	// existed, so treat it as confirmed — otherwise the new "interrupted
+	// enrollment" guard would re-show the enrollment QR to an already-enrolled
+	// operator on upgrade. Idempotent: inserts only when a secret exists and the
+	// marker is absent.
+	`INSERT INTO site_settings (name, value, source)
+	 SELECT '_totp_confirmed', '1', 'totp'
+	 WHERE EXISTS (SELECT 1 FROM site_settings WHERE name = '_totp_secret')
+	 ON CONFLICT (name) DO NOTHING;`,
 }
 
 func RunMigrations(db *sql.DB) error {

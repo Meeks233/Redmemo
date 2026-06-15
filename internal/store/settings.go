@@ -139,7 +139,9 @@ func (s *SettingsStore) DemoteOrphans(activeEnvKeys map[string]string) (int, err
 	defer stmt.Close()
 
 	for _, name := range orphans {
-		stmt.Exec(name)
+		if _, err := stmt.Exec(name); err != nil {
+			return 0, err // deferred tx.Rollback undoes the partial batch
+		}
 	}
 	return len(orphans), tx.Commit()
 }

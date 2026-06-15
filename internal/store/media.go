@@ -19,11 +19,12 @@ import (
 // Callers still pass raw URLs (or muxed: prefixed keys). Canonicalization is
 // internal so the call sites in media/proxy.go and media/mux.go are unchanged.
 type MediaIndexStore struct {
-	db *sql.DB
+	db        *sql.DB
+	hashLocks *keyedMutex // per-content-hash publish/evict serialization; see LockHash
 }
 
 func NewMediaIndexStore(db *sql.DB) *MediaIndexStore {
-	return &MediaIndexStore{db: db}
+	return &MediaIndexStore{db: db, hashLocks: newKeyedMutex()}
 }
 
 // Resolve returns the cached media for rawURL — joining the URL row to its

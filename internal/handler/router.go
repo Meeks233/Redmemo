@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	tls_client "github.com/bogdanfinn/tls-client"
@@ -45,8 +46,15 @@ type Handler struct {
 	// a fingerprint mismatch against every other outbound request.
 	spoofedClient tls_client.HttpClient
 	cfg           *config.Config
-	siteDefaults  map[string]string
-	auth          *AuthManager
+	// siteDefaults mirrors the site_settings table. siteDefaultsMu guards it:
+	// handleSettingsSave rewrites the map on a POST goroutine while nearly every
+	// other in-flight request reads it (readPreferences, the upstream-disabled
+	// gate, resolveTokenTTL). A bare map here triggers Go's fatal "concurrent map
+	// read and map write" abort, which the recovery middleware cannot catch. All
+	// reads outside the save path go through h.siteDefault().
+	siteDefaults   map[string]string
+	siteDefaultsMu sync.RWMutex
+	auth           *AuthManager
 	stats         statsCache
 	// upstreamFlight coalesces concurrent identical Reddit fetches so N parallel
 	// requests for the same /r/sub/sort page (or /comments/id) only spend one

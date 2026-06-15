@@ -633,14 +633,29 @@ func ParseMoreChildren(data []byte, postLink, postAuthor string) ([]Comment, err
 		roots = append(roots, c)
 	}
 
+	// seen tracks the IDs on the current DFS path so a cyclic parent graph in the
+	// (untrusted) upstream payload — e.g. A.parent=B, B.parent=A — cannot drive
+	// build into unbounded recursion and overflow the goroutine stack (a fatal,
+	// unrecoverable crash, unlike a normal panic). Each node has exactly one
+	// parent slot, so in an acyclic forest no node is ever revisited and this
+	// never truncates a legitimate tree.
+	seen := make(map[string]bool, len(flat))
 	var build func(c *Comment) Comment
 	build = func(c *Comment) Comment {
 		out := *c
+		if seen[c.ID] {
+			return out
+		}
 		kids := childrenOf[c.ID]
 		out.Replies = make([]Comment, 0, len(kids))
+		if len(kids) == 0 {
+			return out
+		}
+		seen[c.ID] = true
 		for _, k := range kids {
 			out.Replies = append(out.Replies, build(k))
 		}
+		delete(seen, c.ID)
 		return out
 	}
 

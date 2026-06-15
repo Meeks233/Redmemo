@@ -23,7 +23,7 @@ import (
 // quota_exhausted because it's the more specific failure mode and informs
 // the user that even idle tokens won't be used.
 func (h *Handler) shouldDegrade(ctx context.Context) (degrade bool, reason string) {
-	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+	if h.siteDefault("disable_initiative_upstream_access") == "on" {
 		return true, "upstream_disabled"
 	}
 	if h.hr != nil {

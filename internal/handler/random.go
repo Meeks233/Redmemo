@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash/fnv"
 	"math"
 	"net/http"
 	"net/url"
@@ -390,15 +391,22 @@ func (h *Handler) randomWalk(ctx context.Context, parsed searchquery.Parsed, opt
 	return posts, roundDone, nil
 }
 
-// randomWalkLocks holds one mutex per distinct walk state key, serializing the
-// non-atomic cursor read-modify-write of each filter. The set of live filters on
-// a self-hosted instance is small, so the map never meaningfully grows.
-var randomWalkLocks sync.Map // stateKey → *sync.Mutex
+// randomWalkLockArr is a fixed array of mutexes that serialize the non-atomic
+// cursor read-modify-write of each /random filter, indexed by a hash of the walk
+// state key. A previous per-key sync.Map grew without bound because /random is
+// public and its free-text q= yields unlimited distinct keys (a slow memory
+// leak / DoS on an internet-exposed instance). A fixed array removes the growth
+// entirely; an occasional hash collision merely serializes two unrelated filters,
+// which is harmless — each still advances its own Redis cursor.
+const randomWalkLockShards = 512
 
-// lockRandomWalk acquires the per-filter walk lock and returns its unlock func.
+var randomWalkLockArr [randomWalkLockShards]sync.Mutex
+
+// lockRandomWalk acquires the shard lock for stateKey and returns its unlock func.
 func lockRandomWalk(stateKey string) func() {
-	muAny, _ := randomWalkLocks.LoadOrStore(stateKey, &sync.Mutex{})
-	mu := muAny.(*sync.Mutex)
+	hsh := fnv.New32a()
+	hsh.Write([]byte(stateKey))
+	mu := &randomWalkLockArr[hsh.Sum32()%randomWalkLockShards]
 	mu.Lock()
 	return mu.Unlock
 }

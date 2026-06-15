@@ -433,10 +433,11 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		// video-only file as an emergency silent copy so requests stop hitting
 		// Reddit live, and record the failure so L5 (and user-triggered
 		// retries) can try again later.
-		hash, outPath, perr := publishContent(videoTmp, p.rootPath)
+		hash, outPath, release, perr := publishContent(videoTmp, p.rootPath, p.mediaStore.LockHash)
 		if perr != nil {
 			return nil, fmt.Errorf("cache emergency silent: %w", perr)
 		}
+		defer release()
 		meta, err := p.saveMuxedFile(key, hash, outPath)
 		if err != nil {
 			return nil, err
@@ -488,10 +489,11 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 		verdict = "has_audio"
 	}
 
-	hash, outPath, err := publishContent(stagingPath, p.rootPath)
+	hash, outPath, release, err := publishContent(stagingPath, p.rootPath, p.mediaStore.LockHash)
 	if err != nil {
 		return nil, fmt.Errorf("publish muxed: %w", err)
 	}
+	defer release()
 	meta, err := p.saveMuxedFile(key, hash, outPath)
 	if err != nil {
 		return nil, err
@@ -605,10 +607,11 @@ func (p *Proxy) downloadSilent(ctx context.Context, videoURL, key string) (*stor
 		p.recordUnavailable(videoURL, status, err.Error())
 		return nil, fmt.Errorf("download: %w", err)
 	}
-	hash, outPath, err := publishContent(stagingPath, p.rootPath)
+	hash, outPath, release, err := publishContent(stagingPath, p.rootPath, p.mediaStore.LockHash)
 	if err != nil {
 		return nil, fmt.Errorf("publish silent: %w", err)
 	}
+	defer release()
 	info, err := os.Stat(outPath)
 	if err != nil {
 		return nil, fmt.Errorf("stat: %w", err)

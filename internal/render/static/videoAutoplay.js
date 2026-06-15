@@ -68,6 +68,11 @@
   function tryPlay(video) {
     // Respect an explicit user pause: do not resume on our own.
     if (video._userPaused) return;
+    // Symmetric to scriptPause(): only raise the flag when play() will actually
+    // cause a paused->playing transition. play() on an already-playing video
+    // fires no "play" event, so the flag would never be consumed and would leak
+    // onto the next genuine user play().
+    if (!video.paused) return;
     video._programmaticPlay = true;
     var p = video.play();
     if (p && typeof p.catch === "function") {

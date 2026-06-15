@@ -238,6 +238,9 @@ func (c *Config) Validate() error {
 	if c.RateLimit.WindowDuration <= 0 {
 		errs = append(errs, errors.New("ratelimit.window_duration must be positive"))
 	}
+	if c.Media.EvictionCheckInterval <= 0 {
+		errs = append(errs, errors.New("media.eviction_check_interval must be positive"))
+	}
 	for i, tok := range c.OAuth.Tokens {
 		if tok.ClientID == "" {
 			errs = append(errs, fmt.Errorf("oauth.tokens[%d].client_id is required", i))

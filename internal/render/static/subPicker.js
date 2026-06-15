@@ -51,15 +51,24 @@ function NPPicker(opts) {
 		return normalizeSub(last);
 	}
 
+	// ghostStart marks the start offset of the live inline-complete ghost (the
+	// tail-anchored selection inlineComplete inserted, running to the end of the
+	// value); -1 means no ghost is active. We track it explicitly rather than
+	// inferring it from selection geometry, because a hand-made end-anchored
+	// selection has the same shape as a real ghost and must NOT be stripped.
+	var ghostStart = -1;
+
 	// effectiveValue returns just the user-typed portion of the textarea, stripping
 	// a trailing ghost completion (a tail-anchored selection inserted by
 	// inlineComplete). The suggestion list and includedSet must reason about what
 	// the user actually typed, not the speculative completion, or filtering by the
-	// completed name would always collapse to zero results.
+	// completed name would always collapse to zero results. We only strip when a
+	// ghost is actually active AND the live selection still exactly matches the
+	// recorded ghost range; otherwise the selection is the user's own and is left
+	// intact.
 	function effectiveValue() {
-		var start = inputEl.selectionStart, end = inputEl.selectionEnd;
-		if (start !== null && start < end && end === inputEl.value.length) {
-			return inputEl.value.substring(0, start);
+		if (ghostStart >= 0 && inputEl.selectionStart === ghostStart && inputEl.selectionEnd === inputEl.value.length) {
+			return inputEl.value.substring(0, ghostStart);
 		}
 		return inputEl.value;
 	}
@@ -213,12 +222,27 @@ function NPPicker(opts) {
 		var anchor = inputEl.value.length;
 		inputEl.value = inputEl.value + match.substring(q.length);
 		inputEl.setSelectionRange(anchor, inputEl.value.length);
+		ghostStart = anchor;
 	}
 
 	inputEl.addEventListener('input', function () {
+		// Any input event supersedes the previous ghost; inlineComplete re-sets
+		// ghostStart if it inserts a fresh completion.
+		ghostStart = -1;
 		inlineComplete();
 		renderList();
 	});
+	// A caret move, manual selection, or click that doesn't accept the ghost
+	// invalidates it: the live selection no longer represents inlineComplete's
+	// speculative completion, so effectiveValue() must stop stripping it.
+	function invalidateGhost() {
+		if (ghostStart >= 0 && !(inputEl.selectionStart === ghostStart && inputEl.selectionEnd === inputEl.value.length)) {
+			ghostStart = -1;
+		}
+	}
+	inputEl.addEventListener('keyup', invalidateGhost);
+	inputEl.addEventListener('click', invalidateGhost);
+	document.addEventListener('selectionchange', invalidateGhost);
 	// Notify on blur and on each pick. The settings page uses this only to flag the
 	// form dirty (Save bar) — the field itself is part of the form and persisted on
 	// Save, so onChange no longer writes anything on its own.

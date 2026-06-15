@@ -573,7 +573,7 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	// h.siteDefaults already mirrors the settings table (refreshed on every
 	// save), so consult it instead of issuing another DB round-trip.
 	var prefetchSubs []string
-	if v := h.siteDefaults["prefetch_subs"]; v != "" {
+	if v := h.siteDefault("prefetch_subs"); v != "" {
 		prefetchSubs = searchquery.Parse(v).WhiteSubs
 	}
 
@@ -638,9 +638,9 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		frontPageQuery = searchquery.Parse(prefs.FrontPageSubs).Canonical()
 	}
 	prefetchQuery := searchquery.JoinSubs(prefetchSubs)
-	prefetchUnified := ComposePrefetchUnified(prefetchQuery, h.siteDefaults["prefetch_sub_modes"])
+	prefetchUnified := ComposePrefetchUnified(prefetchQuery, h.siteDefault("prefetch_sub_modes"))
 
-	archiveControl := h.siteDefaults["archive_control"]
+	archiveControl := h.siteDefault("archive_control")
 
 	data := render.SettingsPageData{
 		BasePage: render.BasePage{
@@ -714,9 +714,11 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		h.siteDefaultsMu.Lock()
 		for k, v := range updates {
 			h.siteDefaults[k] = v
 		}
+		h.siteDefaultsMu.Unlock()
 		// Hot-swap the archiver's Control whenever the user changes the
 		// archive_control field — no restart needed.
 		if v, ok := updates["archive_control"]; ok && h.archiver != nil {

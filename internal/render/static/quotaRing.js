@@ -20,6 +20,8 @@
 		var currentRem = -1;
 		var clockIv = null;
 		var pollIv = null;
+		var inFlight = false;
+		var retryIv = null;
 
 		// Fill the arc to remaining/capacity (clamped to [0,1]).
 		function renderArc(rem, cap) {
@@ -91,15 +93,23 @@
 			if (reset > 0) {
 				startClock();
 			} else {
+				if (clockIv) { clearInterval(clockIv); clockIv = null; }
 				renderClock(0);
 			}
 			if (persist) save(rem, cap, _endMs);
 		}
 
 		function fetchStatus() {
+			if (inFlight) return;
+			inFlight = true;
 			fetch('/api/status').then(function(r){ return r.json(); }).then(function(d) {
+				inFlight = false;
 				apply(d, true);
-			}).catch(function(){ setTimeout(fetchStatus, 3000); });
+			}).catch(function(){
+				inFlight = false;
+				if (retryIv) clearTimeout(retryIv);
+				retryIv = setTimeout(fetchStatus, 3000);
+			});
 		}
 
 		pollIv = setInterval(fetchStatus, 5000);

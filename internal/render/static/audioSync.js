@@ -125,6 +125,10 @@
         // have no audio (clearNotice on "silent").
         var audioEl = null;
         var syncListeners = null;
+        // The bandwidth-yield watchdog (timeupdate) is bound separately from
+        // syncListeners; keep its handle at track() scope so detach can remove
+        // it on every detach/re-attach cycle and it never accumulates.
+        var watchdogHandler = null;
         // Viewport-gated poll loop state. `visible` is the latest IO verdict;
         // `pollTimer` is the live setTimeout handle (so a pause can cancel it);
         // `pollPaused` means the poll loop parked itself because the video
@@ -132,6 +136,11 @@
         // whole machine down for terminal states.
         var visible = visObserver ? false : true;
         var pollTimer = null;
+        // In-flight fetch guard. poll() nulls pollTimer before awaiting the
+        // fetch, so during the round-trip pollTimer is null with no other
+        // signal that a poll is live; without this flag a scroll-out/scroll-in
+        // would launch a concurrent fetch chain (see _audioSyncResume).
+        var polling = false;
         // pollPaused tracks "the loop wants to run but is parked waiting for
         // visibility". It must agree with `visible` at init: with an IO present
         // we start unseen, so the loop IS parked from t=0 — otherwise the IO's
@@ -328,11 +337,14 @@
                     }
                 }
             }
-            video.addEventListener("timeupdate", audioWaitWatchdog);
+            watchdogHandler = audioWaitWatchdog;
+            video.addEventListener("timeupdate", watchdogHandler);
             // Once audio is buffered (companionLive) the canplay handler
             // tears the notice down and we no longer need the watchdog —
             // but keep the listener installed; it's a cheap guard and
-            // self-disables on the companionLive check.
+            // self-disables on the companionLive check. detachAudioCompanion
+            // removes it so the detach/re-attach cycle (scroll out/in) never
+            // accumulates duplicate timeupdate listeners.
 
             (video.parentNode || document.body).appendChild(audioEl);
 
@@ -349,6 +361,10 @@
                 video.removeEventListener(ev, syncListeners[ev]);
             }
             syncListeners = null;
+            if (watchdogHandler) {
+                video.removeEventListener("timeupdate", watchdogHandler);
+                watchdogHandler = null;
+            }
             try {
                 audioEl.pause();
                 // Firefox holds onto already-buffered audio after removeChild
@@ -546,9 +562,11 @@
             // Park the loop while off-screen — onIntersect will resume it.
             if (!visible) { pollPaused = true; return; }
             pollPaused = false;
+            polling = true;
             fetch("/api/audio_status?src=" + encodeURIComponent(src), { cache: "no-store" })
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) {
+                    polling = false;
                     if (done) return;
                     if (data.state === "ready") {
                         done = true;
@@ -602,6 +620,7 @@
                     }
                 })
                 .catch(function () {
+                    polling = false;
                     if (done) return;
                     polls++;
                     if (polls < MAX_POLLS && visible) {
@@ -633,8 +652,10 @@
             // Kick off (or resume) polling whenever this video becomes
             // visible and no tick is already in flight. The status poll runs
             // for every visible muxable video — the focus gate now lives on
-            // companion attach, not on the poll loop.
-            if (!pollTimer) {
+            // companion attach, not on the poll loop. `polling` covers the
+            // window where pollTimer is null because a fetch is mid-flight, so
+            // a scroll-out/scroll-in can't launch a second concurrent chain.
+            if (!pollTimer && !polling) {
                 pollPaused = false;
                 poll();
             }

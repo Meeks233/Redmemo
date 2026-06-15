@@ -378,6 +378,23 @@ func resolveDateValue(val string) (after, before *time.Time, ok bool) {
 // relativeRe matches a relative offset like 7d, 12h, 1y, 1mo, 30m.
 var relativeRe = regexp.MustCompile(`^(?i)(\d+)(mo|[smhdwy])$`)
 
+// maxDuration is the largest representable time.Duration (int64 nanoseconds).
+const maxDuration time.Duration = 1<<63 - 1
+
+// mulDuration multiplies a user-supplied count by a unit, rejecting (false) any
+// product that would overflow int64 nanoseconds. Without this guard a value like
+// `date>293y` wraps the Duration negative, and nowFn().Add(-d) then moves the
+// bound into the FUTURE — silently inverting the filter so it drops every post.
+func mulDuration(n int, unit time.Duration) (time.Duration, bool) {
+	if n < 0 {
+		return 0, false
+	}
+	if n != 0 && time.Duration(n) > maxDuration/unit {
+		return 0, false
+	}
+	return time.Duration(n) * unit, true
+}
+
 // parseRelative parses a relative offset into a Duration.
 func parseRelative(val string) (time.Duration, bool) {
 	m := relativeRe.FindStringSubmatch(strings.TrimSpace(val))
@@ -390,19 +407,19 @@ func parseRelative(val string) (time.Duration, bool) {
 	}
 	switch strings.ToLower(m[2]) {
 	case "s":
-		return time.Duration(n) * time.Second, true
+		return mulDuration(n, time.Second)
 	case "m":
-		return time.Duration(n) * time.Minute, true
+		return mulDuration(n, time.Minute)
 	case "h":
-		return time.Duration(n) * time.Hour, true
+		return mulDuration(n, time.Hour)
 	case "d":
-		return time.Duration(n) * 24 * time.Hour, true
+		return mulDuration(n, 24*time.Hour)
 	case "w":
-		return time.Duration(n) * 7 * 24 * time.Hour, true
+		return mulDuration(n, 7*24*time.Hour)
 	case "mo":
-		return time.Duration(n) * 30 * 24 * time.Hour, true
+		return mulDuration(n, 30*24*time.Hour)
 	case "y":
-		return time.Duration(n) * 365 * 24 * time.Hour, true
+		return mulDuration(n, 365*24*time.Hour)
 	}
 	return 0, false
 }

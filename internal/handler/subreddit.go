@@ -251,7 +251,7 @@ func (h *Handler) serveSubreddit(w http.ResponseWriter, r *http.Request, sub, so
 	// visitors to the equivalent archive route instead of attempting upstream
 	// and falling back. Skips the cache/HR gate/archive chain entirely so the
 	// URL surface advertises the archive truthfully.
-	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+	if h.siteDefault("disable_initiative_upstream_access") == "on" {
 		http.Redirect(w, r, "/archive/r/"+sub, http.StatusFound)
 		return
 	}

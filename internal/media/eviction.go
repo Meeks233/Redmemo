@@ -75,8 +75,9 @@ func (e *Evictor) Start(ctx context.Context) {
 
 // RunOnce reclaims 10% of the configured cap when usage has reached the cap.
 // The selection is done in the database (highest cache-score first, cumulative
-// file_size crossing the target) and the surviving content rows are dropped to
-// the -1 absence sentinel in a single batched UPDATE.
+// file_size crossing the target); each selected file is removed and its content
+// row dropped to the -1 absence sentinel under the row's per-hash publish lock,
+// so a concurrent re-download of the same content can never interleave.
 func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
 	usedBytes, err := e.DiskUsage()
 	if err != nil {
@@ -106,35 +107,45 @@ func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
 		return 0, 0, nil
 	}
 
-	hashes := make([]string, 0, len(candidates))
-	var removeFails int
+	// Reclaim each candidate under its per-hash publish lock (see
+	// store.LockHash). Holding the lock across os.Remove + MarkEvicted serializes
+	// the reclaim against a concurrent re-download's rename + Save for the same
+	// content: paths are content-addressed, so a re-download lands at the exact
+	// path we just removed, and without the lock it could re-create and re-point
+	// the file between our remove and the row-NULL — stranding a present file
+	// behind a file_path=NULL row that eviction can never re-select. The lock
+	// closes that download/evict TOCTOU outright (the prior code only narrowed it
+	// with a best-effort re-stat). The lock is per-hash and never nested, so the
+	// loop can't deadlock; an unlock is paired with every acquire on every path.
+	var removeFails, markFails int
 	for _, meta := range candidates {
 		if meta.FilePath == nil {
 			continue
 		}
+		unlock := e.mediaStore.LockHash(meta.Hash)
 		if err := os.Remove(*meta.FilePath); err != nil && !os.IsNotExist(err) {
+			unlock()
 			log.Printf("eviction: remove %s: %v", *meta.FilePath, err)
 			removeFails++
 			continue
 		}
-		hashes = append(hashes, meta.Hash)
+		if err := e.mediaStore.MarkEvicted(meta.Hash); err != nil {
+			unlock()
+			log.Printf("eviction: mark evicted %s: %v", meta.Hash, err)
+			markFails++
+			continue
+		}
+		unlock()
 		freedBytes += meta.FileSize
 		evictedCount++
-	}
-
-	if len(hashes) > 0 {
-		if err := e.mediaStore.BatchMarkEvicted(hashes); err != nil {
-			log.Printf("eviction: batch mark evicted: %v", err)
-			e.Events.Addf(LevelError, "evict", "batch mark evicted: %v", err)
-		}
 	}
 
 	level := LevelOK
 	msg := fmt.Sprintf("freed %s from %d files (target %s)",
 		humanBytes(freedBytes), evictedCount, humanBytes(targetFree))
-	if removeFails > 0 {
+	if removeFails > 0 || markFails > 0 {
 		level = LevelWarn
-		msg += fmt.Sprintf(", %d remove errors", removeFails)
+		msg += fmt.Sprintf(", %d remove / %d mark errors", removeFails, markFails)
 	}
 	e.Events.Add(level, "evict", msg)
 	return freedBytes, evictedCount, nil

@@ -738,6 +738,13 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 		return nil, fmt.Errorf("mkdir shard: %w", err)
 	}
 
+	// Hold the per-hash publish lock across the rename and the Save below: it
+	// serializes this publish against the evictor's os.Remove + MarkEvicted for
+	// the same content, closing the download/evict TOCTOU (see LockHash). Held
+	// to function return, which lands right after Save.
+	unlock := p.mediaStore.LockHash(hash)
+	defer unlock()
+
 	// If the same bytes are already cached under a different URL, drop the
 	// staging file — disk dedup is structural. Otherwise atomic-rename into
 	// place; a concurrent reader of a prior copy at this path never sees a
@@ -908,6 +915,20 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 				return status, hdr, written, fmt.Errorf("status %d", status)
 			}
 			total = parseContentRangeTotal(resp.Header.Get("Content-Range"))
+		}
+		// Validate the status of EVERY chunk, not just the first (the status==0
+		// block above only guards the opening chunk). A continuation chunk that
+		// comes back non-2xx — typically a 416 once we step one chunk past a
+		// totalless EOF (a 206 whose Content-Range carries no total) — must never
+		// have its error body copied into the output: that corrupts the served,
+		// and on the Download path hashed-and-cached, media. Bytes already
+		// delivered are a clean end; otherwise surface the error.
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+			resp.Body.Close()
+			if written > 0 {
+				return status, hdr, written, nil
+			}
+			return resp.StatusCode, resp.Header, written, fmt.Errorf("status %d", resp.StatusCode)
 		}
 		n, cerr := io.Copy(w, resp.Body)
 		resp.Body.Close()

@@ -41,10 +41,11 @@ async function checkOtherInstances() {
     try {
         const response = await fetch('/instances.json');
         const data = await response.json();
-        const instances = window.location.host.endsWith('.onion') ? data.instances.filter(i => i.onion) : data.instances.filter(i => i.url);
+        const onTor = window.location.host.endsWith('.onion');
+        const instances = onTor ? data.instances.filter(i => i.onion) : data.instances.filter(i => i.url);
         if (instances.length == 0) return;
         const randomInstance = instances[Math.floor(Math.random() * instances.length)];
-        const instanceUrl = randomInstance.url ?? randomInstance.onion;
+        const instanceUrl = onTor ? (randomInstance.onion ?? randomInstance.url) : (randomInstance.url ?? randomInstance.onion);
         // Set the href of the <a> tag to the instance URL with path included
         document.getElementById('random-instance').href = instanceUrl + window.location.pathname;
         document.getElementById('random-instance').innerText = "Visit Random Instance";

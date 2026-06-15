@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -317,12 +318,56 @@ func videoMuted(p reddit.Post, prefs reddit.Preferences) bool {
 // The flair/thumbnail style helpers return templ.SafeCSS so the (Reddit-sourced)
 // values are emitted verbatim, matching the old direct interpolation rather than
 // being neutralized by templ's CSS sanitizer.
-func flairEmojiStyle(url string) templ.SafeCSS {
-	return templ.SafeCSS("background-image:url('" + url + "');")
+
+// safeEmojiURLRe rejects any flair-emoji value carrying a character that could
+// break out of the url('...') wrapper — quotes, parentheses, backslash,
+// whitespace or angle brackets — while still admitting every form Reddit
+// legitimately produces: a same-origin proxy path like /emoji/<id>/<name>
+// (FormatURL rewrites emoji.redditmedia.com to exactly that, so the common case
+// is relative, NOT absolute), as well as an absolute URL for the hosts FormatURL
+// passes through verbatim. The value comes straight from upstream flair JSON and
+// is emitted through templ.SafeCSS, which only HTML-escapes — it does NOT strip
+// CSS metacharacters — so an unvalidated value containing  ')  could close the
+// url() early and inject extra declarations (full-page overlays, url()
+// exfiltration) onto every viewer; a backslash could smuggle a CSS-escaped  )
+// past the same guard, so it is excluded too. No scheme is required because
+// background-image never executes its url() target (javascript:/data: are inert
+// here) — only the breakout characters are dangerous. Mirrors the
+// sanitizeCSSColor allowlist in spirit.
+var safeEmojiURLRe = regexp.MustCompile(`^[^\s'"()\\<>]+$`)
+
+func flairEmojiStyle(emojiURL string) templ.SafeCSS {
+	if !safeEmojiURLRe.MatchString(emojiURL) {
+		return "" // empty or carries url()-breakout chars — render no background
+	}
+	return templ.SafeCSS("background-image:url('" + emojiURL + "');")
+}
+
+// safeCSSColorRe admits only the color syntaxes Reddit flair legitimately uses:
+// a #hex triplet/quad (3/4/6/8 digits) or a bare CSS color keyword. Anything
+// carrying CSS metacharacters (; : ( ) % / whitespace) is rejected. This matters
+// because flair colors come straight from upstream JSON and are emitted into an
+// inline style via templ.SafeCSS, which only HTML-escapes — it does NOT strip
+// CSS metacharacters, so an unvalidated value could inject extra declarations
+// (full-page position:fixed overlays, url() exfiltration) onto every viewer.
+var safeCSSColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]{1,32}$`)
+
+func sanitizeCSSColor(v string) string {
+	if safeCSSColorRe.MatchString(v) {
+		return v
+	}
+	return ""
 }
 
 func flairBoxStyle(fg, bg string) templ.SafeCSS {
-	return templ.SafeCSS("color:" + fg + "; background:" + bg + ";")
+	var b strings.Builder
+	if c := sanitizeCSSColor(fg); c != "" {
+		b.WriteString("color:" + c + ";")
+	}
+	if c := sanitizeCSSColor(bg); c != "" {
+		b.WriteString("background:" + c + ";")
+	}
+	return templ.SafeCSS(b.String())
 }
 
 func thumbBoxStyle(w, h int64) templ.SafeCSS {

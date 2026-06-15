@@ -163,8 +163,18 @@
         var resumePlay = wantsToPlay(video) || !video.paused;
         st.retries++;
 
+        function onErr() {
+            // The cache-busted reload itself failed (error fired instead of
+            // loadedmetadata) — clear st.reloading so the bounded-retry path
+            // isn't wedged true forever. The attach()-level error handler will
+            // schedule the next retry (subject to the retry budget).
+            video.removeEventListener("loadedmetadata", restore);
+            video.removeEventListener("error", onErr);
+            st.reloading = false;
+        }
         function restore() {
             video.removeEventListener("loadedmetadata", restore);
+            video.removeEventListener("error", onErr);
             try {
                 if (resumeAt > 0 &&
                     (!video.duration || resumeAt < video.duration)) {
@@ -185,6 +195,7 @@
             st.reloadedAt = Date.now();
         }
         video.addEventListener("loadedmetadata", restore);
+        video.addEventListener("error", onErr);
 
         // Prefer setting the live src to a cache-busted form so the browser
         // refetches even if it would otherwise cling to the failed resource.

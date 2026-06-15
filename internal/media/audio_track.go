@@ -152,10 +152,11 @@ func (p *Proxy) downloadSeparateAudio(ctx context.Context, videoURL, key string)
 	if isSilent, serr := audioIsSilentPlaceholder(audioTmp); serr == nil && isSilent {
 		return nil, "silent", nil
 	}
-	hash, outPath, err := publishContent(audioTmp, p.rootPath)
+	hash, outPath, release, err := publishContent(audioTmp, p.rootPath, p.mediaStore.LockHash)
 	if err != nil {
 		return nil, "", fmt.Errorf("publish audio: %w", err)
 	}
+	defer release()
 	info, err := os.Stat(outPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("stat audio: %w", err)

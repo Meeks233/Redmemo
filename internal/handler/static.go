@@ -418,7 +418,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// shouldDegrade: upstream_disabled > HR cooldown > quota_exhausted > clear.
 	currentReason := ""
 	currentReset := 0
-	if h.siteDefaults["disable_initiative_upstream_access"] == "on" {
+	if h.siteDefault("disable_initiative_upstream_access") == "on" {
 		currentReason = "upstream_disabled"
 	} else if hrReason != "" {
 		currentReason = hrReason

@@ -121,9 +121,19 @@ var prefDefaults = map[string]string{
 	"show_all_gallery_media":  "off",
 }
 
+// siteDefault returns the operator-set default for name under a read lock, or
+// "" when unset. Every read of siteDefaults outside handleSettingsSave must go
+// through this to stay race-free with the save path's rewrite.
+func (h *Handler) siteDefault(name string) string {
+	h.siteDefaultsMu.RLock()
+	v := h.siteDefaults[name]
+	h.siteDefaultsMu.RUnlock()
+	return v
+}
+
 func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	pref := func(name string) string {
-		if v := h.siteDefaults[name]; v != "" {
+		if v := h.siteDefault(name); v != "" {
 			return v
 		}
 		return prefDefaults[name]
