@@ -105,10 +105,10 @@ func TestParsePrefetchSubModes_Depth(t *testing.T) {
 		},
 		{
 			name: "multiple subs with mixed depth",
-			in:   "golang=depth:l2+l3&sort:top+golang=depth:none+rust=sort:new",
+			in:   "golang=depth:l2+l3&sort:top+python=depth:none+rust=sort:new",
 			want: []PrefetchSubOverride{
 				{Sub: "golang", Sort: "top", Depth: "l2+l3"},
-				{Sub: "golang", Depth: "none"},
+				{Sub: "python", Depth: "none"},
 				{Sub: "rust", Sort: "new"},
 			},
 		},
@@ -209,7 +209,7 @@ func TestNormalizeSettings_PrefetchDefaultDepth(t *testing.T) {
 // public docs example (default=none + r/golang opt-in via depth:l2+l3).
 func TestNormalizeSettings_PrefetchSubModes_Depth(t *testing.T) {
 	updates := map[string]string{
-		"prefetch_sub_modes": "golang=DEPTH:l3+L2&SORT:TOP+golang=depth:NoNe",
+		"prefetch_sub_modes": "golang=DEPTH:l3+L2&SORT:TOP+rust=depth:NoNe",
 	}
 	out, _ := NormalizeSettings(updates)
 	got := out["prefetch_sub_modes"]
@@ -219,7 +219,7 @@ func TestNormalizeSettings_PrefetchSubModes_Depth(t *testing.T) {
 	if !strings.Contains(got, "sort:top") {
 		t.Errorf("expected sort:top in %q", got)
 	}
-	if !strings.Contains(got, "golang=depth:none") {
-		t.Errorf("expected golang=depth:none in %q", got)
+	if !strings.Contains(got, "rust=depth:none") {
+		t.Errorf("expected rust=depth:none in %q", got)
 	}
 }

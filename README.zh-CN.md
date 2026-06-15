@@ -6,18 +6,18 @@
 
 ![RedMemo 浏览 r/golang](docs/img/hero.png)
 
-<sub>RedMemo 提供 <code>/r/golang</code> 的浏览 —— UI 完全继承自 Redlib，当上游被限速时由本地存档接管。</sub>
+<sub>用 RedMemo 浏览 <code>/r/golang</code> —— UI 完全继承自 Redlib，上游被限速时由本地存档接管。</sub>
 
 ---
 
 **10 秒简介。** 沿用 Redlib 的 UI，把后端用 Go 重写，主动 + 被动地缓存资源。你熟悉的 Redlib 路由、主题与 cookie 一概保留 —— 底层加入 Postgres + 内容寻址的媒体存档、被动的自然预取调度器，以及一个 TOTP 保护的 `/settings` 面板。
 
-- 🗄 **持久化** —— 每一个见过的帖子和媒体都进 Postgres + 磁盘内容寻址存储。Reddit 删了的不会带走你的存档。
-- 🐢 **被动** —— 上游被封或限速时,请求降级到本地存档,带一条小横幅,绝不直接 5xx。
-- 🔐 **门禁** —— `/settings` 由预共享服务端密钥 + TOTP 把守,按 IP 三次错锁定。
+- 🗄 **持久化** —— 每一个见过的帖子和媒体都写入 Postgres + 磁盘内容寻址存储。Reddit 那边删掉的内容,你的存档里照样还在。
+- 🐢 **被动** —— 上游被封或限速时,请求自动降级到本地存档,只挂一条小横幅提示,绝不直接 5xx。
+- 🔐 **门禁** —— `/settings` 由预共享服务端密钥 + TOTP 把守,同一 IP 错三次即锁定。
 - 🦫 **Go + templ** —— 服务端渲染;无 JS 框架,无客户端水合,无客户端状态。
 - 🔎 **搜索** —— e621 风格的统一语法,通查本地存档(`sub:`、`rating:`、`score:>1000`、`flair:` …) —— 详见 [搜索与 URL 参考](docs/Search-Reference.md)。
-- 💍 **额度感知** —— 单次进入 sub / 搜索的上游请求默认抓取 50 条（可配置 5–100）。导航栏自带一圈动态 SVG ring,实时显示当前窗口的剩余额度;额度紧张时由 HR 层自动限流并降级到本地存档 —— 详见 [额度设计](docs/Budget-Design.md)。
+- 💍 **额度感知** —— 每次进入 sub 或搜索,向上游默认抓取 50 条（可配 5–100）。导航栏有一圈动态 SVG 环,实时显示当前窗口的剩余额度;额度吃紧时由 HR 层自动限流,并降级到本地存档 —— 详见 [额度设计](docs/Budget-Design.md)。
 
 ## TL;DR 部署
 
@@ -42,7 +42,7 @@ docker compose up -d
 ### Public —— TOTP 守护 `/settings`,面向公网
 
 **何时选这个配置:**
-- 你无法控制谁能访问站点(链接分享、公开 DNS、搜索引擎可索引),需要 RedMemo 自带的 TOTP 门禁 + 按 IP 三次错锁定来承担认证工作。
+- 你无法控制谁能访问站点(链接会被分享、DNS 公开、能被搜索引擎索引),需要 RedMemo 自带的 TOTP 门禁 + 同一 IP 错三次即锁定来扛起认证。
 - 你想把 **Archive hub**(存档中心)作为公共资源开放 —— 陌生人可浏览 RedMemo 已保存的内容,而 `/settings` 与预取控制依然锁在注册之后。
 
 ```bash
@@ -56,13 +56,13 @@ EOF
 docker compose up -d
 ```
 
-RedMemo 只监听 `:8080` —— 请自行准备一个 TLS 终止的反向代理(nginx、Caddy、Traefik ……)转发过来。[`deploy/nginx.conf`](deploy/nginx.conf) 提供一个示例 vhost 作参考(`/media/` 走 X-Accel-Redirect、静态资源缓存、转发头),请根据自己的环境调整,而不是直接接入默认。
+RedMemo 只监听 `:8080` —— 请自行在前面架一个负责 TLS 终止的反向代理(nginx、Caddy、Traefik ……)把流量转发进来。[`deploy/nginx.conf`](deploy/nginx.conf) 给了一份示例 vhost 供参考(`/media/` 走 X-Accel-Redirect、静态资源缓存、转发头),请按自己的环境调整后再用,别直接照搬默认值。
 
-到 `/settings` 用服务端密钥注册 TOTP,然后绑定按 IP 三次错锁定。完整环境变量矩阵见 [快速部署](docs/Quick-Deployment.md)。
+打开 `/settings`,用服务端密钥注册 TOTP,启用同一 IP 错三次即锁定。完整环境变量一览见 [快速部署](docs/Quick-Deployment.md)。
 
 ![/settings 的 TOTP 门禁](docs/img/totp.png)
 
-<sub>公网配置下守护 <code>/settings</code> 的 TOTP 提示。按 IP 三次错锁定,注册由 <code>REDMEMO_SERVER_SECRET</code> 把关。</sub>
+<sub>公网配置下守护 <code>/settings</code> 的 TOTP 提示。同一 IP 错三次即锁定,注册由 <code>REDMEMO_SERVER_SECRET</code> 把关。</sub>
 
 ## 文档
 

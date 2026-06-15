@@ -15,21 +15,21 @@ const minRepostTitleLen = 12
 
 // minClusterTokens is the minimum number of distinctive tokens (post-stopword,
 // post-length-filter) a title must produce before FoldReposts will consider
-// it for clustering. Below this floor titles like "rule" / "python" / "M4M"
+// it for clustering. Below this floor titles like "lol" / "this" / "PSA"
 // would only be one or two tokens — too thin a fingerprint, and bucketing
 // them would collide unrelated content.
 const minClusterTokens = 3
 
 // jaccardThreshold is the token-set similarity floor for treating two titles
 // as the same content. Calibrated on a real spam page:
-//   - typo variants ("knaughty" vs "knaughtty")            ~0.94
-//   - prefix swaps ("[Encouragement]" vs "[Gay Linux Porn]") ~0.90
-//   - word-order with tag drops ("Musk Python Golang" vs "Python Comic") ~0.75
+//   - typo variants ("annoucement" vs "announcement")      ~0.94
+//   - prefix swaps ("[Encouragement]" vs "[Daily Thread]")   ~0.90
+//   - word-order with tag drops ("Go 1.26 Release Notes" vs "Release Notes") ~0.75
 //   - cross-sub crossposts with minor formatting drift             ~0.80
 // 0.72 catches the word-order + tag-drop case while sitting comfortably
 // above the topic-only similarity of legitimately distinct posts that share
-// the query terms (typically ~0.15 — 0.30 since two random caption posts
-// agree mainly on "gay/linux/python/porn" and otherwise diverge).
+// the query terms (typically ~0.15 — 0.30 since two random titled posts
+// agree mainly on "release/notes/update/thread" and otherwise diverge).
 const jaccardThreshold = 0.72
 
 // jaccardThresholdSameAuthor is the token-similarity cutoff used to fold

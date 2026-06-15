@@ -25,6 +25,11 @@ config.yaml
 .env
 .env.*
 !.env.example
+# Personal local test profile (NSFW sub defaults, prefetch targets). Public
+# deployments use deploy/docker-compose.{public,homelab}.yml instead.
+docker-compose.yml
+docker-compose.local.yml
+docker-compose.override.yml
 
 # --- Logs & temp ---
 *.log

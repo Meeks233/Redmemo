@@ -38,7 +38,7 @@ func TestResolveSubDepth(t *testing.T) {
 		}, "rust", "l2"},
 		{"per-sub depth survives mixed clauses with other subs", map[string]string{
 			"prefetch_default_depth": "none",
-			"prefetch_sub_modes":     "golang=depth:l2+l3+golang=sort:top+rust=depth:l3",
+			"prefetch_sub_modes":     "golang=depth:l2+l3+python=sort:top+rust=depth:l3",
 		}, "rust", "l3"},
 		{"per-sub depth alias 'd'", map[string]string{
 			"prefetch_default_depth": "none",

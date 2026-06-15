@@ -105,7 +105,7 @@ The **crawl list** and the per-user **on/off toggle** live in the DB (settings k
 | `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` |
 | `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` | `none` / `l2` / `l3` / `l2+l3` | `l2+l3` |
 | `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` | `0..100000` | `0` (compose presets ship `50`) |
-| `REDMEMO_DEFAULT_PREFETCH_SUB_MODES` | per-sub overrides, e.g. `golang=depth:l2+l3&sort:top+golang=depth:none` | _(empty)_ |
+| `REDMEMO_DEFAULT_PREFETCH_SUB_MODES` | per-sub overrides, e.g. `golang=depth:l2+l3&sort:top+rust=depth:none` | _(empty)_ |
 
 `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` is the L3 noise floor: any archived post with fewer than this many comments is frozen out of L3 (both bind and standalone) — the count comes from the post JSON locally, no upstream probe. `0` disables the filter. The value must be a non-negative integer in `[0, 100000]`; an invalid value causes the container to **refuse to start** (loud failure beats silent fallback). Combined with the L3 cycle-freeze (a post archived during L1 cycle N is automatically skipped during cycle N+1 regardless of count), this lets operators say "don't waste budget on 1-line threads" while still letting hot threads through.
 

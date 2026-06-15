@@ -25,8 +25,63 @@ NP exposes a **depth** dimension on top of the L1 / L2 / L3 layer split: it cont
 | `l2+l3` | yes | yes | yes (visit-like, default) |
 
 - Global default: `prefetch_default_depth` (storage key) / `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` (env). The settings page renders it as the **Default depth** select on the NP fieldset.
-- Per-sub override: append `depth:<value>` inside a prefetch override clause, e.g. `golang=depth:l2+l3&sort:top` or `golang=depth:none`. Override wins per-sub. Unknown values are dropped.
+- Per-sub override: append `depth:<value>` inside a prefetch override clause, e.g. `golang=depth:l2+l3&sort:top` or `rust=depth:none`. Override wins per-sub. Unknown values are dropped.
 - Common pattern: set the global default to `none` and opt specific subs into media+comments via `<sub>=depth:l2+l3` — this is how the settings page documents single-sub deep crawls.
+
+## Driving NP from /settings — the prefetch field
+
+The entire crawl list lives in **one text box** on the settings page (Natural Prefetch → subreddits). It is a single `+`-separated stream where each clause is either:
+
+- a **bare subreddit name** — `cats` — crawled with the global Default sort / timeframe / depth, or
+- a **per-sub override clause** — `cats=sort:rising&time:day&depth:l2+l3` — the same sub crawled with its own sort / timeframe / depth.
+
+```
+field   := <clause>(+<clause>)*
+clause  := <sub>                       # bare — inherit the global defaults
+         | <sub>=<k>:<v>(&<k>:<v>)*     # override one or more dimensions for this sub
+```
+
+Recognised override keys (case-insensitive; unknown pieces are silently dropped):
+
+| Key | Aliases | Values | Effect |
+|-----|---------|--------|--------|
+| `sort` | — | `hot` `new` `top` `rising` `controversial` | listing sort for this sub |
+| `time` | `t`, `timeframe` | `hour` `day` `week` `month` `year` `all` | listing timeframe — also selects the cadence bucket (see below) |
+| `depth` | `d` | `none` `l2` `l3` `l2+l3` | which layers run (see the Depth table above; `l1` / `off` are accepted as aliases for `none`) |
+
+How clauses resolve:
+
+- A clause overrides **only** the dimensions you name; anything you omit falls back to the global Default sort / timeframe / depth.
+- Override clauses always **win over** the global defaults for that sub.
+- The parser is **lenient**: an unknown key, a misspelled value, or a malformed `k:v` pair is dropped on its own without killing the rest of the clause. A clause that ends up with *no* usable override at all is dropped whole.
+- **Duplicate sub names** collapse to the last occurrence.
+- The `+` inside `depth:l2+l3` is understood as part of the value, not a clause separator.
+
+Operators can seed the same content at boot: `REDMEMO_DEFAULT_PREFETCH_SUBS` (bare list), `REDMEMO_DEFAULT_PREFETCH_SUB_MODES` (override clauses), `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` (global depth).
+
+### Examples
+
+```
+golang+rust+linux
+```
+Crawl three subs, all on the global defaults.
+
+```
+news=time:hour&sort:hot
+```
+Crawl r/news on the hourly cadence with hot sort; every other dimension stays at the default.
+
+```
+golang=depth:l2+l3&sort:top+rust=depth:none
+```
+r/golang gets full media + comments on top sort; r/rust fetches listings only (no media, no comments).
+
+```
+cats+dogs+golang=sort:rising&time:day+rust=depth:l2+l3&sort:top
+```
+Mixed list: cats and dogs on defaults; golang on rising/day; rust full-depth on top.
+
+> Common pattern: set the global **Default depth** to `None` and opt individual subs into media/comments with `<sub>=depth:l2+l3` — cheap by default, deep only where you want it.
 
 ## Per-timeframe bucket cadence
 

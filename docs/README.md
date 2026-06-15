@@ -11,7 +11,8 @@ User-facing handbook for RedMemo. The repo-root [`README.md`](../README.md) is t
 
 - [Architecture](Architecture.md) — four-level failover chain (ASCII diagram)
 - [Persistence Layer](Persistence.md) — Postgres tables + content-addressed media store
-- [Natural Prefetch (NP)](Natural-Prefetch.md) — passive background crawler (ASCII state machine)
+- [Natural Prefetch (NP)](Natural-Prefetch.md) — passive background crawler (ASCII state machine), plus the `/settings` prefetch-field grammar
+- [Archive Control](Archive-Control.md) — whitelist / blacklist filter for which subs get stored
 - [HR Rate-Limit Layer](HR-Rate-Limit.md) — three-tier global cap shared via Redis
 - [Budget Design](Budget-Design.md) — 50-per-call page size (quota is per-request, not per-item), navbar quota ring, auto-throttle vs Redlib's fixed 25-per-call drain
 
