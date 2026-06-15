@@ -107,7 +107,15 @@ func (p *Proxy) fetchSeparateAudio(ctx context.Context, videoURL, key string) (*
 		call.meta = meta
 	} else {
 		fetchSem <- struct{}{}
+		// Detach from the caller's cancellation (a client that navigates away
+		// mid-fetch must not abort a download other waiters and the cache
+		// depend on) but carry its PRIORITY forward: ServeSeparateAudio and the
+		// prebuffer gate both tag their context KindAudio so the audio bytes
+		// preempt in-flight video at the bandwidth gate. Without this copy the
+		// download ran on a bare background context — default (lowest) priority
+		// — and lost the wire to the very video stream it was meant to unblock.
 		workCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		workCtx = WithPriority(workCtx, PriorityFromContext(ctx))
 		meta, st, err := p.downloadSeparateAudio(workCtx, videoURL, key)
 		cancel()
 		<-fetchSem
@@ -163,4 +171,24 @@ func (p *Proxy) downloadSeparateAudio(ctx context.Context, videoURL, key string)
 		return nil, "", fmt.Errorf("save index: %w", err)
 	}
 	return meta, "ready", nil
+}
+
+// kickSeparateAudio starts (or joins) the single-flight fetch of videoURL's
+// standalone audio track at audio priority, off the request path. It is a
+// no-op once the track is cached. Called the moment the silent video starts
+// streaming so the (few-hundred-KB) audio lands within a second or two — at
+// audio priority it preempts background downloads at the bandwidth gate, while
+// the throttled live video can't outrun it by much. Self-contained: the audio
+// fetch never depends on the page's JS companion firing.
+func (p *Proxy) kickSeparateAudio(videoURL string) {
+	key := audioTrackKey(videoURL)
+	if p.cachedMedia(key) != nil {
+		return
+	}
+	go func() {
+		ctx := WithPriority(context.Background(), Priority{Gen: NextGen(), Kind: KindAudio})
+		if _, _, err := p.fetchSeparateAudio(ctx, videoURL, key); err != nil {
+			log.Printf("media: audio prefetch for %s: %v", videoURL, err)
+		}
+	}()
 }

@@ -12,16 +12,25 @@ import (
 // probes. A single global token bucket means a feed full of fresh videos can't
 // saturate the host's uplink (or Reddit's per-IP shaping) regardless of how
 // many ServeMedia / ServeMuxed / prefetch jobs are in flight.
-const cdnBandwidthLimit = 5 * 1024 * 1024 // bytes per second
+const cdnBandwidthLimit = 10 * 1024 * 1024 // bytes per second
 
 // cdnBurstCapacity caps the instantaneous burst the bucket will grant. A full
-// second of budget (5 MiB) lets a fresh stream blast its first ~5 MiB
-// uncapped, so external observers see ~7 MB/s peaks even though the steady
-// rate is 5 MB/s — visually breaking the "max 5 MB/s" promise. ~50 ms of
-// budget is enough to absorb scheduler jitter and a typical 32-64 KiB write
-// without an extra wait, while keeping the observable peak pinned at the
-// configured rate.
+// second of budget lets a fresh stream blast its first chunk uncapped, so
+// external observers see peaks well above the steady rate — visually breaking
+// the configured ceiling. ~50 ms of budget is enough to absorb scheduler
+// jitter and a typical 32-64 KiB write without an extra wait, while keeping the
+// observable peak pinned at the configured rate.
 const cdnBurstCapacity = cdnBandwidthLimit / 20
+
+// liveStreamRate caps a SINGLE temporary online-playback sample (the silent
+// video-only segment reverseProxy streams live while the keep-forever muxed
+// copy is still downloading in the background). Holding each live preview to
+// 1 MB/s — comfortably above any typical Reddit bitrate, so playback stays
+// real-time — keeps it from devouring the global budget the background
+// cache-fill needs to finish. The live writer also bypasses the priority gate
+// (see newLiveStreamWriter), so this trickle never starves the background
+// download the way a gate-registered writer would.
+const liveStreamRate = 1 * 1024 * 1024 // bytes per second, per live stream
 
 // cdnLimiter is the process-wide token bucket. Sustained throughput converges
 // on cdnBandwidthLimit; burst is intentionally small so the peak observed
@@ -103,16 +112,18 @@ func (b *tokenBucket) waitN(ctx context.Context, n int) error {
 // shaping latency, instead of waiting out a multi-MiB io.Copy slice.
 const prioChunkSize = 32 << 10
 
-// limitedWriter throttles writes through the global CDN bucket AND the
-// priority gate. Each Write blocks until it owns the current top priority and
-// then reserves token-bucket bandwidth; combined throughput across every
-// concurrent media fetch converges on cdnBandwidthLimit, but newer / audio
-// downloads preempt older / video ones byte-for-byte.
+// limitedWriter throttles writes through the global CDN bucket and, optionally,
+// the priority gate and a per-stream bucket. Each Write blocks until (if gated)
+// it owns the current top priority, then reserves both per-stream and global
+// token-bucket bandwidth. Combined throughput across every concurrent media
+// fetch converges on cdnBandwidthLimit; gated writers additionally let newer /
+// audio downloads preempt older / video ones byte-for-byte.
 type limitedWriter struct {
 	ctx   context.Context
 	w     io.Writer
-	b     *tokenBucket
-	gate  *prioGate
+	b     *tokenBucket // global CDN ceiling (always present)
+	pb    *tokenBucket // optional per-stream cap (nil = global only)
+	gate  *prioGate    // optional priority gate (nil = ungated trickle)
 	p     Priority
 	regID int64
 }
@@ -126,6 +137,19 @@ func newLimitedWriter(ctx context.Context, w io.Writer) *limitedWriter {
 	lw := &limitedWriter{ctx: ctx, w: w, b: cdnLimiter, gate: globalGate, p: p}
 	lw.regID = globalGate.register(p)
 	return lw
+}
+
+// newLiveStreamWriter wraps w for a temporary online-playback sample: paced by
+// BOTH the shared per-stream bucket `pb` (so the whole live stream — first
+// chunk plus every continuation chunk — stays under one 1 MB/s cap regardless
+// of how many writers share `pb`) and the global ceiling, but deliberately NOT
+// registered on the priority gate. A gate-registered live stream would block
+// every lower-priority background download for its entire (multi-second)
+// lifetime; staying off the gate lets the background cache-fill keep draining
+// the remaining global budget while the preview trickles. release() is a no-op
+// here (no gate slot) but is kept symmetric with newLimitedWriter.
+func newLiveStreamWriter(ctx context.Context, w io.Writer, pb *tokenBucket) *limitedWriter {
+	return &limitedWriter{ctx: ctx, w: w, b: cdnLimiter, pb: pb}
 }
 
 // release drops this writer's slot from the priority gate. Safe to call
@@ -152,6 +176,16 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 		}
 		if l.gate != nil {
 			if err := l.gate.wait(l.ctx, l.p); err != nil {
+				return total, err
+			}
+		}
+		// Reserve the per-stream cap FIRST (it is the slower, binding
+		// constraint for a live preview); the global bucket, refilling far
+		// faster, then almost never adds wait. Reserving in the other order
+		// would pin global tokens while parked on the per-stream wait,
+		// needlessly starving concurrent background downloads.
+		if l.pb != nil {
+			if err := l.pb.waitN(l.ctx, chunk); err != nil {
 				return total, err
 			}
 		}

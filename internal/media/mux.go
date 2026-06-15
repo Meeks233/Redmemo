@@ -211,8 +211,16 @@ func (p *Proxy) ServeMuxed(w http.ResponseWriter, r *http.Request, videoURL stri
 		p.serve(w, r, meta, true)
 		return
 	}
-	// Nothing cached yet — stream the silent video-only segment live.
-	p.reverseProxy(w, r, videoURL, true)
+	// Nothing cached yet — stream the silent video-only segment live as a
+	// temporary preview, throttled to liveStreamRate (1 MB/s). The throttle is
+	// a continuous trickle, NOT a stop-and-wait: it keeps bytes flowing so the
+	// browser never idles the connection long enough to abort and reload the
+	// whole video, while leaving the bulk of the global budget to the
+	// background cache-fill. Kick the sibling audio track now at audio priority
+	// so sound lands within a second or two — the throttled video can't outrun
+	// it by much, and the page's audioSync companion stitches them together.
+	p.kickSeparateAudio(videoURL)
+	p.reverseProxy(w, r, videoURL, true, liveStreamRate)
 }
 
 // AudioStatus reports the mux state of a v.redd.it video for the audioSync.js
@@ -665,7 +673,7 @@ func (p *Proxy) downloadToWithStatus(ctx context.Context, url, dst string) (int,
 		return 0, err
 	}
 	defer f.Close()
-	status, _, _, err := p.streamRangedTo(ctx, url, 0, nil, f)
+	status, _, _, err := p.streamRangedTo(ctx, url, 0, nil, f, nil)
 	return status, err
 }
 

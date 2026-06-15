@@ -53,7 +53,7 @@ func TestStreamRangedTo_ReassemblesAcrossChunks(t *testing.T) {
 	withChunkSize(t, 1000)
 
 	var buf bytes.Buffer
-	status, _, n, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf)
+	status, _, n, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf, nil)
 	if err != nil {
 		t.Fatalf("streamRangedTo: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestStreamRangedTo_RetriesMidBodyTruncation(t *testing.T) {
 	withChunkSize(t, int64(len(body)))
 
 	var buf bytes.Buffer
-	status, _, n, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf)
+	status, _, n, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf, nil)
 	if err != nil {
 		t.Fatalf("streamRangedTo: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestStreamRangedTo_NonOK(t *testing.T) {
 	defer srv.Close()
 
 	var buf bytes.Buffer
-	status, _, _, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf)
+	status, _, _, err := testProxy().streamRangedTo(context.Background(), srv.URL, 0, nil, &buf, nil)
 	if err == nil {
 		t.Fatal("expected an error for a 403 response")
 	}
@@ -167,7 +167,7 @@ func TestReverseProxy_RangeRequestServesFullExtent(t *testing.T) {
 	r.Header.Set("Range", "bytes=0-")
 	w := httptest.NewRecorder()
 
-	testProxy().reverseProxy(w, r, srv.URL, true)
+	testProxy().reverseProxy(w, r, srv.URL, true, 0)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusPartialContent {
@@ -192,7 +192,7 @@ func TestReverseProxy_NoRangeServesWhole(t *testing.T) {
 	r := httptest.NewRequest("GET", "/vid/x", nil)
 	w := httptest.NewRecorder()
 
-	testProxy().reverseProxy(w, r, srv.URL, false)
+	testProxy().reverseProxy(w, r, srv.URL, false, 0)
 
 	resp := w.Result()
 	if resp.StatusCode != http.StatusOK {
@@ -201,6 +201,58 @@ func TestReverseProxy_NoRangeServesWhole(t *testing.T) {
 	if !bytes.Equal(w.Body.Bytes(), body) {
 		t.Errorf("streamed body length %d, want %d", w.Body.Len(), len(body))
 	}
+}
+
+// TestReverseProxy_ThrottledServesFullExtent confirms the per-stream throttle
+// (the temporary online-playback sample cap) still delivers the complete body
+// across the prebuffer + continuation chunks — the cap shapes the rate, it does
+// not truncate. The small body fits the bucket burst, so the test stays fast.
+func TestReverseProxy_ThrottledServesFullExtent(t *testing.T) {
+	body := makeBody(5000)
+	srv, _ := rangeServer(t, body)
+	withChunkSize(t, 1000)
+
+	r := httptest.NewRequest("GET", "/vid/x", nil)
+	r.Header.Set("Range", "bytes=0-")
+	w := httptest.NewRecorder()
+
+	testProxy().reverseProxy(w, r, srv.URL, true, 1<<20)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", resp.StatusCode)
+	}
+	if cr := resp.Header.Get("Content-Range"); cr != "bytes 0-4999/5000" {
+		t.Errorf("Content-Range = %q, want bytes 0-4999/5000", cr)
+	}
+	if !bytes.Equal(w.Body.Bytes(), body) {
+		t.Errorf("throttled stream delivered %d bytes, want full %d", w.Body.Len(), len(body))
+	}
+}
+
+// TestLiveStreamWriter_UngatedAndCapped pins the two properties that keep a live
+// preview from starving the background cache-fill: it is bound to the supplied
+// per-stream bucket AND it is NOT registered on the priority gate (a gate slot
+// would block every lower-priority background download for the preview's whole
+// lifetime).
+func TestLiveStreamWriter_UngatedAndCapped(t *testing.T) {
+	pb := newTokenBucket(1<<20, 1<<19)
+	var buf bytes.Buffer
+	lw := newLiveStreamWriter(context.Background(), &buf, pb)
+
+	if lw.gate != nil {
+		t.Error("live stream writer holds a priority-gate slot; it must bypass the gate so background downloads keep draining the budget")
+	}
+	if lw.pb != pb {
+		t.Error("live stream writer is not bound to the per-stream cap bucket")
+	}
+	if _, err := lw.Write([]byte("hello")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != "hello" {
+		t.Errorf("got %q, want hello", buf.String())
+	}
+	lw.release() // no gate slot — must be a safe no-op
 }
 
 func TestParseContentRangeTotal(t *testing.T) {

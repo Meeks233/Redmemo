@@ -265,6 +265,18 @@
             // poller stays alive so applyReady can later swap to the single
             // muxed mp4, but it no longer needs UI to announce that.
             audioEl.addEventListener("canplay", function () {
+                // `canplay` is NOT one-shot: while the companion's track is
+                // still streaming in (rate-limited, sharing the wire with the
+                // live silent video), the audio element repeatedly drains its
+                // buffer and re-fills it, dropping below HAVE_FUTURE_DATA and
+                // climbing back — firing `canplay` again every time. The
+                // late-audio rewind below MUST run only on the first such
+                // event; otherwise every buffer-recovery during the download
+                // yanks playback back to 0:00 over and over (the user-visible
+                // "video keeps restarting while loading" bug). companionLive
+                // latches the first canplay, so capture its prior value as the
+                // first-fire gate before flipping it.
+                var firstCanplay = !companionLive;
                 companionLive = true;
                 if (notice && notice.parentNode) {
                     notice.parentNode.removeChild(notice);
@@ -278,7 +290,7 @@
                 // properly with sound. Below the threshold the normal
                 // syncPlay+nudge path lines audio up in place — no rewind
                 // needed for a clip that just barely started.
-                if (!video.ended &&
+                if (firstCanplay && !video.ended &&
                     (video.currentTime || 0) > LATE_AUDIO_REWIND_S) {
                     try { video.currentTime = 0; }
                     catch (e) { /* seeking not ready — ignore */ }

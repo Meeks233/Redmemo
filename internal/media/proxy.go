@@ -167,7 +167,7 @@ func (p *Proxy) serveUnavailable(w http.ResponseWriter, r *http.Request, origina
 		http.Error(w, "media not ready", http.StatusServiceUnavailable)
 		return
 	}
-	p.reverseProxy(w, r, originalURL, false)
+	p.reverseProxy(w, r, originalURL, false, 0)
 }
 
 // allowedUpstreamHostSuffixes pins the generic /proxy/media surface to
@@ -697,7 +697,7 @@ func (p *Proxy) Download(ctx context.Context, originalURL string) (*store.MediaM
 	}
 	stagingPath := staging.Name()
 	hasher := sha256.New()
-	status, hdr, size, err := p.streamRangedTo(ctx, originalURL, 0, nil, io.MultiWriter(staging, hasher))
+	status, hdr, size, err := p.streamRangedTo(ctx, originalURL, 0, nil, io.MultiWriter(staging, hasher), nil)
 	staging.Close()
 	if err != nil {
 		os.Remove(stagingPath)
@@ -862,13 +862,21 @@ func (p *Proxy) getRangeWith(ctx context.Context, url string, start int64, extra
 // the browser surfaces as "corrupt mp4" 1 second into playback. Each chunk's
 // own Range fetch is re-attempted streamReadRetries times before bubbling the
 // error up.
-func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, extra fhttp.Header, w io.Writer) (status int, hdr fhttp.Header, written int64, err error) {
-	// Throttle every CDN byte through the global media bandwidth bucket AND
-	// the priority gate — see bwlimit.go / prio.go. Wrapping at this single
-	// chokepoint covers Download, reverseProxy, and the mux audio/video
-	// probes uniformly; release() unparks lower-priority waiters once we're
-	// done.
-	lw := newLimitedWriter(ctx, w)
+func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, extra fhttp.Header, w io.Writer, live *tokenBucket) (status int, hdr fhttp.Header, written int64, err error) {
+	// Throttle every CDN byte through the global media bandwidth bucket — see
+	// bwlimit.go / prio.go. Wrapping at this single chokepoint covers Download,
+	// reverseProxy, and the mux audio/video probes uniformly. A nil `live`
+	// gets the standard gated writer (priority-ordered, global ceiling). A
+	// non-nil `live` is a temporary online-playback sample: it shares that
+	// per-stream bucket and bypasses the priority gate so its 1 MB/s trickle
+	// never starves the background cache-fill. release() unparks lower-priority
+	// waiters once we're done (no-op for the ungated live writer).
+	var lw *limitedWriter
+	if live != nil {
+		lw = newLiveStreamWriter(ctx, w, live)
+	} else {
+		lw = newLimitedWriter(ctx, w)
+	}
 	defer lw.release()
 	w = lw
 	offset := start
@@ -949,8 +957,25 @@ const (
 // from the CDN in flow-control-safe chunks (see streamRangedTo) while presenting
 // the client a single coherent response for its requested range. noStore strips
 // upstream caching headers and marks the response uncacheable.
-func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool) {
+//
+// streamRate, when > 0, caps this response to a single per-stream token bucket
+// (bytes/sec) shared across the prebuffer chunk and every continuation chunk,
+// and routes the bytes through the ungated live writer (no priority-gate slot).
+// It is the temporary online-playback sample throttle: a continuous, bounded
+// trickle that (a) never starves the background cache-fill and (b) never leaves
+// the connection idle long enough for the browser to abort and reload the whole
+// video. streamRate 0 streams at the full gated rate (used for non-preview
+// fallbacks like serveUnavailable).
+func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL string, noStore bool, streamRate int) {
 	start := parseRangeStart(r.Header.Get("Range"))
+
+	// One bucket for the whole live stream — the prebuffer copy below and the
+	// streamRangedTo continuation both draw from it, so the cap is enforced
+	// across the entire response rather than per chunk.
+	var live *tokenBucket
+	if streamRate > 0 {
+		live = newTokenBucket(streamRate, streamRate/2)
+	}
 
 	conditional := fhttp.Header{}
 	for _, h := range []string{"If-Modified-Since", "Cache-Control"} {
@@ -1001,7 +1026,16 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 		w.WriteHeader(http.StatusOK)
 	}
 
-	n, cerr := io.Copy(w, first.Body)
+	// The prebuffer chunk goes through the same per-stream cap as the rest of
+	// the live stream (when throttled): an ungated, per-stream-bucketed writer.
+	// A small burst (the bucket's capacity) lets the very first bytes — moov /
+	// init segment — land fast so playback starts promptly, then it settles to
+	// the steady rate. Unthrottled (live==nil) it writes straight to w as before.
+	var firstDst io.Writer = w
+	if live != nil {
+		firstDst = newLiveStreamWriter(r.Context(), w, live)
+	}
+	n, cerr := io.Copy(firstDst, first.Body)
 	first.Body.Close()
 	if cerr != nil {
 		return
@@ -1016,7 +1050,7 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 	// Response headers are already committed; on failure the client gets a
 	// truncated body. Log so the truncation isn't silent — there's no clean
 	// abort path left.
-	if status, _, _, err := p.streamRangedTo(r.Context(), targetURL, offset, conditional, w); err != nil || (status != 0 && status != http.StatusOK && status != http.StatusPartialContent) {
+	if status, _, _, err := p.streamRangedTo(r.Context(), targetURL, offset, conditional, w, live); err != nil || (status != 0 && status != http.StatusOK && status != http.StatusPartialContent) {
 		log.Printf("proxy: ranged continuation failed offset=%d status=%d url=%s err=%v", offset, status, targetURL, err)
 	}
 }
