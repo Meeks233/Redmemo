@@ -40,6 +40,13 @@ services:
       # media). Without this, only the local archive is served.
       - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=off
 
+      # ---- Media viewing ---------------------------------------------
+      # A trusted LAN/Tailnet box has bandwidth to spare: play longer clips
+      # inline (gate at 10 min vs the conservative 3-min code default) and
+      # expand every gallery item in the feed by default.
+      - REDMEMO_DEFAULT_LONG_VIDEO_THRESHOLD=10
+      - REDMEMO_DEFAULT_SHOW_ALL_GALLERY_MEDIA=on
+
       # ---- Natural Prefetch ------------------------------------------
       # Master switch on, dispatcher tick at the default 30s. The crawl
       # list is intentionally empty — fill it with your own subs using

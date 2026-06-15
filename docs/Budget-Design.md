@@ -48,7 +48,7 @@ Listing endpoints accept up to 100 items per request, and Reddit's OAuth budget 
 
 ## Wiring (file map)
 
-- Page-size constants — `internal/handler/archive.go` (`archivePageSize`), `internal/handler/search.go`.
+- Upstream page size — the `page_limit` user setting (default `50` in `internal/handler/middleware.go`, validated to `[5, 100]` in `internal/handler/settings.go`), resolved per request by `pageLimitFromPrefs` in `internal/handler/subreddit.go` and passed to every live `FetchSearch` / listing call. (Local archive pagination is a separate, fixed `archivePageSize = 25` in `internal/handler/archive.go` and does not touch the upstream budget.)
 - Budget tracking — `internal/ratelimit/manager.go` (`Status.Remaining`, `OnRequestComplete`).
 - HR gate — `internal/hrlimit/` + see [HR Rate-Limit](HR-Rate-Limit.md).
 - Ring markup — `internal/render/layout.templ`.

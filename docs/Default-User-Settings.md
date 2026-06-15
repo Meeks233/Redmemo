@@ -69,7 +69,7 @@ All overridable, all auto-translated from `REDLIB_DEFAULT_*`.
 | `REDMEMO_DEFAULT_AUTO_THEME_DAY` | any selectable theme | `light` | Day-side theme when `THEME=system` resolves to light. |
 | `REDMEMO_DEFAULT_AUTO_THEME_NIGHT` | any selectable theme | `black` | Night-side theme when `THEME=system` resolves to dark. |
 | `REDMEMO_DEFAULT_SETTINGS_TOKEN_TTL` | `5`, `10`, `15`, `30`, `60` (minutes) | `10` | `/settings` auth-cookie lifetime. Capped at 60 by design. |
-| `REDMEMO_DEFAULT_LONG_VIDEO_THRESHOLD` | `0..99` (minutes) | `5` | Videos longer than this render a click-to-download placeholder instead of a live `<video>`. `0` disables the gate entirely. |
+| `REDMEMO_DEFAULT_LONG_VIDEO_THRESHOLD` | `0..99` (minutes) | `3` | Videos longer than this render a click-to-download placeholder instead of a live `<video>`. `0` disables the gate entirely. |
 | `REDMEMO_DEFAULT_SHOW_ALL_GALLERY_MEDIA` | `on`, `off` | `off` | When on, listing pages render all gallery items inline with left/right navigation instead of only the first image. |
 | `REDMEMO_DEFAULT_PREFETCH_SORT` | `hot`, `new`, `top`, `rising`, `controversial` | `hot` | Global default sort for NP L1 listing fetch. |
 | `REDMEMO_DEFAULT_PREFETCH_TIMEFRAME` | `hour`, `day`, `week`, `month`, `year`, `all` | `day` | Global default timeframe for NP L1 (only honoured by `top`/`controversial`). |

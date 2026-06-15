@@ -282,7 +282,7 @@ func playAsGif(p reddit.Post) bool {
 func longVideoThreshold(prefs reddit.Preferences) int {
 	n, err := strconv.Atoi(prefs.LongVideoThreshold)
 	if err != nil || n < 0 || n > 99 {
-		return 5
+		return 3
 	}
 	return n
 }

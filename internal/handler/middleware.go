@@ -117,7 +117,8 @@ var prefDefaults = map[string]string{
 	"auto_theme_day":          "light",
 	"auto_theme_night":        "black",
 	"lang":                    render.DefaultLang,
-	"long_video_threshold":    "5",
+	"long_video_threshold":    "3",
+	"show_all_gallery_media":  "off",
 }
 
 func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {

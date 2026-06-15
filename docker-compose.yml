@@ -39,6 +39,11 @@ services:
       - REDMEMO_DEFAULT_SHOW_NSFW=on
       - REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS=on
       - REDMEMO_DEFAULT_BLUR_NSFW=off
+      # Media viewing: a private box trusts its bandwidth, so play longer clips
+      # inline (gate at 10 min instead of the conservative 3-min code default)
+      # and expand every gallery item in the feed by default.
+      - REDMEMO_DEFAULT_LONG_VIDEO_THRESHOLD=10
+      - REDMEMO_DEFAULT_SHOW_ALL_GALLERY_MEDIA=on
 
       # ---- Natural Prefetch: full L1+L2+L3 coverage of r/golang for local ---
       # Default depth is "l2+l3" so the local container exercises the entire
