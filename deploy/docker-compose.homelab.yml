@@ -14,7 +14,7 @@
 
 services:
   redmemo:
-    image: ghcr.io/redmemo/redmemo:latest
+    image: ghcr.io/meeks233/redmemo:latest
     # build: ..              # uncomment when building from source
     ports:
       - "8080:8080"

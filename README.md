@@ -31,7 +31,7 @@ Two Compose profiles ship in `deploy/`:
 
 ```bash
 mkdir redmemo && cd redmemo
-curl -O https://raw.githubusercontent.com/CanglanXYA/Redmemo/main/deploy/docker-compose.homelab.yml
+curl -O https://raw.githubusercontent.com/Meeks233/Redmemo/main/deploy/docker-compose.homelab.yml
 mv docker-compose.homelab.yml docker-compose.yml
 echo "PG_PASSWORD=$(openssl rand -hex 24)" > .env
 docker compose up -d
@@ -47,7 +47,7 @@ Visit `http://<host>:8080/`. No TOTP, intended for trusted networks.
 
 ```bash
 mkdir redmemo && cd redmemo
-curl -O https://raw.githubusercontent.com/CanglanXYA/Redmemo/main/deploy/docker-compose.public.yml
+curl -O https://raw.githubusercontent.com/Meeks233/Redmemo/main/deploy/docker-compose.public.yml
 mv docker-compose.public.yml docker-compose.yml
 cat > .env <<EOF
 PG_PASSWORD=$(openssl rand -hex 24)
@@ -81,11 +81,11 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 
 ## Star History
 
-<a href="https://www.star-history.com/#CanglanXYA/Redmemo&Date">
+<a href="https://www.star-history.com/#Meeks233/Redmemo&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=CanglanXYA/Redmemo&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=CanglanXYA/Redmemo&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CanglanXYA/Redmemo&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Meeks233/Redmemo&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Meeks233/Redmemo&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Meeks233/Redmemo&type=Date" />
  </picture>
 </a>
 

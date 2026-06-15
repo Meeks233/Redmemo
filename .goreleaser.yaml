@@ -83,57 +83,53 @@ changelog:
 
 dockers:
   - image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
     use: buildx
     dockerfile: Dockerfile.release
     goarch: amd64
-    extra_files:
-      - config.example.yaml
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
       - "--label=org.opencontainers.image.description=Self-hosted Reddit privacy proxy with persistent archive"
-      - "--label=org.opencontainers.image.source=https://github.com/CanglanXYA/Redmemo"
+      - "--label=org.opencontainers.image.source=https://github.com/Meeks233/Redmemo"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
       - "--label=org.opencontainers.image.licenses=AGPL-3.0"
   - image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
     use: buildx
     dockerfile: Dockerfile.release
     goarch: arm64
-    extra_files:
-      - config.example.yaml
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
       - "--label=org.opencontainers.image.description=Self-hosted Reddit privacy proxy with persistent archive"
-      - "--label=org.opencontainers.image.source=https://github.com/CanglanXYA/Redmemo"
+      - "--label=org.opencontainers.image.source=https://github.com/Meeks233/Redmemo"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
       - "--label=org.opencontainers.image.licenses=AGPL-3.0"
 
 docker_manifests:
-  - name_template: "ghcr.io/canglanxya/redmemo:{{ .Version }}"
+  - name_template: "ghcr.io/meeks233/redmemo:{{ .Version }}"
     image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/canglanxya/redmemo:v{{ .Major }}"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/meeks233/redmemo:v{{ .Major }}"
     image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/canglanxya/redmemo:v{{ .Major }}.{{ .Minor }}"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/meeks233/redmemo:v{{ .Major }}.{{ .Minor }}"
     image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/canglanxya/redmemo:latest"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/meeks233/redmemo:latest"
     image_templates:
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-amd64"
-      - "ghcr.io/canglanxya/redmemo:{{ .Version }}-arm64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-amd64"
+      - "ghcr.io/meeks233/redmemo:{{ .Version }}-arm64"
 
 release:
   github:
-    owner: CanglanXYA
+    owner: Meeks233
     name: Redmemo
   prerelease: auto
   draft: false
@@ -143,7 +139,7 @@ release:
     Self-hosted Reddit privacy solution with persistent archive.
 
     ### Install
-    - Docker: `docker pull ghcr.io/canglanxya/redmemo:{{ .Version }}`
+    - Docker: `docker pull ghcr.io/meeks233/redmemo:{{ .Version }}`
     - Binary: download below for your platform
   footer: |
-    **Full Changelog**: https://github.com/CanglanXYA/Redmemo/compare/{{ .PreviousTag }}...{{ .Tag }}
+    **Full Changelog**: https://github.com/Meeks233/Redmemo/compare/{{ .PreviousTag }}...{{ .Tag }}
