@@ -2,6 +2,7 @@
 # Private development notes; docs/ itself is public.
 docs-internal/
 scripts
+cmd/tlsprobe/
 _redlib_ref/
 
 # --- Build output ---
