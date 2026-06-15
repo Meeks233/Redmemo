@@ -93,7 +93,7 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 
 RedMemo would not exist without:
 
-- **[Redlib](https://github.com/redlib-org/redlib)** — the entire front-end (templates, styles, themes, route shape, user-settings model) descends from Redlib. A reference copy lives in `_redlib_ref/`.
+- **[Redlib](https://github.com/redlib-org/redlib)** — the entire front-end (templates, styles, themes, route shape, user-settings model) descends from Redlib.
 - **[Libreddit](https://github.com/libreddit/libreddit)** — the original alternative front-end Redlib was forked from, and the ultimate source of the UI everyone recognises.
 - **[Lucide](https://lucide.dev)** — a large portion of the SVG iconography (toolbar glyphs, status badges, archive-hub markers) is reused verbatim or with minor edits from the Lucide icon set (ISC), itself partly descended from [Feather](https://github.com/feathericons/feather) (MIT, © Cole Bemis).
 
