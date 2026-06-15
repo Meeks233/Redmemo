@@ -192,6 +192,12 @@ templ errorContent(d ErrorPageData) {
 								</tr>
 							}
 							<tr><td colspan="2" class="ps-divider">L2 — Media Download</td></tr>
+							if d.PrefetchStatus.ReclaimL2Phase != "" {
+								<tr>
+									<td class="ps-label">reclaim</td>
+									<td><span class="ps-phase ps-on">{ d.PrefetchStatus.ReclaimL2Phase }</span> · { d.PrefetchStatus.ReclaimL2Info }</td>
+								</tr>
+							}
 							<tr>
 								<td class="ps-label">{ T(ctx, "error.phase") }</td>
 								<td>
@@ -257,6 +263,12 @@ templ errorContent(d ErrorPageData) {
 								}
 							}
 							<tr><td colspan="2" class="ps-divider">L3 — Deep Archive (Comments)</td></tr>
+							if d.PrefetchStatus.ReclaimL3Phase != "" {
+								<tr>
+									<td class="ps-label">reclaim</td>
+									<td><span class="ps-phase ps-on">{ d.PrefetchStatus.ReclaimL3Phase }</span> · { d.PrefetchStatus.ReclaimL3Info }</td>
+								</tr>
+							}
 							<tr>
 								<td class="ps-label">{ T(ctx, "error.phase") }</td>
 								<td>

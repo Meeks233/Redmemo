@@ -574,9 +574,13 @@ type PrefetchStatusView struct {
 	L4QueueLen  int
 	L4NextTick    string
 	L4NextTickAbs string
-	NPPhase     string
-	NPCurrent   string
-	QueueLen    int
+	NPPhase        string
+	NPCurrent      string
+	QueueLen       int
+	ReclaimL2Phase string
+	ReclaimL2Info  string
+	ReclaimL3Phase string
+	ReclaimL3Info  string
 }
 
 type PrefetchCursorView struct {

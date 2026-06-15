@@ -615,9 +615,13 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L4QueueLen:  ps.L4QueueLen,
 			L4NextTick:    ps.L4NextTick,
 			L4NextTickAbs: ps.L4NextTickAbs,
-			NPPhase:     ps.NPPhase,
-			NPCurrent:   ps.NPCurrent,
-			QueueLen:    ps.QueueLen,
+			NPPhase:        ps.NPPhase,
+			NPCurrent:      ps.NPCurrent,
+			QueueLen:       ps.QueueLen,
+			ReclaimL2Phase: ps.ReclaimL2Phase,
+			ReclaimL2Info:  ps.ReclaimL2Info,
+			ReclaimL3Phase: ps.ReclaimL3Phase,
+			ReclaimL3Info:  ps.ReclaimL3Info,
 		}
 	}
 

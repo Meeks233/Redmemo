@@ -236,6 +236,11 @@ type Scheduler struct {
 	l4NextTickAt  time.Time
 	npPhase     string
 	npCurrent   string
+	// Reclaim status: visible on /debug while driveReclaimedCycle is active.
+	reclaimL2Phase string
+	reclaimL2Info  string
+	reclaimL3Phase string
+	reclaimL3Info  string
 }
 
 // Bucket identifiers — one per Reddit listing-API timeframe.
@@ -403,13 +408,20 @@ func (s *Scheduler) reclaimPendingRuns(ctx context.Context) {
 		if g.layer == "L2" {
 			s.rebuildL2CycleSnapshot(g.tf, g.sub, g.cycleID, g.runs)
 		}
+		var pending []store.PrefetchRun
 		for _, r := range g.runs {
-			if r.Status != "pending" {
-				continue
+			if r.Status == "pending" {
+				pending = append(pending, r)
 			}
-			totalPending++
-			go s.resumePendingWave(ctx, r)
 		}
+		if len(pending) == 0 {
+			continue
+		}
+		sort.Slice(pending, func(i, j int) bool {
+			return pending[i].SubInterval.Int32 < pending[j].SubInterval.Int32
+		})
+		totalPending += len(pending)
+		go s.driveReclaimedCycle(ctx, g.layer, g.tf, g.sub, pending)
 	}
 	if totalPending > 0 {
 		s.Events.Addf(LevelInfo, "init", "reclaim: %d pending L2/L3 wave(s) across %d cycle(s) recovered from prefetch_runs",
@@ -506,22 +518,52 @@ func parseCycleStart(cycleID string) time.Time {
 // mirror runL2Cycle / runL3Cycle so the ledger looks identical regardless of
 // whether the wave was driven by its original cycle goroutine or revived
 // after a restart.
-func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) {
+// driveReclaimedCycle drives a group of reclaimed waves for one (layer, cycle)
+// sequentially. Past-due waves fire immediately but one at a time — never in
+// parallel — so the NP queue sees a normal serial cadence rather than a burst
+// of concurrent submissions. If any wave is superseded by a newer L1 cycle,
+// the remaining waves in this group are skipped (they share the same cycle_id
+// and would all be superseded too).
+func (s *Scheduler) driveReclaimedCycle(ctx context.Context, layer, tf, sub string, waves []store.PrefetchRun) {
+	total := len(waves)
+	overdue := 0
+	for _, w := range waves {
+		if time.Until(w.ScheduledAt) <= 0 {
+			overdue++
+		}
+	}
+	s.Events.Addf(LevelInfo, layer, "reclaim r/%s: driving %d wave(s) sequentially (%d overdue, %d future)",
+		sub, total, overdue, total-overdue)
+
+	for i, r := range waves {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		remaining := total - i
+		s.setReclaimStatus(layer, sub, i+1, total, remaining)
+		if !s.resumePendingWave(ctx, r) {
+			s.Events.Addf(LevelInfo, layer, "reclaim r/%s: cycle superseded at wave %d/%d — discarding %d remaining wave(s)",
+				sub, i+1, total, remaining-1)
+			break
+		}
+	}
+	s.clearReclaimStatus(layer)
+}
+
+// resumePendingWave fires a single reclaimed wave. Returns true if the caller
+// should continue driving subsequent waves; false if this wave was superseded
+// (the entire cycle is stale and remaining waves should be discarded).
+func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) bool {
 	tf := r.Bucket.String
 	sub := r.Subreddit.String
 	subInterval := int(r.SubInterval.Int32)
 	if wait := time.Until(r.ScheduledAt); wait > 0 {
 		if err := sleep(ctx, wait); err != nil {
-			return
+			return true
 		}
 	} else {
-		_ = s.runStore.MarkFinished(r.ID, "skipped", "wave window missed during downtime")
-		s.Events.Addf(LevelWarn, r.Layer, "reclaim r/%s wave %d/%d: window passed at %s — skipped",
-			sub, subInterval, l2WavesPerCycle, r.ScheduledAt.Format(time.RFC3339))
-		if r.Layer == "L2" {
-			s.maybeDropL2Cycle(tf, sub, subInterval)
-		}
-		return
+		s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: overdue by %s — firing immediately (best-effort)",
+			sub, subInterval, l2WavesPerCycle, formatDur(-wait))
 	}
 	var meta struct {
 		Chunk int `json:"chunk"`
@@ -535,17 +577,20 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 
 	// TryMarkRunning fails the row if status is no longer 'pending' — most
 	// commonly because SupersedePending demoted it after a fresh L1 cycle for
-	// the same (tf, sub) opened a newer wave set. Exit cleanly in that case.
-	ok, err := s.runStore.TryMarkRunning(r.ID)
-	if err != nil {
-		s.Events.Addf(LevelWarn, r.Layer, "reclaim r/%s wave %d: mark running: %v", sub, subInterval, err)
-	} else if !ok {
-		s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: superseded by newer cycle — skipped",
-			sub, subInterval, l2WavesPerCycle)
-		if r.Layer == "L2" {
-			s.maybeDropL2Cycle(tf, sub, subInterval)
+	// the same (tf, sub) opened a newer wave set. Return false so the caller
+	// discards remaining waves in this cycle (they share the same cycle_id).
+	if s.runStore != nil {
+		ok, err := s.runStore.TryMarkRunning(r.ID)
+		if err != nil {
+			s.Events.Addf(LevelWarn, r.Layer, "reclaim r/%s wave %d: mark running: %v", sub, subInterval, err)
+		} else if !ok {
+			s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: superseded by newer cycle — skipped",
+				sub, subInterval, l2WavesPerCycle)
+			if r.Layer == "L2" {
+				s.maybeDropL2Cycle(tf, sub, subInterval)
+			}
+			return false
 		}
-		return
 	}
 	s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d firing (chunk=%d, cycle=%s)",
 		sub, subInterval, l2WavesPerCycle, chunk, cycleID)
@@ -557,26 +602,29 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 	var runErr error
 	switch r.Layer {
 	case "L2":
-		// Re-check depth at fire time: a settings flip away from L2 between
-		// schedule and reclaim must not force a stale download pass.
 		depth := s.resolveSubDepth(sub)
 		if !depthHasL2(depth) {
-			_ = s.runStore.MarkFinished(r.ID, "skipped", "depth no longer covers L2")
+			if s.runStore != nil {
+				_ = s.runStore.MarkFinished(r.ID, "skipped", "depth no longer covers L2")
+			}
 			s.maybeDropL2Cycle(tf, sub, subInterval)
-			return
+			return true
 		}
 		runErr = s.runL2Wave(ctx, tf, sub, chunk, cycleID, subInterval)
 	case "L3":
 		runErr = s.runL3Wave(ctx, tf, sub, chunk, cycleID, subInterval)
 	}
-	if runErr != nil {
-		_ = s.runStore.MarkFinished(r.ID, "fail", runErr.Error())
-	} else {
-		_ = s.runStore.MarkFinished(r.ID, "ok", "")
+	if s.runStore != nil {
+		if runErr != nil {
+			_ = s.runStore.MarkFinished(r.ID, "fail", runErr.Error())
+		} else {
+			_ = s.runStore.MarkFinished(r.ID, "ok", "")
+		}
 	}
 	if r.Layer == "L2" {
 		s.maybeDropL2Cycle(tf, sub, subInterval)
 	}
+	return true
 }
 
 // maybeDropL2Cycle clears the in-memory snapshot once the last wave has
@@ -2406,6 +2454,10 @@ type PrefetchStatus struct {
 	QueueLen    int
 	Enabled     bool
 	ActiveSubs  []string
+	ReclaimL2Phase string
+	ReclaimL2Info  string
+	ReclaimL3Phase string
+	ReclaimL3Info  string
 }
 
 type PrefetchBucketStatus struct {
@@ -2591,6 +2643,10 @@ func (s *Scheduler) Status() PrefetchStatus {
 		QueueLen:    len(s.queue),
 		Enabled:     s.isEnabled(),
 		ActiveSubs:  s.activeSubs(),
+		ReclaimL2Phase: s.reclaimL2Phase,
+		ReclaimL2Info:  s.reclaimL2Info,
+		ReclaimL3Phase: s.reclaimL3Phase,
+		ReclaimL3Info:  s.reclaimL3Info,
 	}
 }
 
@@ -2864,6 +2920,33 @@ func (s *Scheduler) setNPStatus(phase, current string) {
 	s.statusMu.Lock()
 	s.npPhase = phase
 	s.npCurrent = current
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) setReclaimStatus(layer, sub string, current, total, remaining int) {
+	info := fmt.Sprintf("r/%s wave %d/%d (%d remaining)", sub, current, total, remaining)
+	s.statusMu.Lock()
+	switch layer {
+	case "L2":
+		s.reclaimL2Phase = "recovering"
+		s.reclaimL2Info = info
+	case "L3":
+		s.reclaimL3Phase = "recovering"
+		s.reclaimL3Info = info
+	}
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) clearReclaimStatus(layer string) {
+	s.statusMu.Lock()
+	switch layer {
+	case "L2":
+		s.reclaimL2Phase = ""
+		s.reclaimL2Info = ""
+	case "L3":
+		s.reclaimL3Phase = ""
+		s.reclaimL3Info = ""
+	}
 	s.statusMu.Unlock()
 }
 
