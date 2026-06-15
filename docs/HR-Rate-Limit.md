@@ -4,8 +4,6 @@
 
 HR (Human and Robots) caps the **total** outbound Reddit traffic at three tumbling-window granularities. Counters in Redis are wall-clock-aligned, so multiple RedMemo instances behind a load balancer share one global budget without coordination.
 
-Full design notes in [`docs/HR.md`](../docs/HR.md).
-
 ## Tiers
 
 | Tier | Window | Threshold | Cooldown when tripped |

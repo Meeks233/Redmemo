@@ -1673,6 +1673,16 @@ video.lazy-media:not([src]) {
     display: block;
 }
 
+/* gallery_all renders raw <img> with explicit width/height pixel attributes
+   (from the gallery metadata) to reserve layout space. max-width:100% clamps
+   the rendered width when the image is wider than the container, but without
+   height:auto the height attribute stays pinned at the original pixel value,
+   stretching the image vertically. height:auto restores the aspect ratio. */
+.gallery_all .post_media_image img {
+    max-width: 100%;
+    height: auto;
+}
+
 .gallery .outbound_url {
     color: var(--accent);
     text-overflow: ellipsis;

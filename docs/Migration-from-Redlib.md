@@ -33,7 +33,7 @@ See [Persistence Layer](Persistence.md) for the full schema and dedup design.
 
 Redlib is written in **Rust** on top of Hyper, with Askama for templating. RedMemo is a full ground-up **Go** rewrite:
 
-- **Go** for the back-end (`internal/`, `cmd/redmemo`) — same `bogdanfinn/tls-client` for the outbound transport, so the TLS ClientHello and HTTP/2 (Akamai h2) fingerprints still match the official Reddit Android client.
+- **Go** for the back-end (`internal/`, `cmd/redmemo`).
 - **templ** for SSR — the entire UI is server-side rendered into static HTML by Go templates that mirror Redlib's Askama tree. No JS framework, no client-side hydration, no SPA shell.
 - The four-layer Natural Prefetch scheduler, the HR rate-limit gate, the `media_content`/`media_url` content-addressed store and the TOTP gate are all native Go code with no Rust counterpart in Redlib.
 - Build artefacts are a single static Go binary (plus the Postgres + Redis + nginx side-car services in compose).

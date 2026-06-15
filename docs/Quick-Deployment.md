@@ -56,7 +56,7 @@ make build
 ./bin/redmemo -config config.yaml
 ```
 
-The outbound HTTP transport is `bogdanfinn/tls-client`, which embeds its own TLS stack — no system `openssl`/`boringssl` required.
+The outbound HTTP transport embeds its own TLS stack — no system `openssl`/`boringssl` required.
 
 ## Where to go next
 

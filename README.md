@@ -17,7 +17,7 @@
 - 🔐 **Gated** — `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
 - 🦫 **Go + templ** — server-side rendered; no JS framework, no client hydration, no client-side state.
 - 🔎 **Search** — e621-style unified grammar across local archive (`sub:`, `rating:`, `score:>1000`, `flair:`, …) — see the [Search & URL Reference](docs/Search-Reference.md).
-- 💍 **Budget-aware** — sub/search pages target small per-upstream-call page sizes, a live navbar ring shows the remaining budget for the current window, and the HR layer auto-throttles into the archive when it runs low — see the [Budget Design](docs/Budget-Design.md).
+- 💍 **Budget-aware** — sub/search pages fetch up to 50 posts per upstream call (operator-configurable 5–100), a live navbar ring shows the remaining budget for the current window, and the HR layer auto-throttles into the archive when it runs low — see the [Budget Design](docs/Budget-Design.md).
 
 ## TL;DR deploy
 
@@ -74,7 +74,7 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 - **[Persistence Layer](docs/Persistence.md)** — Postgres tables + media dedup
 - **[Natural Prefetch](docs/Natural-Prefetch.md)** — passive background crawler
 - **[HR Rate-Limit](docs/HR-Rate-Limit.md)** — global three-tier cap
-- **[Budget Design](docs/Budget-Design.md)** — 5-per-call page size, navbar ring, auto-throttle
+- **[Budget Design](docs/Budget-Design.md)** — 50-per-call page size, navbar ring, auto-throttle
 - **[Configuration Reference](docs/Configuration.md)** — every `REDMEMO_*` env var
 - **[Default User Settings](docs/Default-User-Settings.md)** — `REDMEMO_DEFAULT_*` overrides
 - **[Search & URL Reference](docs/Search-Reference.md)** — e621-style unified grammar

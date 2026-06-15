@@ -4,8 +4,6 @@
 
 NP is a producer/consumer pipeline that quietly fills the archive without burst patterns. All outbound traffic — both the L1 Reddit-API listing fetch and the L2 CDN media downloads — flows through one **NP dispatcher** goroutine that applies a 1–3 s random delay between calls and pauses 30 s after any user-triggered upstream request.
 
-Full design notes in [`docs/prefetch.md`](../docs/prefetch.md).
-
 ## Layers
 
 | Layer | Trigger | Cost / round | Behaviour |

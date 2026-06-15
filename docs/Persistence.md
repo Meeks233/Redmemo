@@ -2,7 +2,7 @@
 
 ← [Wiki index](README.md) · Related: [Architecture](Architecture.md)
 
-PostgreSQL is the system of record. All schema changes are forward-only migrations in `internal/store/migrate.go`. Full schema in [`docs/storage-design.md`](../docs/storage-design.md).
+PostgreSQL is the system of record. All schema changes are forward-only migrations in `internal/store/migrate.go`.
 
 ## Main tables
 

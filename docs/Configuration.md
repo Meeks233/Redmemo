@@ -75,33 +75,7 @@ Booleans accept `on` / `off`. `true` / `false` are **not** recognised — use `o
 
 ## OAuth tokens
 
-OAuth sessions are managed entirely in the DB by the token holder, which bootstraps an anonymous `mobile_spoof` session on first start and persists refresh state across restarts. **No declaration is required.** Declare a token in YAML only if you want to pin a specific Reddit `client_id` at boot:
-
-```yaml
-oauth:
-  tokens:
-    - client_id: "ohXpoqrZYub1kg"
-      backend: "mobile_spoof"
-```
-
-| Field | Allowed values | Description |
-|-------|----------------|-------------|
-| `client_id` | string | Reddit OAuth client id. |
-| `client_secret` | string | Optional — most mobile-spoof flows use the public client. |
-| `backend` | `mobile_spoof` \| `generic_web` | Selects the OAuth flow + header set. `mobile_spoof` mimics the official Android app. |
-
-## Android user-agent
-
-Only consumed by the `mobile_spoof` backend. Priority: **`USER_AGENT` > `APP_VERSION` > `APP_DATE` > built-in default**.
-
-| Env var | Description |
-|---------|-------------|
-| `REDMEMO_ANDROID_USER_AGENT` | Full UA string used verbatim — highest priority, disables randomisation. e.g. `Reddit/Version 2026.07.0/Build 2607141/Android 14`. |
-| `REDMEMO_ANDROID_APP_VERSION` | Comma-separated `Version YYYY.WW.X/Build NNNNNNN` entries; one picked at random per token. |
-| `REDMEMO_ANDROID_APP_DATE` | Date `YYYY-MM-DD`; auto-translated to a synthesised version+build. Ignored if `APP_VERSION` is set. |
-| `REDMEMO_ANDROID_OS_VERSION` | Android major version. Fixed (`14`) or range (`12-15`). |
-
-See [`docs/android-user-agent.md`](../docs/android-user-agent.md) for the full table of known builds.
+OAuth sessions are managed entirely in the DB by the token holder, which bootstraps a session on first start and persists refresh state across restarts. **No declaration is required.**
 
 ## Rate-limit budget
 

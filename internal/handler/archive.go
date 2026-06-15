@@ -287,7 +287,7 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 			PostCount: rs.PostCount,
 		}
 		if icon, ok := iconMap[rs.Name]; ok {
-			entry.IconURL = icon.IconURL
+			entry.IconURL = reddit.FormatURL(icon.IconURL)
 		}
 		if nsfwSet[key] {
 			entry.NSFW = true

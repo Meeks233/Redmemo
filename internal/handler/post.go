@@ -149,7 +149,7 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `{"ok":false,"error":"fetch failed: %s"}`, err.Error())
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "fetch failed: " + err.Error()})
 		return
 	}
 

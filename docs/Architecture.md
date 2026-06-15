@@ -2,8 +2,6 @@
 
 ← [Wiki index](README.md) · Related: [Persistence](Persistence.md) · [Natural Prefetch](Natural-Prefetch.md) · [HR Rate-Limit](HR-Rate-Limit.md)
 
-Full design notes live in [`docs/architecture.md`](../docs/architecture.md).
-
 ## Failover chain
 
 Every front-end request walks a four-step ladder. The first step that returns wins.
@@ -57,7 +55,7 @@ Every front-end request walks a four-step ladder. The first step that returns wi
    │              │    │  HR counters │    │  config + TOTP    │  Redirect    │
    └──────┬───────┘    └──────────────┘    └──────────────┘    └──────┬───────┘
           │                                                            ▲
-          │       outbound (TLS-client, Android fingerprint)            │ media blobs
+          │       outbound (stealth transport)                            │ media blobs
           ▼                                                            │ on disk
    ┌──────────────┐                                          ┌──────────────────┐
    │  Reddit API  │                                          │ <root>/<hh>/<sha>│
@@ -68,3 +66,7 @@ Every front-end request walks a four-step ladder. The first step that returns wi
 - **redmemo** never sits on the media IO path — it writes the file once and lets nginx serve it via `X-Accel-Redirect`.
 - **Redis** holds only volatile state (HTML cache, HR counters, active OAuth token id, settings-cookie cache). AOF is enabled (`--appendonly yes --appendfsync everysec`) so HR cooldown survives a restart with at most ~1 s of loss.
 - **Postgres** is the system of record. All schema changes are forward-only migrations in `internal/store/migrate.go`.
+
+## Security
+
+RedMemo applies defence-in-depth across authentication, injection prevention, and media integrity. Implementation details are maintained internally.

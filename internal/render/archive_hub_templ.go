@@ -554,7 +554,7 @@ func archiveSubCard(e ArchiveHubEntry) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue("/proxy/media?url=" + e.IconURL)
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(e.IconURL)
 			if templ_7745c5c3_Err != nil {
 				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/archive_hub.templ`, Line: 108, Col: 46}
 			}

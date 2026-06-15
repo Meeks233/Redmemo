@@ -22,14 +22,12 @@ A few keys are format-canonicalised at env-application time, so the YAML/env pat
 | `FRONT_PAGE` | `default`, `popular`, `all` | `default` |
 | `LAYOUT` | `card`, `clean`, `compact` | `card` |
 | `WIDE` | `on`, `off` | `off` |
-| `POST_SORT` | `hot`, `new`, `top`, `rising`, `controversial` | `hot` |
+| `POST_SORT` | `hot`, `new`, `top`, `rising`, `controversial` | `new` |
 | `COMMENT_SORT` | `confidence`, `top`, `new`, `controversial`, `old` | `confidence` |
-| `BLUR_SPOILER` | `on`, `off` | `off` |
-| `SHOW_NSFW` | `on`, `off` | `off` |
-| `BLUR_NSFW` | `on`, `off` | `off` |
-| `USE_HLS` | `on`, `off` | `off` |
-| `HIDE_HLS_NOTIFICATION` | `on`, `off` | `off` |
-| `AUTOPLAY_VIDEOS` | `on`, `off` | `off` |
+| `BLUR_SPOILER` | `on`, `off` | `on` |
+| `SHOW_NSFW` | `on`, `off` | `on` |
+| `BLUR_NSFW` | `on`, `off` | `on` |
+| `AUTOPLAY_VIDEOS` | `on`, `off` | `on` |
 | `SUBSCRIPTIONS` | `+`-separated list (`sub1+sub2+sub3`) | _(none)_ |
 | `HIDE_AWARDS` | `on`, `off` | `off` |
 | `DISABLE_VISIT_REDDIT_CONFIRMATION` | `on`, `off` | `off` |
@@ -37,7 +35,6 @@ A few keys are format-canonicalised at env-application time, so the YAML/env pat
 | `HIDE_SIDEBAR_AND_SUMMARY` | `on`, `off` | `off` |
 | `FIXED_NAVBAR` | `on`, `off` | `on` |
 | `REMOVE_DEFAULT_FEEDS` | `on`, `off` | `off` |
-| `SFW_ONLY` | `on`, `off` | `off` |
 
 ## Instance-only toggles (no per-user equivalent)
 
@@ -72,4 +69,8 @@ All overridable, all auto-translated from `REDLIB_DEFAULT_*`.
 | `REDMEMO_DEFAULT_AUTO_THEME_DAY` | any selectable theme | `light` | Day-side theme when `THEME=system` resolves to light. |
 | `REDMEMO_DEFAULT_AUTO_THEME_NIGHT` | any selectable theme | `black` | Night-side theme when `THEME=system` resolves to dark. |
 | `REDMEMO_DEFAULT_SETTINGS_TOKEN_TTL` | `5`, `10`, `15`, `30`, `60` (minutes) | `10` | `/settings` auth-cookie lifetime. Capped at 60 by design. |
+| `REDMEMO_DEFAULT_LONG_VIDEO_THRESHOLD` | `0..99` (minutes) | `5` | Videos longer than this render a click-to-download placeholder instead of a live `<video>`. `0` disables the gate entirely. |
+| `REDMEMO_DEFAULT_SHOW_ALL_GALLERY_MEDIA` | `on`, `off` | `off` | When on, listing pages render all gallery items inline with left/right navigation instead of only the first image. |
+| `REDMEMO_DEFAULT_PREFETCH_SORT` | `hot`, `new`, `top`, `rising`, `controversial` | `hot` | Global default sort for NP L1 listing fetch. |
+| `REDMEMO_DEFAULT_PREFETCH_TIMEFRAME` | `hour`, `day`, `week`, `month`, `year`, `all` | `day` | Global default timeframe for NP L1 (only honoured by `top`/`controversial`). |
 | `REDMEMO_DEFAULT_LANG` | supported language code | (auto) | Force a UI language; otherwise resolved from `Accept-Language`. |

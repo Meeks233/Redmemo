@@ -26,12 +26,3 @@ User-facing handbook for RedMemo. The repo-root [`README.md`](../README.md) is t
 - [Search & URL Reference](Search-Reference.md) — e621-style unified grammar shared by `/search` and `/archive`
 - [`/random` endpoint](Search-Reference.md#random-endpoint) — `t:` filter language
 
-## Designer docs (in [`docs/`](../docs/))
-
-The wiki is end-user oriented. Design notes, internal protocols and references stay under [`docs/`](../docs/):
-
-- [`docs/architecture.md`](../docs/architecture.md), [`docs/storage-design.md`](../docs/storage-design.md)
-- [`docs/prefetch.md`](../docs/prefetch.md), [`docs/HR.md`](../docs/HR.md)
-- [`docs/reddit.md`](../docs/reddit.md), [`docs/reddit-search.md`](../docs/reddit-search.md), [`docs/redlib.md`](../docs/redlib.md)
-- [`docs/android-user-agent.md`](../docs/android-user-agent.md), [`docs/token.md`](../docs/token.md), [`docs/version-tracking.md`](../docs/version-tracking.md)
-- [`docs/h2-fingerprint-tradeoff.md`](../docs/h2-fingerprint-tradeoff.md)
