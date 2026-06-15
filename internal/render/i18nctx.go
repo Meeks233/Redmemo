@@ -177,6 +177,20 @@ func searchPageHref(sub, query, sort, timeframe, cursor, cursorKind string) stri
 	return base + "?" + qs
 }
 
+// flairSearchHref builds the "find posts with this flair in this community"
+// link rendered on a flair pill. flairText and community come straight from
+// upstream JSON and routinely carry characters that are significant in both a
+// URL query and RedMemo's own search grammar (space, '+', '&', '#', '%', '"'),
+// so the q value is assembled as a plain string and percent-encoded via
+// url.Values.Encode rather than concatenated into a pre-encoded literal. The
+// previous raw-concatenation form truncated/corrupted the query for common
+// flairs like "Q&A", "C#", or "Help Wanted". Mirrors searchPageHref's encoding.
+func flairSearchHref(flairText, community string) string {
+	v := url.Values{}
+	v.Set("q", `flair:"`+flairText+`" white:`+community)
+	return "/search?" + v.Encode()
+}
+
 // u64p formats a *uint64 poll vote count; nil becomes "" so the markup matches
 // the old `{{ .VoteCount }}` on an open poll.
 func u64p(p *uint64) string {

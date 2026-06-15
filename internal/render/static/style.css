@@ -438,6 +438,17 @@ main {
     padding-bottom: 4em;
 }
 
+/* A notice banner (offline / degraded / archived) is a direct flex child of
+   <main> with `flex: 0 0 100%`. In the default non-wrapping flex row it would
+   claim the whole row *beside* #column_one (which has flex-shrink:1 and would
+   collapse to a sliver), so the banner reads as a broken full-height block on
+   the left. Wrapping lets it take its own row above the content. Scoped via
+   :has() so it only engages when a banner is actually present — the normal
+   single-line post page and the two-column subreddit layout are untouched. */
+main:has(> .warning-banner) {
+    flex-wrap: wrap;
+}
+
 .wide main {
     max-width: calc(100% - 40px);
 }
@@ -828,7 +839,8 @@ select {
 /* Single-line search input, full width of the field. The shared bare #search
    selector is also used by the comment search input, so navbar-only sizing
    (padding) lives in the scoped rule below. */
-#search {
+#search,
+#commentSearchInput {
     display: block;
     width: 100%;
     box-sizing: border-box;
@@ -852,7 +864,8 @@ select {
     padding: 8px 0;
 }
 
-#search:focus {
+#search:focus,
+#commentSearchInput:focus {
     outline: 0;
 }
 
@@ -959,6 +972,7 @@ button.submit:hover > svg {
 }
 
 #sort,
+#commentQueryForm,
 #search_sort {
     display: flex;
     align-items: stretch;

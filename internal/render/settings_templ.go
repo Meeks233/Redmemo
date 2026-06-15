@@ -500,7 +500,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</label> <select name=\"post_sort\"><option value=\"new\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</label> <select name=\"post_sort\" id=\"post_sort\"><option value=\"new\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1143,7 +1143,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, "</label> <input type=\"hidden\" value=\"off\" name=\"fixed_navbar\"> <input type=\"checkbox\" name=\"fixed_navbar\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, "</label> <input type=\"hidden\" value=\"off\" name=\"fixed_navbar\"> <input type=\"checkbox\" name=\"fixed_navbar\" id=\"fixed_navbar\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1192,7 +1192,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "</label> <input type=\"hidden\" value=\"off\" name=\"hide_sidebar_and_summary\"> <input type=\"checkbox\" name=\"hide_sidebar_and_summary\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, "</label> <input type=\"hidden\" value=\"off\" name=\"hide_sidebar_and_summary\"> <input type=\"checkbox\" name=\"hide_sidebar_and_summary\" id=\"hide_sidebar_and_summary\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1261,7 +1261,7 @@ func settingsContent(d SettingsPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "</label> <input type=\"hidden\" value=\"off\" name=\"disable_visit_reddit_confirmation\"> <input type=\"checkbox\" name=\"disable_visit_reddit_confirmation\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "</label> <input type=\"hidden\" value=\"off\" name=\"disable_visit_reddit_confirmation\"> <input type=\"checkbox\" name=\"disable_visit_reddit_confirmation\" id=\"disable_visit_reddit_confirmation\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

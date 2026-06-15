@@ -186,7 +186,7 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 		<h2 class="post_title">
 			if len(post.Flair.FlairParts) > 0 {
 				<a
-					href={ templ.SafeURL("/search?q=flair%3A%22" + post.Flair.Text + "%22+white%3A" + post.Community) }
+					href={ templ.SafeURL(flairSearchHref(post.Flair.Text, post.Community)) }
 					class="post_flair"
 					style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }
 					dir="ltr"

@@ -91,8 +91,8 @@ templ postContent(d PostPageData) {
 					</select>
 					<button id="sort_submit" class="submit">@submitSVG()</button>
 				</form>
-				<form id="sort">
-					<input id="search" class="commentQuery" type="search" name="q" value={ d.CommentQuery } placeholder={ T(ctx, "comments.search_placeholder") }/>
+				<form id="commentQueryForm">
+					<input id="commentSearchInput" class="commentQuery" type="search" name="q" value={ d.CommentQuery } placeholder={ T(ctx, "comments.search_placeholder") }/>
 					<input type="hidden" name="type" value="comment"/>
 				</form>
 			</div>
@@ -243,7 +243,7 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 		</div>
 		<h1 class="post_title">
 			if len(post.Flair.FlairParts) > 0 {
-				<a href={ templ.SafeURL("/search?q=flair%3A%22" + post.Flair.Text + "%22+white%3A" + post.Community) } class="post_flair" style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }>@renderFlair(post.Flair.FlairParts)</a>
+				<a href={ templ.SafeURL(flairSearchHref(post.Flair.Text, post.Community)) } class="post_flair" style={ flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor) }>@renderFlair(post.Flair.FlairParts)</a>
 			}
 			{ post.Title }
 			if post.Removed {
@@ -297,14 +297,14 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 						<figcaption>
 							<p>{ g.Caption }</p>
 							if g.OutboundURL != "" {
-								<p><a class="outbound_url" href={ templ.SafeURL(g.OutboundURL) } rel="nofollow">{ g.OutboundURL }</a></p>
+								<p><a class="outbound_url" href={ templ.URL(g.OutboundURL) } rel="nofollow">{ g.OutboundURL }</a></p>
 							}
 						</figcaption>
 					</figure>
 				}
 			</div>
 		} else if post.PostType == "link" {
-			<a id="post_url" href={ templ.SafeURL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
+			<a id="post_url" href={ templ.URL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
 		}
 		<div class="post_body">
 			@templ.Raw(string(post.Body))

@@ -118,7 +118,7 @@ templ settingsContent(d SettingsPageData) {
 							<legend>{ T(ctx, "settings.interface") }</legend>
 							<div class="prefs-group">
 								<label for="post_sort" title={ T(ctx, "settings.post_sort_title") }>{ T(ctx, "settings.post_sort") }</label>
-								<select name="post_sort">
+								<select name="post_sort" id="post_sort">
 									<option value="new" selected?={ d.Prefs.PostSort == "new" }>{ T(ctx, "sort.new") }</option>
 									<option value="new_archive" selected?={ d.Prefs.PostSort == "new_archive" }>{ T(ctx, "sort.archive") }</option>
 									<option value="top" selected?={ d.Prefs.PostSort == "top" }>{ T(ctx, "sort.top") }</option>
@@ -201,7 +201,7 @@ templ settingsContent(d SettingsPageData) {
 							<div class="prefs-group">
 								<label for="fixed_navbar">{ T(ctx, "settings.fixed_navbar") }</label>
 								<input type="hidden" value="off" name="fixed_navbar"/>
-								<input type="checkbox" name="fixed_navbar" checked?={ d.Prefs.FixedNavbar == "on" }/>
+								<input type="checkbox" name="fixed_navbar" id="fixed_navbar" checked?={ d.Prefs.FixedNavbar == "on" }/>
 							</div>
 							<div class="prefs-group">
 								<label for="scroll_interval">{ T(ctx, "settings.scroll_interval") }</label>
@@ -210,7 +210,7 @@ templ settingsContent(d SettingsPageData) {
 							<div class="prefs-group">
 								<label for="hide_sidebar_and_summary">{ T(ctx, "settings.hide_sidebar") }</label>
 								<input type="hidden" value="off" name="hide_sidebar_and_summary"/>
-								<input type="checkbox" name="hide_sidebar_and_summary" checked?={ d.Prefs.HideSidebarAndSummary == "on" }/>
+								<input type="checkbox" name="hide_sidebar_and_summary" id="hide_sidebar_and_summary" checked?={ d.Prefs.HideSidebarAndSummary == "on" }/>
 							</div>
 							<div class="prefs-group">
 								<label for="hide_awards">{ T(ctx, "settings.hide_awards") }</label>
@@ -225,7 +225,7 @@ templ settingsContent(d SettingsPageData) {
 							<div class="prefs-group">
 								<label for="disable_visit_reddit_confirmation">{ T(ctx, "settings.disable_visit_confirm") }</label>
 								<input type="hidden" value="off" name="disable_visit_reddit_confirmation"/>
-								<input type="checkbox" name="disable_visit_reddit_confirmation" checked?={ d.Prefs.DisableVisitRedditConfirmation == "on" }/>
+								<input type="checkbox" name="disable_visit_reddit_confirmation" id="disable_visit_reddit_confirmation" checked?={ d.Prefs.DisableVisitRedditConfirmation == "on" }/>
 							</div>
 							<div class="prefs-group">
 								<label for="fetch_sub_about" title={ T(ctx, "settings.fetch_sub_about_title") }>{ T(ctx, "settings.fetch_sub_about") }</label>
