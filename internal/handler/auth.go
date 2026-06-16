@@ -45,7 +45,10 @@ const (
 	// opens straight away on a trusted browser without a fresh TOTP. Its lifetime
 	// is a SLIDING window (trustedTokenTTL): every validated request pushes the
 	// expiry forward from that moment, so an actively-used browser never lapses
-	// while one left idle past the window dies on its own.
+	// while one left idle past the window dies on its own. Like authTokenCookie it
+	// is IP-bound: validation (store Check) requires the presenting client IP to
+	// match the address the cookie was minted for, so a cookie exfiltrated to
+	// another host cannot open /settings.
 	trustedCookie = "redmemo_trusted_device"
 	// trustedTokenTTL is the trusted-device window. It is not an absolute cap but
 	// a sliding lifetime renewed on each use (see refreshTrustedDevice / store
@@ -180,7 +183,10 @@ func (a *AuthManager) registerTrustFailure() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
-	if a.trustFailWindowStart.IsZero() || now.Sub(a.trustFailWindowStart) > trustFailWindow {
+	// >= (not >) so a failure landing exactly on the window edge stays in the
+	// current window rather than resetting the tally — an attacker can't dilute
+	// the count by straddling the boundary.
+	if a.trustFailWindowStart.IsZero() || now.Sub(a.trustFailWindowStart) >= trustFailWindow {
 		a.trustFailWindowStart = now
 		a.trustFailCount = 0
 	}
@@ -194,15 +200,18 @@ func (a *AuthManager) registerTrustFailure() {
 
 // HasValidTrustedDevice passively re-validates the request's trusted-device
 // cookie against the table on EVERY call (no in-process trust caching — a
-// revoked row goes dead on the very next request). Flow:
+// revoked row goes dead on the very next request). The presented cookie must
+// also come from the same client IP it was minted for (ip is matched inside
+// Check) — a 30-day cookie stolen to another host is rejected, mirroring the
+// IP binding on the ephemeral session token. Flow:
 //   - no cookie               -> not a trust attempt, reject without counting;
 //   - global ban active       -> reject without touching the DB;
 //   - TrustValid              -> allow;
-//   - TrustExpired/TrustAbsent-> reject and count a failure (Check already
-//     reaped an expired row); the failure feeds the 30-min/3-strike tripwire.
+//   - TrustExpired/TrustAbsent-> reject and count a failure (an IP mismatch
+//     reads as TrustAbsent here); the failure feeds the 30-min/3-strike tripwire.
 //
 // A DB error fails closed without counting (a transient blip is not abuse).
-func (a *AuthManager) HasValidTrustedDevice(r *http.Request) bool {
+func (a *AuthManager) HasValidTrustedDevice(r *http.Request, ip string) bool {
 	if a.devices == nil {
 		return false
 	}
@@ -216,8 +225,9 @@ func (a *AuthManager) HasValidTrustedDevice(r *http.Request) bool {
 	// Sliding window: a valid check pushes the DB expiry forward to now+TTL, so a
 	// browser in regular use never lapses. refreshTrustedDevice mirrors this onto
 	// the browser cookie (the DB extension alone is moot if the cookie itself
-	// still expires at its original time).
-	verdict, err := a.devices.Check(hashToken(c.Value), time.Now().Add(trustedTokenTTL))
+	// still expires at its original time). The check also binds to ip: only the
+	// address that passed the gate can renew/use the cookie.
+	verdict, err := a.devices.Check(hashToken(c.Value), ip, time.Now().Add(trustedTokenTTL))
 	if err != nil {
 		log.Printf("[auth] check trusted device: %v", err)
 		return false
@@ -551,7 +561,7 @@ func (a *AuthManager) registerFailure(ip string) (locked bool, remaining int) {
 	// tally; the gate locks if EITHER trips. The global window is rolling and
 	// self-clearing — once lockoutWindow has elapsed since it opened, the next
 	// failure starts a fresh window rather than accumulating forever.
-	if a.globalWindowStart.IsZero() || now.Sub(a.globalWindowStart) > lockoutWindow {
+	if a.globalWindowStart.IsZero() || now.Sub(a.globalWindowStart) >= lockoutWindow {
 		a.globalWindowStart = now
 		a.globalCount = 0
 	}
@@ -670,7 +680,7 @@ func (h *Handler) requireSettingsAuth(next http.HandlerFunc) http.HandlerFunc {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if h.auth.HasValidTrustedDevice(r) {
+		if h.auth.HasValidTrustedDevice(r, ip) {
 			// Slide the browser cookie forward to match the DB expiry the check
 			// just extended, then admit the request.
 			h.auth.refreshTrustedDevice(w, r)

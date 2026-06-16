@@ -2014,7 +2014,7 @@ func postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) templ.Com
 						return templ_7745c5c3_Err
 					}
 					if len(post.Gallery) > 1 {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "<button class=\"gallery_nav gallery_prev gallery_nav_hidden\" type=\"button\" aria-label=\"Previous\">&#x2039;</button> <button class=\"gallery_nav gallery_next\" type=\"button\" aria-label=\"Next\">&#x203A;</button>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "<button class=\"gallery_nav gallery_prev gallery_nav_hidden\" type=\"button\" aria-label=\"Previous\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M15 5l-7 7 7 7\"></path></svg></button> <button class=\"gallery_nav gallery_next\" type=\"button\" aria-label=\"Next\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 5l7 7-7 7\"></path></svg></button>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

@@ -43,7 +43,9 @@ func buildMediaBundle() []byte {
 		"static/imageReload.js",
 		"static/videoReload.js",
 		"static/longVideoGate.js",
+		"static/scrollReveal.js",
 		"static/galleryNav.js",
+		"static/expandAnchor.js",
 	}
 	var buf []byte
 	for _, p := range parts {

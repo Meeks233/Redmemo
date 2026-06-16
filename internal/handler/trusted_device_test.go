@@ -56,10 +56,11 @@ func (f *fakeDeviceStore) Create(hash, prefix, ip string, expiresAt time.Time) e
 	return nil
 }
 
-// Check mirrors store.Check: a live row is touched and reported TrustValid; an
-// expired row is deleted on the spot and reported TrustExpired; a missing row
-// is TrustAbsent.
-func (f *fakeDeviceStore) Check(hash string, newExpiry time.Time) (store.TrustVerdict, error) {
+// Check mirrors store.Check: a live row whose ip matches clientIP is touched and
+// reported TrustValid; an expired row is deleted on the spot (IP-agnostic, pure
+// hygiene) and reported TrustExpired; a missing row — or a live row presented
+// from a different IP — is TrustAbsent.
+func (f *fakeDeviceStore) Check(hash, clientIP string, newExpiry time.Time) (store.TrustVerdict, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i, r := range f.rows {
@@ -67,6 +68,11 @@ func (f *fakeDeviceStore) Check(hash string, newExpiry time.Time) (store.TrustVe
 			continue
 		}
 		if r.expiresAt.After(time.Now()) {
+			// IP binding: a live row only validates from the IP it was minted for,
+			// mirroring the `AND ip = $2` constraint in the store CTE.
+			if r.ip != clientIP {
+				return store.TrustAbsent, nil
+			}
 			now := time.Now()
 			r.lastUsed = &now
 			r.expiresAt = newExpiry // sliding-window renewal, mirrors the store CTE
@@ -152,6 +158,10 @@ func newTestAuthWithDevices(f *fakeDeviceStore) *AuthManager {
 	return a
 }
 
+// boundIP is the client IP that trusted-device rows in these tests are minted
+// for; HasValidTrustedDevice is called with the same IP so the binding matches.
+const boundIP = "192.0.2.5"
+
 func trustedReq(token string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/settings", nil)
 	r.AddCookie(&http.Cookie{Name: trustedCookie, Value: token})
@@ -175,7 +185,7 @@ func TestTrustedDeviceRevokedImmediatelyRejected(t *testing.T) {
 	}
 
 	req := trustedReq(tok)
-	if !a.HasValidTrustedDevice(req) {
+	if !a.HasValidTrustedDevice(req, boundIP) {
 		t.Fatal("freshly created trusted device should validate")
 	}
 
@@ -190,7 +200,7 @@ func TestTrustedDeviceRevokedImmediatelyRejected(t *testing.T) {
 	if err := a.RevokeTrustedDevice(list[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if a.HasValidTrustedDevice(req) {
+	if a.HasValidTrustedDevice(req, boundIP) {
 		t.Fatal("revoked trusted device must be rejected immediately on the next request")
 	}
 }
@@ -213,7 +223,7 @@ func TestRevokeAllTrustedDevicesOnTOTPReset(t *testing.T) {
 		}
 	}
 	for _, tok := range toks {
-		if !a.HasValidTrustedDevice(trustedReq(tok)) {
+		if !a.HasValidTrustedDevice(trustedReq(tok), boundIP) {
 			t.Fatal("seeded trusted device should validate before reset")
 		}
 	}
@@ -226,7 +236,7 @@ func TestRevokeAllTrustedDevicesOnTOTPReset(t *testing.T) {
 		t.Fatalf("want %d devices revoked, got %d", len(toks), n)
 	}
 	for _, tok := range toks {
-		if a.HasValidTrustedDevice(trustedReq(tok)) {
+		if a.HasValidTrustedDevice(trustedReq(tok), boundIP) {
 			t.Fatal("every trusted device must be rejected after a TOTP reset")
 		}
 	}
@@ -296,7 +306,7 @@ func TestTrustedDeviceSlidingRenewal(t *testing.T) {
 		t.Fatalf("seed device: %v", err)
 	}
 
-	if !a.HasValidTrustedDevice(trustedReq(tok)) {
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundIP) {
 		t.Fatal("near-expiry trusted device should still validate")
 	}
 
@@ -307,6 +317,35 @@ func TestTrustedDeviceSlidingRenewal(t *testing.T) {
 	}
 	if got := time.Until(list[0].ExpiresAt); got < trustedTokenTTL-time.Hour {
 		t.Fatalf("validation should have slid expiry to ~%s out, got %s", trustedTokenTTL, got)
+	}
+}
+
+// TestTrustedDeviceBoundToIP proves the 30-day trusted cookie only authorises
+// requests from the IP it was minted for: a live, valid cookie replayed from a
+// different address is rejected (theft / exfiltration), mirroring the IP binding
+// on the ephemeral session token. The legitimate IP keeps working, and the
+// cross-IP rejection counts toward the abuse tripwire.
+func TestTrustedDeviceBoundToIP(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "cafef00dcafef00dcafef00dcafef00d"
+	if err := f.Create(hashToken(tok), tok[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	// Same IP it was minted for: honoured.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundIP) {
+		t.Fatal("trusted cookie must validate from the IP it was minted for")
+	}
+	// A stolen cookie replayed from another network: rejected.
+	if a.HasValidTrustedDevice(trustedReq(tok), "203.0.113.99") {
+		t.Fatal("trusted cookie replayed from a different IP must be rejected")
+	}
+	// The cross-IP rejection must NOT have deleted the row — the legitimate IP
+	// can still use it.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundIP) {
+		t.Fatal("a cross-IP rejection must not invalidate the cookie for its own IP")
 	}
 }
 
@@ -443,8 +482,8 @@ func TestRevokeOtherDeviceKeepsAccess(t *testing.T) {
 
 	const mine = "1111111111111111aaaaaaaaaaaaaaaa"
 	const other = "2222222222222222bbbbbbbbbbbbbbbb"
-	_ = f.Create(hashToken(mine), mine[:8], "", time.Now().Add(trustedTokenTTL))
-	_ = f.Create(hashToken(other), other[:8], "", time.Now().Add(trustedTokenTTL))
+	_ = f.Create(hashToken(mine), mine[:8], boundIP, time.Now().Add(trustedTokenTTL))
+	_ = f.Create(hashToken(other), other[:8], boundIP, time.Now().Add(trustedTokenTTL))
 	list, _ := a.ListTrustedDevices()
 	var otherID int64
 	for _, d := range list {
@@ -463,7 +502,7 @@ func TestRevokeOtherDeviceKeepsAccess(t *testing.T) {
 	if loc := w.Header().Get("Location"); loc != "/settings" {
 		t.Fatalf("revoking another device should stay in settings, got %q", loc)
 	}
-	if !a.HasValidTrustedDevice(trustedReq(mine)) {
+	if !a.HasValidTrustedDevice(trustedReq(mine), boundIP) {
 		t.Fatal("the caller's own trusted device must still validate")
 	}
 }
@@ -480,7 +519,7 @@ func TestTrustedDeviceExpiredCleanedOnAccess(t *testing.T) {
 		t.Fatalf("seed dead: %v", err)
 	}
 
-	if a.HasValidTrustedDevice(trustedReq(dead)) {
+	if a.HasValidTrustedDevice(trustedReq(dead), boundIP) {
 		t.Fatal("expired token must be rejected")
 	}
 	if got := f.len(); got != 0 {
@@ -554,13 +593,13 @@ func TestTrustTripwireSealsAfterThreeFailures(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const good = "900dbeef0123456789abcdef0a1b2c3d"
-	if err := f.Create(hashToken(good), good[:8], "", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(good), good[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed good: %v", err)
 	}
 
 	// trustMaxFailures rejected checks (an absent/forged cookie) trip the wire.
 	for i := 0; i < trustMaxFailures; i++ {
-		if a.HasValidTrustedDevice(trustedReq("forged-cookie-value")) {
+		if a.HasValidTrustedDevice(trustedReq("forged-cookie-value"), boundIP) {
 			t.Fatal("a forged cookie must never validate")
 		}
 	}
@@ -568,7 +607,7 @@ func TestTrustTripwireSealsAfterThreeFailures(t *testing.T) {
 	if !a.trustBanned() {
 		t.Fatal("trust should be globally sealed after the failure ceiling")
 	}
-	if a.HasValidTrustedDevice(trustedReq(good)) {
+	if a.HasValidTrustedDevice(trustedReq(good), boundIP) {
 		t.Fatal("once the tripwire trips, even a valid trust cookie must be refused")
 	}
 	rec, req := issuePost()
@@ -584,11 +623,11 @@ func TestTrustTripwireSelfClears(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const good = "abadcafe0123456789abcdef0a1b2c3d"
-	if err := f.Create(hashToken(good), good[:8], "", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(good), good[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed good: %v", err)
 	}
 	for i := 0; i < trustMaxFailures; i++ {
-		a.HasValidTrustedDevice(trustedReq("forged-cookie-value"))
+		a.HasValidTrustedDevice(trustedReq("forged-cookie-value"), boundIP)
 	}
 	// Force the ban window into the past, as if 30 minutes had elapsed.
 	a.mu.Lock()
@@ -599,7 +638,7 @@ func TestTrustTripwireSelfClears(t *testing.T) {
 	if a.trustBanned() {
 		t.Fatal("trust ban should have self-cleared once its window elapsed")
 	}
-	if !a.HasValidTrustedDevice(trustedReq(good)) {
+	if !a.HasValidTrustedDevice(trustedReq(good), boundIP) {
 		t.Fatal("a valid cookie must be honoured again after the ban window clears")
 	}
 }

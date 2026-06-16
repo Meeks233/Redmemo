@@ -76,3 +76,48 @@ func TestPerIPLockoutStillTrips(t *testing.T) {
 		t.Fatal("locked(ip) should report the per-IP lockout")
 	}
 }
+
+
+// TestGlobalOffByOne attempts to verify the claimed off-by-one scenario:
+// After the 10th failure triggers lockout and resets globalCount to 0,
+// can an 11th failure within the same window bypass the ceiling?
+func TestGlobalOffByOne(t *testing.T) {
+	a := newTestAuth()
+	baseTime := time.Now()
+	
+	// Drive 10 failures
+	for i := 0; i < globalMaxAttempts; i++ {
+		a.mu.Lock()
+		if i == 0 {
+			a.globalWindowStart = baseTime
+		}
+		a.mu.Unlock()
+		
+		ip := fmt.Sprintf("192.0.2.%d", i)
+		locked, _ := a.registerFailure(ip)
+		
+		if i == globalMaxAttempts-1 && !locked {
+			t.Fatalf("Expected 10th failure to trigger global lockout")
+		}
+	}
+	
+	// Check the global lockout state
+	a.mu.Lock()
+	wasLocked := a.globalCount == 0 && time.Now().Before(a.globalUntil)
+	a.mu.Unlock()
+	
+	if !wasLocked {
+		t.Fatalf("Global lockout should be active after 10th failure")
+	}
+	
+	// In practice, serveAuthGate checks locked() before any form processing,
+	// so the 11th request would never reach registerFailure(). However, let's
+	// verify that if it somehow did, the global lockout state would still block it.
+	// NB: locked() takes a.mu itself — calling it under an outer a.mu.Lock()
+	// would self-deadlock (the mutex is non-reentrant), so call it unguarded.
+	stillLocked, _ := a.locked("203.0.113.1")
+
+	if !stillLocked {
+		t.Fatalf("Global lockout should still be active after 10 failures")
+	}
+}

@@ -1737,6 +1737,10 @@ video.lazy-media:not([src]) {
     background: rgba(0, 0, 0, 0.8);
 }
 
+.gallery_nav svg {
+    display: block;
+}
+
 .gallery_prev {
     left: 8px;
 }

@@ -13,9 +13,28 @@
         if (h > maxH) maxH = h;
       }
     }
+    // Floor by the height already on screen. Galleries whose items carry no
+    // intrinsic dimensions yield maxH == 0, which previously left the box
+    // unlocked so every navigation resized it — and any swap to a shorter image
+    // collapsed content above the fold, jerking the page upward when the
+    // viewport sat in the lower half of the image. Anchoring to the current
+    // render guarantees the box can never shrink below what is shown now.
+    var cur = link.offsetHeight;
+    if (cur > maxH) maxH = cur;
     if (w > 0) slider.style.minWidth = w + 'px';
     if (maxH > 0) slider.style.minHeight = Math.ceil(maxH) + 'px';
     slider.setAttribute('data-gallery-locked', '1');
+  }
+
+  // Raise the locked floor to the tallest image shown so far. With no intrinsic
+  // dimensions the initial lock only knows the first image's height; bumping on
+  // each load keeps later (taller) images from ever shrinking the box on a
+  // subsequent navigation.
+  function bumpLock(slider, el) {
+    var h = el.offsetHeight;
+    if (h <= 0) return;
+    var cur = parseFloat(slider.style.minHeight) || 0;
+    if (h > cur) slider.style.minHeight = Math.ceil(h) + 'px';
   }
 
   function clearPending(link) {
@@ -29,6 +48,7 @@
     if (old && old.parentNode) old.remove();
     link.insertBefore(newImg, count);
     slider._galleryShown = newImg;
+    bumpLock(slider, newImg);
   }
 
   function navigate(slider, dir) {
@@ -74,11 +94,17 @@
       if (old) old.style.display = '';
     }
 
+    var item = items[idx];
     var newImg = document.createElement('img');
     newImg.alt = (old && old.alt) || '';
     newImg.style.width = '100%';
     newImg.style.height = 'auto';
-    newImg.src = items[idx].u;
+    // Intrinsic width/height attributes hand the browser the aspect ratio, so
+    // the <img> reserves its final height the instant it is inserted — before
+    // the pixels arrive. This is the standard layout-shift (CLS) fix: reserve
+    // space via aspect ratio, then let CSS (width:100%/height:auto) size it.
+    if (item.w > 0 && item.h > 0) { newImg.width = item.w; newImg.height = item.h; }
+    newImg.src = item.u;
 
     if (newImg.complete && newImg.naturalWidth > 0) {
       clearPending(link);
@@ -86,9 +112,29 @@
       return;
     }
 
+    // Reserve the incoming image's space up-front so the box is already at its
+    // final height while the spinner shows: no collapse to the tiny spinner svg,
+    // and no downward lurch when the image paints (the old "shrink then extend"
+    // bug). Known dimensions give the exact height; otherwise we floor at the
+    // outgoing image's height so it at least never collapses.
+    var reserve = 0;
+    if (item.w > 0 && item.h > 0 && link.offsetWidth > 0) {
+      reserve = link.offsetWidth * item.h / item.w;
+    } else if (old) {
+      reserve = old.offsetHeight;
+    }
+    if (reserve > 0) {
+      var curMin = parseFloat(slider.style.minHeight) || 0;
+      if (reserve > curMin) slider.style.minHeight = Math.ceil(reserve) + 'px';
+    }
+
     if (old) old.style.display = 'none';
     clearPending(link);
     link.insertAdjacentHTML('afterbegin', SPINNER);
+    // Hold the spinner at the reserved height so the placeholder occupies the
+    // same box the image will, instead of collapsing to the 24px svg.
+    var loader = link.querySelector('.gallery_loading');
+    if (loader && reserve > 0) loader.style.height = Math.ceil(reserve) + 'px';
 
     newImg.onload = function () {
       if (isStale()) return;
@@ -111,6 +157,15 @@
     if (!slider) return;
 
     navigate(slider, btn.classList.contains('gallery_prev') ? -1 : 1);
+
+    // Turn the "stuck below a tall image" annoyance into a feature: every step
+    // re-centres the current media (the .gallery_slider box, which vertically
+    // centres the image) in the viewport. Centring on the actual media — not a
+    // top-reveal — is deterministic and idempotent, so the first and second
+    // clicks behave identically, and it keeps the nav buttons (pinned at the
+    // slider's vertical centre) dead-centre on screen, leaving no gap for the
+    // browser's native focus-scroll to fight over.
+    if (window.RedMemo) window.RedMemo.centerInView(slider);
   });
 
   // Touch swipe support for mobile (hover-based nav buttons never appear on touch).

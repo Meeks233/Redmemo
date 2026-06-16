@@ -70,24 +70,30 @@ const (
 	TrustExpired
 )
 
-// Check verifies a presented token hash and self-heals in one round-trip:
-//   - a live row is touched (last_used = NOW) AND its expiry is slid forward to
-//     newExpiry, then reported TrustValid — this is the sliding window: a token
-//     in regular use never lapses, while one left idle past the window expires;
+// Check verifies a presented token hash AND that it is being presented from the
+// client IP it was minted for, self-healing in one round-trip:
+//   - a live row whose ip matches clientIP is touched (last_used = NOW) AND its
+//     expiry is slid forward to newExpiry, then reported TrustValid — this is the
+//     sliding window: a token in regular use never lapses, while one left idle
+//     past the window expires;
 //   - an expired row is deleted on the spot and reported TrustExpired (so an
 //     invalid-but-uncleaned token is reaped exactly when it is presented);
-//   - a missing row is reported TrustAbsent.
+//   - a missing row — OR a live row replayed from a DIFFERENT IP — is reported
+//     TrustAbsent (rejected). IP binding mirrors the ephemeral session token
+//     (sessionToken.ip): a 30-day cookie exfiltrated to another host is useless
+//     because it only authorises the address that passed the TOTP gate.
 //
 // The two writes run inside one CTE so the valid-touch and expired-delete are a
 // single atomic statement — a token is never both touched and deleted. The
 // renewal only fires on the valid branch, so an already-expired token can never
-// be resurrected by a late presentation.
-func (s *TrustedDeviceStore) Check(tokenHash string, newExpiry time.Time) (TrustVerdict, error) {
+// be resurrected by a late presentation. The expired-delete is intentionally NOT
+// IP-scoped: reaping a stale row is pure hygiene regardless of who presents it.
+func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Time) (TrustVerdict, error) {
 	var validN, expiredN int
 	err := s.db.QueryRow(`
 		WITH valid AS (
-			UPDATE trusted_devices SET last_used = NOW(), expires_at = $2
-			WHERE token_hash = $1 AND expires_at > NOW()
+			UPDATE trusted_devices SET last_used = NOW(), expires_at = $3
+			WHERE token_hash = $1 AND ip = $2 AND expires_at > NOW()
 			RETURNING 1
 		),
 		expired AS (
@@ -96,7 +102,7 @@ func (s *TrustedDeviceStore) Check(tokenHash string, newExpiry time.Time) (Trust
 			RETURNING 1
 		)
 		SELECT (SELECT COUNT(*) FROM valid), (SELECT COUNT(*) FROM expired)`,
-		tokenHash, newExpiry,
+		tokenHash, clientIP, newExpiry,
 	).Scan(&validN, &expiredN)
 	if err != nil {
 		return TrustAbsent, fmt.Errorf("check trusted device: %w", err)
