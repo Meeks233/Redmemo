@@ -37,6 +37,49 @@ templ settingsTitle(d SettingsPageData) {
 	{ T(ctx, "settings.page_title", d.BrandName) }
 }
 
+// trustedDevices renders the "Trust this device" long-token management area at
+// the bottom of Instance Information: an optional grace warning (shown when a
+// trust request was just dropped at the cap), then a table of live tokens —
+// prefix, created time, IP — each with a Revoke action.
+templ trustedDevices(d SettingsPageData) {
+	<div class="trusted-devices">
+		<label>{ T(ctx, "settings.trusted_devices") }</label>
+		<p class="query-skip-hint">{ T(ctx, "settings.trusted_devices_desc") }</p>
+		if d.TrustedLimitHit {
+			<div class="trusted-grace">{ T(ctx, "settings.trusted_limit") }</div>
+		}
+		if len(d.TrustedDevices) == 0 {
+			<p class="trusted-empty">{ T(ctx, "settings.trusted_none") }</p>
+		} else {
+			<table class="trusted-table">
+				<thead>
+					<tr>
+						<th>{ T(ctx, "settings.trusted_th_token") }</th>
+						<th>{ T(ctx, "settings.trusted_th_created") }</th>
+						<th>{ T(ctx, "settings.trusted_th_ip") }</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, dev := range d.TrustedDevices {
+						<tr>
+							<td><code class="inline">{ dev.Prefix }…</code></td>
+							<td>{ dev.Created }</td>
+							<td>{ dev.IP }</td>
+							<td>
+								<form method="post" action="/settings/trusted/revoke" style="margin:0">
+									<input type="hidden" name="id" value={ i64(dev.ID) }/>
+									<button type="submit" class="trusted-revoke">{ T(ctx, "settings.trusted_revoke") }</button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}
+
 templ settingsPage(d SettingsPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:   settingsTitle(d),
@@ -369,6 +412,7 @@ templ settingsContent(d SettingsPageData) {
 								</tr>
 							</tbody>
 						</table>
+						@trustedDevices(d)
 					</fieldset>
 				</div>
 			</div>

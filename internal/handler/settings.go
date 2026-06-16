@@ -692,6 +692,21 @@ func filterValidSubsList(names []string) []string {
 	return out
 }
 
+// shouldShowTrustLimit decides whether the "cap reached" grace banner is honest
+// to render. The auth gate redirects to /settings?trusted=limit whenever a trust
+// request was dropped, but (a) that marker is sticky in the URL across refreshes
+// and (b) the drop can happen for reasons other than a full cap (e.g. the
+// validation tripwire, a store error). The banner literally claims "you already
+// have 3 trusted devices", so it must only show when the LIVE device list is
+// genuinely at the cap — otherwise it contradicts the table right beneath it
+// (the reported "you have 3 max" + "No trusted devices" nonsense). deviceCount
+// is the live (non-expired) device count, the same quantity the cap is enforced
+// on in issueTrustedDevice, so the banner appears exactly when a request would
+// actually be refused for being full.
+func shouldShowTrustLimit(marker string, deviceCount int) bool {
+	return marker == "limit" && deviceCount >= maxTrustedDevices
+}
+
 func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 
@@ -781,6 +796,32 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	archiveControl := h.siteDefault("archive_control")
 
+	// Trusted-device long tokens for the Instance Information management table.
+	// Guarded on h.auth (nil under AUTH_BYPASS / tests). The "?trusted=limit"
+	// marker is set by the auth gate when a trust request was dropped at the cap.
+	var trustedDevices []render.TrustedDeviceView
+	if h.auth != nil {
+		if devs, err := h.auth.ListTrustedDevices(); err != nil {
+			log.Printf("[settings] list trusted devices: %v", err)
+		} else {
+			for _, d := range devs {
+				lastUsed := "—"
+				if d.LastUsed != nil {
+					lastUsed = d.LastUsed.Format("2006-01-02 15:04")
+				}
+				trustedDevices = append(trustedDevices, render.TrustedDeviceView{
+					ID:       d.ID,
+					Prefix:   d.TokenPrefix,
+					IP:       d.IP,
+					Created:  d.CreatedAt.Format("2006-01-02 15:04"),
+					LastUsed: lastUsed,
+					Expires:  d.ExpiresAt.Format("2006-01-02"),
+				})
+			}
+		}
+	}
+	trustedLimitHit := shouldShowTrustLimit(r.URL.Query().Get("trusted"), len(trustedDevices))
+
 	data := render.SettingsPageData{
 		BasePage: render.BasePage{
 			URL:       r.URL.Path,
@@ -803,6 +844,8 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		LiveSubs:        liveSubs,
 		SelectedCounts:  selectedCounts,
 		AuthBypass:      h.cfg.Auth.BypassAuth,
+		TrustedDevices:  trustedDevices,
+		TrustedLimitHit: trustedLimitHit,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// Settings is rendered behind the ephemeral TOTP token cookie — never let a
@@ -919,6 +962,50 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// handleTrustedRevoke revokes one trusted-device long token by id. It is reached
+// only through requireSettingsAuth (so the caller already holds a valid session
+// and passed the same-origin check). On success the device's long token stops
+// authorising /settings immediately.
+func (h *Handler) handleTrustedRevoke(w http.ResponseWriter, r *http.Request) {
+	if h.auth == nil {
+		http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("id")), 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	// Decide BEFORE deleting whether the row being revoked is the caller's own
+	// browser — once the row is gone we can no longer match its hash. A store
+	// error here is non-fatal: we just treat it as "not self" and revoke anyway.
+	hash, err := h.auth.deviceHashByID(id)
+	if err != nil {
+		log.Printf("[settings] lookup trusted device %d: %v", id, err)
+	}
+	self := h.auth.requestIsTrustedDevice(r, hash)
+
+	if err := h.auth.RevokeTrustedDevice(id); err != nil {
+		log.Printf("[settings] revoke trusted device %d: %v", id, err)
+		http.Error(w, "failed to revoke device", http.StatusInternalServerError)
+		return
+	}
+	if self {
+		// Revoking yourself drops your access on the spot: tear down this browser's
+		// session token + both cookies so the dead trusted token can't ride out its
+		// cookie, and send the now-unauthenticated browser back to the home page
+		// rather than the settings gate.
+		h.auth.logout(w, r)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 

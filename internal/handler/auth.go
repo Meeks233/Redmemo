@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
@@ -38,9 +40,30 @@ import (
 const (
 	authTokenCookie = "redmemo_settings_token"
 	safeEnvCookie   = "redmemo_env_ack"
-	defaultTokenTTL = 10 * time.Minute
-	maxTokenTTL     = 60 * time.Minute
-	maxAttempts     = 3
+	// trustedCookie carries the persistent "Trust this device" long token. Unlike
+	// authTokenCookie (in-memory, minutes) this one is DB-backed and lives a year,
+	// so /settings opens straight away on a trusted browser without a fresh TOTP.
+	trustedCookie = "redmemo_trusted_device"
+	// trustedTokenTTL is the lifetime of a trusted-device long token.
+	trustedTokenTTL = 365 * 24 * time.Hour
+	// maxTrustedDevices caps how many live long tokens an instance will hold. A
+	// 4th request is dropped with a grace warning — the operator either has too
+	// many devices (revoke some) or the gate has been breached.
+	maxTrustedDevices = 3
+	// trustedSweepInterval is how often expired long tokens are reaped. Validity
+	// is already gated on expires_at, so this is hygiene, not correctness.
+	trustedSweepInterval = 24 * time.Hour
+	// trustFailWindow / trustMaxFailures form the abuse tripwire on trusted-cookie
+	// validation: within any rolling trustFailWindow we tolerate at most
+	// trustMaxFailures rejected cookie checks. The trustMaxFailures-th failure
+	// trips a global ban (trustBanUntil) that, for the rest of the window, refuses
+	// ALL trusted-device validation AND new trust requests — a burst of bad
+	// cookies reads as an attack, so trust is sealed instance-wide until it cools.
+	trustFailWindow  = 30 * time.Minute
+	trustMaxFailures = 3
+	defaultTokenTTL       = 10 * time.Minute
+	maxTokenTTL           = 60 * time.Minute
+	maxAttempts           = 3
 	lockoutWindow   = totp.Period * time.Second
 	// globalMaxAttempts is the instance-wide failure ceiling that backstops the
 	// per-IP lockout: when RedMemo sits behind a proxy with no TrustedProxyCIDRs,
@@ -66,6 +89,7 @@ const (
 type AuthManager struct {
 	serverSecret string
 	store        *store.TOTPStore
+	devices      trustedDeviceStore
 
 	mu        sync.Mutex
 	tokens    map[string]time.Time // token -> expiry
@@ -80,6 +104,15 @@ type AuthManager struct {
 	globalCount       int
 	globalWindowStart time.Time
 	globalUntil       time.Time
+
+	// Trusted-device validation tripwire (guarded by mu). trustFailCount is the
+	// rolling tally of rejected cookie checks in the current trustFailWindow;
+	// trustFailWindowStart opens that window; trustBanUntil seals all trust
+	// access + issuance once trustMaxFailures is reached. Self-clearing on the
+	// same window semantics as the brute-force backstop above.
+	trustFailCount       int
+	trustFailWindowStart time.Time
+	trustBanUntil        time.Time
 }
 
 type attempt struct {
@@ -88,14 +121,246 @@ type attempt struct {
 	lastSeen    time.Time
 }
 
-func NewAuthManager(serverSecret string, s *store.TOTPStore) *AuthManager {
-	return &AuthManager{
+func NewAuthManager(serverSecret string, s *store.TOTPStore, d *store.TrustedDeviceStore) *AuthManager {
+	a := &AuthManager{
 		serverSecret: serverSecret,
 		store:        s,
 		tokens:       make(map[string]time.Time),
 		tries:        make(map[string]*attempt),
 		usedCodes:    make(map[string]time.Time),
 	}
+	// Guard the typed-nil-into-interface trap: assigning a nil *TrustedDeviceStore
+	// straight into the interface field would make `a.devices == nil` read false
+	// and every guarded method dereference a nil pointer. Only wire a live store.
+	if d != nil {
+		a.devices = d
+	}
+	return a
+}
+
+// hashToken returns the hex SHA-256 of a long token — what we persist and look
+// up by, so the plaintext cookie value never touches the database.
+func hashToken(tok string) string {
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+// trustBanned reports whether the global trusted-device tripwire is currently
+// tripped — within the ban window no cookie is validated and no new trust is
+// granted, regardless of source IP.
+func (a *AuthManager) trustBanned() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return time.Now().Before(a.trustBanUntil)
+}
+
+// registerTrustFailure records one rejected trusted-cookie check in the rolling
+// window. The window self-clears once trustFailWindow has elapsed; the
+// trustMaxFailures-th failure inside a live window seals trust instance-wide for
+// a further trustFailWindow.
+func (a *AuthManager) registerTrustFailure() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	if a.trustFailWindowStart.IsZero() || now.Sub(a.trustFailWindowStart) > trustFailWindow {
+		a.trustFailWindowStart = now
+		a.trustFailCount = 0
+	}
+	a.trustFailCount++
+	if a.trustFailCount >= trustMaxFailures {
+		a.trustBanUntil = now.Add(trustFailWindow)
+		log.Printf("[auth] trusted-device tripwire: %d rejected cookie checks in %s — trust sealed instance-wide until %s",
+			a.trustFailCount, trustFailWindow, a.trustBanUntil.Format(time.RFC3339))
+	}
+}
+
+// HasValidTrustedDevice passively re-validates the request's trusted-device
+// cookie against the table on EVERY call (no in-process trust caching — a
+// revoked row goes dead on the very next request). Flow:
+//   - no cookie               -> not a trust attempt, reject without counting;
+//   - global ban active       -> reject without touching the DB;
+//   - TrustValid              -> allow;
+//   - TrustExpired/TrustAbsent-> reject and count a failure (Check already
+//     reaped an expired row); the failure feeds the 30-min/3-strike tripwire.
+//
+// A DB error fails closed without counting (a transient blip is not abuse).
+func (a *AuthManager) HasValidTrustedDevice(r *http.Request) bool {
+	if a.devices == nil {
+		return false
+	}
+	c, err := r.Cookie(trustedCookie)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	if a.trustBanned() {
+		return false
+	}
+	verdict, err := a.devices.Check(hashToken(c.Value))
+	if err != nil {
+		log.Printf("[auth] check trusted device: %v", err)
+		return false
+	}
+	if verdict == store.TrustValid {
+		return true
+	}
+	// Expired (now cleaned) or absent (revoked / forged): a genuine rejection.
+	a.registerTrustFailure()
+	return false
+}
+
+// issueTrustedDevice mints, persists and cookies a 365-day long token for the
+// current browser. Slot policy (maxTrustedDevices total):
+//   - global trust ban active        -> refuse (the tripwire seals issuance too);
+//   - all slots held by LIVE tokens   -> refuse, surface the grace warning;
+//   - one or more slots expired/empty -> batch-reap every expired row to make
+//     room, then insert into a freed/empty slot.
+//
+// A store error also returns false (the user still got their ephemeral session).
+func (a *AuthManager) issueTrustedDevice(w http.ResponseWriter, r *http.Request, ip string) bool {
+	if a.devices == nil {
+		return false
+	}
+	if a.trustBanned() {
+		return false
+	}
+	// CountActive ignores expired rows, so this is purely the count of LIVE
+	// tokens. At the cap every slot is genuinely occupied — refuse. Otherwise
+	// there is room (an empty or an expired slot), so reclaim all expired rows
+	// in one batch and insert below.
+	n, err := a.devices.CountActive()
+	if err != nil {
+		log.Printf("[auth] count trusted devices: %v", err)
+		return false
+	}
+	if n >= maxTrustedDevices {
+		return false
+	}
+	if _, err := a.devices.DeleteExpired(); err != nil {
+		log.Printf("[auth] reap expired trusted devices: %v", err)
+		return false
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		log.Printf("[auth] trusted token gen: %v", err)
+		return false
+	}
+	tok := hex.EncodeToString(buf)
+	exp := time.Now().Add(trustedTokenTTL)
+	// Show only the leading chars in the management table — enough to tell rows
+	// apart, not enough to reconstruct the token.
+	prefix := tok[:8]
+	if err := a.devices.Create(hashToken(tok), prefix, ip, exp); err != nil {
+		log.Printf("[auth] persist trusted device: %v", err)
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     trustedCookie,
+		Value:    tok,
+		Path:     "/",
+		Expires:  exp,
+		MaxAge:   int(trustedTokenTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   isTLSRequest(r),
+		SameSite: http.SameSiteLaxMode,
+	})
+	return true
+}
+
+// ListTrustedDevices surfaces the live long tokens for the settings management
+// table. Returns nil on a nil store / error.
+func (a *AuthManager) ListTrustedDevices() ([]store.TrustedDevice, error) {
+	if a.devices == nil {
+		return nil, nil
+	}
+	return a.devices.ListActive()
+}
+
+// RevokeTrustedDevice deletes one long token by id (operator-initiated). If the
+// operator revokes the device they are currently on, the next request simply
+// fails the DB lookup and falls back to the TOTP gate — the now-orphaned cookie
+// is harmless and expires on its own.
+func (a *AuthManager) RevokeTrustedDevice(id int64) error {
+	if a.devices == nil {
+		return nil
+	}
+	_, err := a.devices.Revoke(id)
+	return err
+}
+
+// requestIsTrustedDevice reports whether the request's trusted-device cookie
+// hashes to wantHash — i.e. the row identified by wantHash is the very browser
+// making this request. Used by self-revoke to tell "I revoked my own device"
+// from "I revoked some other device" so only the former tears down the caller's
+// own session. Deliberately bypasses the abuse tripwire (it is a plain hash
+// comparison, not a validation attempt).
+func (a *AuthManager) requestIsTrustedDevice(r *http.Request, wantHash string) bool {
+	if wantHash == "" {
+		return false
+	}
+	c, err := r.Cookie(trustedCookie)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	return hashToken(c.Value) == wantHash
+}
+
+// deviceHashByID returns the stored hash for one trusted-device row (or "" when
+// the store is absent / the row is gone).
+func (a *AuthManager) deviceHashByID(id int64) (string, error) {
+	if a.devices == nil {
+		return "", nil
+	}
+	return a.devices.HashByID(id)
+}
+
+// logout fully de-authorises the request's browser: it drops the in-memory
+// ephemeral session token (so the still-cookied value can't authorise another
+// request), then clears both the session and the trusted-device cookies. Used
+// on self-revoke so access stops on the spot rather than living out the cookie.
+func (a *AuthManager) logout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(authTokenCookie); err == nil && c.Value != "" {
+		a.mu.Lock()
+		delete(a.tokens, c.Value)
+		a.mu.Unlock()
+	}
+	a.clearToken(w)
+	http.SetCookie(w, &http.Cookie{
+		Name:     trustedCookie,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// StartTrustedSweeper runs a daily reaper that drops expired long tokens. It
+// fires once on start, then on a 24h ticker, and exits when ctx is cancelled —
+// the same lifecycle shape as the media evictor.
+func (a *AuthManager) StartTrustedSweeper(ctx context.Context) {
+	if a.devices == nil {
+		return
+	}
+	go func() {
+		sweep := func() {
+			if n, err := a.devices.DeleteExpired(); err != nil {
+				log.Printf("[auth] trusted device sweep: %v", err)
+			} else if n > 0 {
+				log.Printf("[auth] trusted device sweep: revoked %d expired token(s)", n)
+			}
+		}
+		sweep()
+		ticker := time.NewTicker(trustedSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sweep()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 // HasValidToken reports whether the request carries a still-live ephemeral
@@ -336,7 +601,7 @@ func (h *Handler) requireSettingsAuth(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		if h.auth.HasValidToken(r) {
+		if h.auth.HasValidToken(r) || h.auth.HasValidTrustedDevice(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -548,8 +813,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 		if err := h.auth.store.MarkConfirmed(); err != nil {
 			log.Printf("[auth] mark TOTP confirmed: %v", err)
 		}
-		h.auth.issueToken(w, r, h.resolveTokenTTL())
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		h.redirectAfterUnlock(w, r, ip)
 
 	case "totp":
 		secret, _ := h.auth.store.Secret()
@@ -578,12 +842,35 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			return
 		}
 		h.auth.resetAttempts(ip)
-		h.auth.issueToken(w, r, h.resolveTokenTTL())
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		h.redirectAfterUnlock(w, r, ip)
 
 	default:
 		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 	}
+}
+
+// redirectAfterUnlock finishes a successful code entry by handing the browser
+// exactly ONE credential, never two. If the operator ticked "Trust this device"
+// and a long-token slot is free, we mint the 365-day trusted cookie and stop —
+// that cookie authorises every future /settings call on its own, so also minting
+// an ephemeral session token would just burn a map slot for no added access.
+// Otherwise (trust not requested, or the maxTrustedDevices cap is full) we fall
+// back to the short-lived session token; the cap case additionally routes to
+// /settings?trusted=limit so the management area can surface the grace warning.
+func (h *Handler) redirectAfterUnlock(w http.ResponseWriter, r *http.Request, ip string) {
+	if r.FormValue("trust_device") == "on" {
+		if h.auth.issueTrustedDevice(w, r, ip) {
+			http.Redirect(w, r, "/settings", http.StatusSeeOther)
+			return
+		}
+		// Cap full: no long token issued. Fall through to an ephemeral session so
+		// the user still gets in this round, and flag the limit.
+		h.auth.issueToken(w, r, h.resolveTokenTTL())
+		http.Redirect(w, r, "/settings?trusted=limit", http.StatusSeeOther)
+		return
+	}
+	h.auth.issueToken(w, r, h.resolveTokenTTL())
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 // qrDataURI renders the otpauth QR as a base64 data: URI so the enrollment
@@ -606,8 +893,11 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 {{if .ThemeStylesheet}}<link rel="stylesheet" href="/themes/{{.Theme}}.css">{{end}}
 {{if .AutoThemeCSS}}{{.AutoThemeCSS}}{{end}}
 <style>
-  body{display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;font-family:system-ui,sans-serif;background:var(--background);color:var(--text)}
-  .card{max-width:480px;width:90%;padding:2rem;background:var(--post);border:var(--panel-border);border-radius:8px;box-shadow:var(--shadow)}
+  /* Layout + responsiveness reuse style.css's centred single-panel pattern
+     (#error wrapper + .prefs panel: width:100% capped at max-width). Only the
+     auth-specific controls below need bespoke styling. */
+  #error{align-items:flex-start}
+  .prefs{padding:2rem}
   h1{margin-top:0;font-size:1.2rem;color:var(--text)}
   input[type=text],input[type=password]{width:100%;padding:.6rem;margin:.5rem 0 1rem;background:var(--outside);color:var(--text);border:var(--panel-border);border-radius:4px;font-family:monospace;font-size:1rem;box-sizing:border-box}
   input[type=text]:focus,input[type=password]:focus{outline:2px solid var(--accent);outline-offset:1px}
@@ -615,6 +905,9 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   button.alt{background:var(--highlighted);color:var(--text)}
   .err{color:var(--nsfw);margin:.5rem 0}
   .muted{color:var(--visited);font-size:.85rem}
+  /* "Trust this device" opt-in — mirrors the settings page's checkbox rows. */
+  label.trust{display:flex;align-items:center;gap:.5rem;margin:.25rem 0 1rem;color:var(--text);font-size:.9rem;cursor:pointer;user-select:none}
+  label.trust input{width:auto;margin:0;flex:0 0 auto}
   img.qr{display:block;margin:1rem auto;background:#fff;padding:.5rem;border-radius:4px}
   code{display:block;padding:.5rem;background:var(--outside);color:var(--text);border-radius:4px;font-family:monospace;word-break:break-all}
   code.inline{display:inline;padding:.1em .35em;word-break:normal}
@@ -630,7 +923,7 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   .otp.shake{animation:otp-shake .4s cubic-bezier(.36,.07,.19,.97) both}
   @keyframes otp-shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
   @media (prefers-reduced-motion:reduce){.otp.shake{animation:none}}
-</style></head><body class="{{.BodyClass}}"><div class="card">
+</style></head><body class="{{.BodyClass}}"><div id="error"><div class="prefs">
 {{if .Err}}<div class="err">{{.Err}}</div>{{end}}
 {{if eq .Stage "safe_env"}}
   <h1>Is this environment safe?</h1>
@@ -658,6 +951,7 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   <form method="post" action="/settings" autocomplete="off" style="margin-top:1rem">
     <input type="hidden" name="stage" value="enroll_confirm">
     <input type="text" class="otp-input" data-autosubmit name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus required placeholder="6-digit code">
+    <label class="trust"><input type="checkbox" name="trust_device" value="on">Trust this device for 365 days (skip the code on this browser)</label>
     <button>Verify &amp; enter settings</button>
   </form>
 {{else if eq .Stage "totp"}}
@@ -666,10 +960,11 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   <form method="post" action="/settings" autocomplete="off">
     <input type="hidden" name="stage" value="totp">
     <input type="text" class="otp-input" data-autosubmit name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus required>
+    <label class="trust"><input type="checkbox" name="trust_device" value="on">Trust this device for 365 days (skip the code on this browser)</label>
     <button>Unlock settings</button>
   </form>
 {{end}}
-</div>
+</div></div>
 <script src="/otpInput.js" defer></script>
 </body></html>`))
 

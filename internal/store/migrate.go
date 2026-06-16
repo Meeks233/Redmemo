@@ -656,6 +656,24 @@ var migrations = []string{
 	 SELECT '_totp_confirmed', '1', 'totp'
 	 WHERE EXISTS (SELECT 1 FROM site_settings WHERE name = '_totp_secret')
 	 ON CONFLICT (name) DO NOTHING;`,
+
+	// v33: trusted-device long tokens. A "Trust this device" tick on the TOTP
+	// gate mints a 365-day cookie whose SHA-256 is persisted here (never the
+	// plaintext — a DB leak must not yield a usable session token). token_prefix
+	// keeps the first few plaintext chars purely so the management table can show
+	// the operator which cookie a row maps to. The instance caps live rows at 3
+	// (enforced in the store layer); expires_at backs both the validity check
+	// (WHERE expires_at > NOW()) and the daily expiry sweep.
+	`CREATE TABLE IF NOT EXISTS trusted_devices (
+		id           BIGSERIAL PRIMARY KEY,
+		token_hash   TEXT NOT NULL UNIQUE,
+		token_prefix TEXT NOT NULL,
+		ip           TEXT,
+		created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		last_used    TIMESTAMPTZ,
+		expires_at   TIMESTAMPTZ NOT NULL
+	 );
+	 CREATE INDEX IF NOT EXISTS idx_trusted_devices_expires ON trusted_devices (expires_at);`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration

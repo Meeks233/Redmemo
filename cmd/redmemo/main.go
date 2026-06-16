@@ -92,6 +92,7 @@ func main() {
 	subIconStore := store.NewSubIconStore(db)
 	settingsStore := store.NewSettingsStore(db)
 	totpStore := store.NewTOTPStore(db)
+	trustedDeviceStore := store.NewTrustedDeviceStore(db)
 
 	// --reset-totp: one-shot administrative wipe of the enrolled TOTP secret.
 	// The next browser visit re-prompts for the server secret and re-renders
@@ -116,7 +117,7 @@ func main() {
 	if cfg.Auth.BypassAuth {
 		log.Printf("auth: REDMEMO_AUTH_BYPASS=on — /settings and /debug are OPEN. Ensure an outer auth layer (Tailscale, VPN, reverse-proxy SSO) is in place.")
 	}
-	authMgr := handler.NewAuthManager(cfg.Auth.ServerSecret, totpStore)
+	authMgr := handler.NewAuthManager(cfg.Auth.ServerSecret, totpStore, trustedDeviceStore)
 
 	// 5. Rebuild site_settings on every startup
 	//    Priority: env_override > legacy_sync > existing KV > default
@@ -282,6 +283,7 @@ func main() {
 	}
 	evictor.Start(ctx)
 	prefetcher.Start(ctx)
+	authMgr.StartTrustedSweeper(ctx)
 
 	// One-off cleanup: drop legacy silent video-only cache entries that a
 	// muxed (audio) copy has since superseded.

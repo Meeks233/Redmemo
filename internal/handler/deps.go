@@ -87,6 +87,21 @@ type hrManager interface {
 	RedisDownReset(ctx context.Context) (down bool, untilUnix int64)
 }
 
+// trustedDeviceStore is the slice of *store.TrustedDeviceStore the auth gate
+// uses to mint, validate, list, revoke and sweep "Trust this device" long
+// tokens. Declared consumer-side so AuthManager's logic (cap enforcement,
+// revoke-invalidates-immediately, expiry cleanup) is unit-testable against an
+// in-memory fake — see trusted_device_test.go.
+type trustedDeviceStore interface {
+	CountActive() (int, error)
+	Create(tokenHash, prefix, ip string, expiresAt time.Time) error
+	Check(tokenHash string) (store.TrustVerdict, error)
+	ListActive() ([]store.TrustedDevice, error)
+	HashByID(id int64) (string, error)
+	Revoke(id int64) (int64, error)
+	DeleteExpired() (int64, error)
+}
+
 // Compile-time guards that concrete production types still satisfy the
 // interfaces above. If a future method removal breaks the contract these
 // fail at build time instead of at runtime in a route handler.
@@ -95,7 +110,8 @@ var (
 	_ commentStorer   = (*store.CommentStore)(nil)
 	_ redditClient    = (*reddit.Client)(nil)
 	_ tokenSource     = (*oauth.TokenHolder)(nil)
-	_ archiverService = (*archive.Service)(nil)
-	_ htmlCache       = (*cache.Cache)(nil)
-	_ hrManager       = (*hrlimit.Manager)(nil)
+	_ archiverService    = (*archive.Service)(nil)
+	_ htmlCache          = (*cache.Cache)(nil)
+	_ hrManager          = (*hrlimit.Manager)(nil)
+	_ trustedDeviceStore = (*store.TrustedDeviceStore)(nil)
 )

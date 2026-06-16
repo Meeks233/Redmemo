@@ -204,6 +204,9 @@ func (h *Handler) Routes() http.Handler {
 	// settings save (when one is). The gate routes between the two.
 	mux.HandleFunc("GET /settings", h.requireSettingsAuth(h.handleSettings))
 	mux.HandleFunc("POST /settings", h.requireSettingsAuth(h.handleSettingsSave))
+	// Revoke a "Trust this device" long token from the Instance Information
+	// management table. Same TOTP gate + same-origin check as the settings save.
+	mux.HandleFunc("POST /settings/trusted/revoke", h.requireSettingsAuth(h.handleTrustedRevoke))
 
 	// Wiki
 	mux.HandleFunc("GET /r/{sub}/wiki/{page...}", h.handleWiki)

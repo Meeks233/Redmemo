@@ -288,6 +288,24 @@ type SettingsPageData struct {
 	// anyone with network reach can edit instance settings. The flag is
 	// instance-wide, not per-user, so all visitors see the same banner.
 	AuthBypass bool
+	// TrustedDevices lists the live "Trust this device" long tokens for the
+	// Instance Information management table. Empty when none are enrolled.
+	TrustedDevices []TrustedDeviceView
+	// TrustedLimitHit is set when the visitor just tried to trust a device but
+	// the instance already holds maxTrustedDevices — the page shows a grace
+	// warning steering them to revoke a device (or treat it as a breach).
+	TrustedLimitHit bool
+}
+
+// TrustedDeviceView is one row of the trusted-device management table. Prefix
+// is the cosmetic leading chars of the token; the full value is never exposed.
+type TrustedDeviceView struct {
+	ID       int64
+	Prefix   string
+	IP       string
+	Created  string
+	LastUsed string
+	Expires  string
 }
 
 type ArchiveHubEntry struct {
