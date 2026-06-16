@@ -18,9 +18,12 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     apk add ca-certificates tzdata \
     && addgroup -S redmemo && adduser -S redmemo -G redmemo
 COPY --from=builder /redmemo /usr/local/bin/redmemo
-COPY config.example.yaml /etc/redmemo/config.yaml
 RUN mkdir -p /data/media && chown -R redmemo:redmemo /data/media
 USER redmemo
 EXPOSE 8080
+# No config baked in — matches Dockerfile.release. RedMemo runs on built-in
+# defaults + REDMEMO_* env vars driven entirely by the compose file, so a
+# build-from-source image boots from a single `docker compose up` with no
+# config.yaml. Mount one only to pin YAML-only knobs (trusted_proxy_cidrs,
+# hrlimit tuning, static OAuth tokens).
 ENTRYPOINT ["redmemo"]
-CMD ["/etc/redmemo/config.yaml"]

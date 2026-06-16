@@ -163,6 +163,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.Handle("GET /audioSync.js", static)
 	mux.Handle("GET /redditModal.js", static)
 	mux.Handle("GET /searchAutocomplete.js", static)
+	mux.Handle("GET /otpInput.js", static)
 
 	// One bundle for every media-page script (lazyMedia/videoAutoplay/
 	// videoPreload/audioSync/imageReload) — see render.MediaBundle.

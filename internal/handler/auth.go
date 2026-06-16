@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -184,9 +185,10 @@ func (a *AuthManager) clearToken(w http.ResponseWriter) {
 }
 
 // registerFailure bumps the per-IP miss counter; on the 3rd miss it parks
-// the IP until the next TOTP rotation and returns true (caller must redirect
-// to /fuckreddit).
-func (a *AuthManager) registerFailure(ip string) bool {
+// the IP until the next TOTP rotation and returns locked=true (caller must
+// redirect to /fuckreddit). remaining is how many tries are left in this round
+// before lockout — 0 once locked, otherwise maxAttempts-count.
+func (a *AuthManager) registerFailure(ip string) (locked bool, remaining int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
@@ -208,9 +210,9 @@ func (a *AuthManager) registerFailure(ip string) bool {
 	if st.count >= maxAttempts {
 		st.lockedUntil = now.Add(lockoutWindow)
 		st.count = 0
-		return true
+		return true, 0
 	}
-	return false
+	return false, maxAttempts - st.count
 }
 
 // locked reports whether the IP is currently in the cool-down window.
@@ -405,7 +407,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 	case "server_secret":
 		entered := r.FormValue("secret")
 		if !constantTimeEqual(entered, h.auth.serverSecret) {
-			if locked := h.auth.registerFailure(ip); locked {
+			if locked, _ := h.auth.registerFailure(ip); locked {
 				http.Redirect(w, r, "/fuckreddit?reason=auth_locked", http.StatusSeeOther)
 				return
 			}
@@ -435,7 +437,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 			}
 			ok, replay := h.auth.consumeCode(existing, code, time.Now())
 			if !ok || replay {
-				if locked := h.auth.registerFailure(ip); locked {
+				if locked, _ := h.auth.registerFailure(ip); locked {
 					http.Redirect(w, r, "/fuckreddit?reason=auth_locked", http.StatusSeeOther)
 					return
 				}
@@ -465,7 +467,7 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 		code := r.FormValue("code")
 		ok, replay := h.auth.consumeCode(secret, code, time.Now())
 		if !ok {
-			if locked := h.auth.registerFailure(ip); locked {
+			if locked, _ := h.auth.registerFailure(ip); locked {
 				// Roll back the enrollment so the next round starts fresh —
 				// otherwise an attacker who tripped the lockout would gain a
 				// pre-baked secret on retry.
@@ -501,11 +503,16 @@ func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip stri
 		code := r.FormValue("code")
 		ok, replay := h.auth.consumeCode(secret, code, time.Now())
 		if !ok {
-			if locked := h.auth.registerFailure(ip); locked {
+			locked, remaining := h.auth.registerFailure(ip)
+			if locked {
 				http.Redirect(w, r, "/fuckreddit?reason=auth_locked", http.StatusSeeOther)
 				return
 			}
-			h.renderAuthPage(w, r, stageTOTPCode, "incorrect code")
+			noun := "attempts"
+			if remaining == 1 {
+				noun = "attempt"
+			}
+			h.renderAuthPage(w, r, stageTOTPCode, fmt.Sprintf("Incorrect code — %d %s left", remaining, noun))
 			return
 		}
 		if replay {
@@ -552,7 +559,19 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   .muted{color:var(--visited);font-size:.85rem}
   img.qr{display:block;margin:1rem auto;background:#fff;padding:.5rem;border-radius:4px}
   code{display:block;padding:.5rem;background:var(--outside);color:var(--text);border-radius:4px;font-family:monospace;word-break:break-all}
+  code.inline{display:inline;padding:.1em .35em;word-break:normal}
   p{color:var(--text)}
+  /* Segmented one-time-code input (progressive enhancement of .otp-input) */
+  .otp{display:flex;gap:.5rem;margin:.5rem 0 1rem;justify-content:center}
+  .otp-cell{width:100%;max-width:3rem;aspect-ratio:3/4;padding:0;text-align:center;font-family:monospace;font-size:1.5rem;font-weight:600;color:var(--text);background:var(--outside);border:2px solid transparent;border-radius:8px;box-shadow:var(--panel-border) 0 0 0 1px inset;transition:border-color .15s,box-shadow .15s;box-sizing:border-box;-moz-appearance:textfield}
+  .otp-cell::-webkit-outer-spin-button,.otp-cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  .otp-cell:hover{border-color:var(--highlighted)}
+  .otp-cell:focus{outline:none;border-color:var(--accent);box-shadow:var(--accent) 0 0 0 1px inset,0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+  .otp-cell.filled{border-color:var(--accent)}
+  .otp.error .otp-cell{border-color:var(--nsfw)}
+  .otp.shake{animation:otp-shake .4s cubic-bezier(.36,.07,.19,.97) both}
+  @keyframes otp-shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
+  @media (prefers-reduced-motion:reduce){.otp.shake{animation:none}}
 </style></head><body class="{{.BodyClass}}"><div class="card">
 {{if .Err}}<div class="err">{{.Err}}</div>{{end}}
 {{if eq .Stage "safe_env"}}
@@ -565,11 +584,11 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   </form>
 {{else if eq .Stage "server_secret"}}
   <h1>Server secret</h1>
-  <p class="muted">Enter the secret configured via <code>REDMEMO_SERVER_SECRET</code>.{{if .HasTOTP}} TOTP is already enrolled — to rotate it, also enter the current 6-digit code.{{end}}</p>
+  <p class="muted">Enter the secret configured via <code class="inline">REDMEMO_SERVER_SECRET</code>.{{if .HasTOTP}} TOTP is already enrolled — to rotate it, also enter the current 6-digit code.{{end}}</p>
   <form method="post" action="/settings" autocomplete="off">
     <input type="hidden" name="stage" value="server_secret">
     <input type="password" name="secret" autofocus required>
-    {{if .HasTOTP}}<input type="text" name="current_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required placeholder="current 6-digit code">{{end}}
+    {{if .HasTOTP}}<input type="text" class="otp-input" name="current_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required placeholder="current 6-digit code">{{end}}
     <button>Continue</button>
   </form>
 {{else if eq .Stage "enroll"}}
@@ -580,7 +599,7 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   <code>{{.Secret}}</code>
   <form method="post" action="/settings" autocomplete="off" style="margin-top:1rem">
     <input type="hidden" name="stage" value="enroll_confirm">
-    <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autofocus required placeholder="6-digit code">
+    <input type="text" class="otp-input" data-autosubmit name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus required placeholder="6-digit code">
     <button>Verify &amp; enter settings</button>
   </form>
 {{else if eq .Stage "totp"}}
@@ -588,11 +607,13 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   <p class="muted">Enter the current 6-digit code from your authenticator. Three wrong codes lock this round.</p>
   <form method="post" action="/settings" autocomplete="off">
     <input type="hidden" name="stage" value="totp">
-    <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autofocus required>
+    <input type="text" class="otp-input" data-autosubmit name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus required>
     <button>Unlock settings</button>
   </form>
 {{end}}
-</div></body></html>`))
+</div>
+<script src="/otpInput.js" defer></script>
+</body></html>`))
 
 type authPageView struct {
 	Stage           string

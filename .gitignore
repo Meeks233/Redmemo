@@ -57,6 +57,7 @@ docker-compose.override.yml
 .cc-rebuild-request
 .cc-rebuild-done
 .cc-rebuild-watcher.pid
+.cc-rebuild-mode
 CLAUDE.md
 
 # --- OS junk ---
@@ -64,3 +65,5 @@ CLAUDE.md
 Thumbs.db
 desktop.ini
 nul
+
+deploy/docker-compose.public-test.yml
