@@ -293,6 +293,7 @@
   "settings.trusted_none": "No trusted devices.",
   "settings.trusted_th_token": "Token",
   "settings.trusted_th_created": "Created",
+  "settings.trusted_th_last": "Last access",
   "settings.trusted_th_ip": "IP",
   "settings.trusted_revoke": "Revoke",
   "settings.th_archived_sub": "Archived Subreddit",

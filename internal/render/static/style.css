@@ -1864,11 +1864,20 @@ video.lazy-media:not([src]) {
     padding: 15px 0 5px;
 }
 
-/* Used only for text post preview */
+/* Used only for text post preview. The "this is a preview" dim lives here and
+   applies to every listing body. The clip + bottom fade do NOT — they only
+   belong on bodies long enough to actually be truncated (see .post_clipped),
+   otherwise a short body's real last lines fade out and read as "more below". */
 .post_preview {
+    opacity: 0.8;
+}
+
+/* Clip + bottom-fade for previews that genuinely overflow. Applied only to the
+   long-body branch (which also carries the expander), so short bodies show
+   their final lines crisp instead of falsely fading into nothing. */
+.post_clipped {
     -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent);
     mask-image: linear-gradient(180deg, #000 60%, transparent);
-    opacity: 0.8;
     max-height: 250px;
     overflow: hidden;
 }
@@ -1912,8 +1921,11 @@ video.lazy-media:not([src]) {
 
 /* Checked → reveal the full body and drop the fade; flip the chevron up. */
 .post_expand_toggle:checked ~ .post_preview {
-    max-height: none;
     opacity: 0.9;
+}
+
+.post_expand_toggle:checked ~ .post_clipped {
+    max-height: none;
     -webkit-mask-image: none;
     mask-image: none;
 }
@@ -2454,6 +2466,11 @@ summary.comment_data {
     border: 0;
     padding: 10px 0;
     margin: 0 0 5px;
+    /* Fieldsets default to min-width:min-content and refuse to shrink below
+       their content — which lets a wide child (the trusted-device table) blow
+       the card out. Pin it to 0 so the table's own overflow-x scroller is what
+       handles the width instead of stretching the card. */
+    min-width: 0;
 }
 
 .prefs legend {
@@ -2639,23 +2656,48 @@ summary.comment_data {
     opacity: 0.7;
 }
 
-.trusted-table {
-    width: 100%;
+/* Horizontal drag/scroll wrapper: keeps every column at its natural width and
+   lets the visitor swipe/drag the table left-right on narrow viewports instead
+   of squashing IP, created and last-access into each other. */
+.trusted-scroll {
     margin-top: 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
+
+.trusted-table {
     border-collapse: collapse;
     font-size: 0.88em;
 }
 
-.trusted-table th,
-.trusted-table td {
+/* Prefixed with #instance_info so these win over the generic
+   `#instance_info td { padding: 5px 0 }` rule (ID specificity) that otherwise
+   strips the horizontal padding and glues Token/Created columns together. */
+#instance_info .trusted-table th,
+#instance_info .trusted-table td {
     text-align: left;
-    padding: 6px 8px;
+    padding: 6px 16px;
     border-bottom: 1px solid var(--border, var(--highlighted));
+    white-space: nowrap;
 }
 
-.trusted-table th {
+#instance_info .trusted-table th:first-child,
+#instance_info .trusted-table td:first-child {
+    padding-left: 0;
+}
+
+/* The generic #instance_info th:nth-child(2) right-aligns the second header;
+   the trusted table wants every header left-aligned. */
+#instance_info .trusted-table th {
+    text-align: left;
     font-weight: bold;
     opacity: 0.75;
+}
+
+/* Revoke action lives in the leftmost column and must never wrap its label. */
+.trusted-act {
+    white-space: nowrap;
 }
 
 .trusted-revoke {
@@ -2665,6 +2707,7 @@ summary.comment_data {
     padding: 3px 10px;
     background: none;
     font-size: 0.9em;
+    white-space: nowrap;
 }
 
 .trusted-revoke:hover {

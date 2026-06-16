@@ -2395,7 +2395,7 @@ func postPreview(post reddit.Post) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "\" class=\"post_expand_toggle\"><div class=\"post_body post_preview\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "\" class=\"post_expand_toggle\"><div class=\"post_body post_preview post_clipped\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

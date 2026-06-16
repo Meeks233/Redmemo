@@ -40,7 +40,10 @@ templ settingsTitle(d SettingsPageData) {
 // trustedDevices renders the "Trust this device" long-token management area at
 // the bottom of Instance Information: an optional grace warning (shown when a
 // trust request was just dropped at the cap), then a table of live tokens —
-// prefix, created time, IP — each with a Revoke action.
+// each with a Revoke action (kept in the leftmost column, never wrapped), the
+// token prefix, separated created / last-access / IP columns. The table is
+// wrapped in a horizontally scrollable container so it can be dragged
+// left/right on narrow viewports instead of squashing the columns together.
 templ trustedDevices(d SettingsPageData) {
 	<div class="trusted-devices">
 		<label>{ T(ctx, "settings.trusted_devices") }</label>
@@ -51,31 +54,35 @@ templ trustedDevices(d SettingsPageData) {
 		if len(d.TrustedDevices) == 0 {
 			<p class="trusted-empty">{ T(ctx, "settings.trusted_none") }</p>
 		} else {
-			<table class="trusted-table">
-				<thead>
-					<tr>
-						<th>{ T(ctx, "settings.trusted_th_token") }</th>
-						<th>{ T(ctx, "settings.trusted_th_created") }</th>
-						<th>{ T(ctx, "settings.trusted_th_ip") }</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, dev := range d.TrustedDevices {
+			<div class="trusted-scroll">
+				<table class="trusted-table">
+					<thead>
 						<tr>
-							<td><code class="inline">{ dev.Prefix }…</code></td>
-							<td>{ dev.Created }</td>
-							<td>{ dev.IP }</td>
-							<td>
-								<form method="post" action="/settings/trusted/revoke" style="margin:0">
-									<input type="hidden" name="id" value={ i64(dev.ID) }/>
-									<button type="submit" class="trusted-revoke">{ T(ctx, "settings.trusted_revoke") }</button>
-								</form>
-							</td>
+							<th></th>
+							<th>{ T(ctx, "settings.trusted_th_token") }</th>
+							<th>{ T(ctx, "settings.trusted_th_created") }</th>
+							<th>{ T(ctx, "settings.trusted_th_last") }</th>
+							<th>{ T(ctx, "settings.trusted_th_ip") }</th>
 						</tr>
-					}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						for _, dev := range d.TrustedDevices {
+							<tr>
+								<td class="trusted-act">
+									<form method="post" action="/settings/trusted/revoke" style="margin:0">
+										<input type="hidden" name="id" value={ i64(dev.ID) }/>
+										<button type="submit" class="trusted-revoke">{ T(ctx, "settings.trusted_revoke") }</button>
+									</form>
+								</td>
+								<td><code class="inline">{ dev.Prefix }…</code></td>
+								<td class="trusted-time">{ dev.Created }</td>
+								<td class="trusted-time">{ dev.LastUsed }</td>
+								<td>{ dev.IP }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
 		}
 	</div>
 }

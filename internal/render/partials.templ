@@ -460,7 +460,7 @@ templ postPreview(post reddit.Post) {
 	if isLongBody(post.Body) {
 		<div class="post_body_wrap">
 			<input type="checkbox" id={ "expand-" + post.ID } class="post_expand_toggle"/>
-			<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+			<div class="post_body post_preview post_clipped">@templ.Raw(string(post.Body))</div>
 			<label for={ "expand-" + post.ID } class="post_expand_label" aria-label={ T(ctx, "post.expand") }>
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"></path></svg>
 			</label>
