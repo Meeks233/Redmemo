@@ -378,9 +378,25 @@ const (
 )
 
 func (h *Handler) currentStage(r *http.Request) authStage {
-	if c, _ := r.Cookie(safeEnvCookie); c == nil || c.Value != "ok" {
-		return stageSafeEnv
+	real := h.realStage()
+	// The safe-environment warning only guards the stages that put a long-lived
+	// secret on screen or in an input: typing the server secret, or scanning the
+	// enrollment QR. The routine post-enrollment flow only asks for an ephemeral
+	// 6-digit TOTP code, which exposes nothing worth warning about — so it skips
+	// the prompt entirely. We still gate that warning behind the safe-env cookie
+	// for the sensitive stages.
+	if real == stageServerSecret || real == stageEnrollTOTP {
+		if c, _ := r.Cookie(safeEnvCookie); c == nil || c.Value != "ok" {
+			return stageSafeEnv
+		}
 	}
+	return real
+}
+
+// realStage reports the actual gate stage given enrollment state, independent of
+// the safe-environment warning (which currentStage layers on top for the
+// secret-exposing stages only).
+func (h *Handler) realStage() authStage {
 	// stageServerSecret is implicit — the gate only advances past it when the
 	// secret has been submitted in the same request. Stateless on purpose:
 	// the server secret must be re-entered on every fresh round (no cookie).

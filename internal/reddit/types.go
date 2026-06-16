@@ -108,7 +108,7 @@ type Flair struct {
 	FlairParts      []FlairPart
 	Text            string
 	BackgroundColor string
-	ForegroundColor string // "dark" → "black", otherwise "white"
+	ForegroundColor string // contrast color ("black"/"white") only when BackgroundColor is set; empty lets the themed CSS drive the text color
 }
 
 // FlairPart is a single component of a rich-text flair.

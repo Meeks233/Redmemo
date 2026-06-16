@@ -81,6 +81,7 @@
   "post.repost_badge": "+%d reposts",
   "post.repost_badge_title": "Same content surfaced more times — variants listed below",
   "post.repost_variants_summary": "%d variants of this content (click to expand / collapse)",
+  "post.expand": "Expand full post",
   "post.upvotes": "Upvotes",
   "post.upvoted": "Upvoted",
   "post.refetch_title": "Re-fetch this post from Reddit",

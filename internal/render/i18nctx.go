@@ -374,11 +374,24 @@ func sanitizeCSSColor(v string) string {
 }
 
 func flairBoxStyle(fg, bg string) templ.SafeCSS {
-	var b strings.Builder
-	if c := sanitizeCSSColor(fg); c != "" {
-		b.WriteString("color:" + c + ";")
+	// "transparent" is Reddit's sentinel for "no flair background". Without a real
+	// background the pill falls back to the themed var(--accent)/var(--background)
+	// CSS, so we must emit neither the background nor the hardcoded contrast
+	// foreground — otherwise a fixed black/white text bleeds onto the themed pill
+	// and reads as black on dark themes. Posts already persisted with a
+	// "transparent"/"black" pair are normalized here at render time, not just at
+	// parse time.
+	if bg == "transparent" {
+		bg = ""
 	}
-	if c := sanitizeCSSColor(bg); c != "" {
+	c := sanitizeCSSColor(bg)
+	var b strings.Builder
+	if c != "" {
+		// Only pin the contrast foreground when there is a real background to
+		// contrast against; on the themed accent pill the theme drives the text.
+		if fgc := sanitizeCSSColor(fg); fgc != "" {
+			b.WriteString("color:" + fgc + ";")
+		}
 		b.WriteString("background:" + c + ";")
 	}
 	return templ.SafeCSS(b.String())

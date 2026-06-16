@@ -81,6 +81,7 @@
   "post.repost_badge": "+%d 条同款",
   "post.repost_badge_title": "同一内容多次出现 — 各变体列在下方",
   "post.repost_variants_summary": "%d 个同款变体（点击展开/收起）",
+  "post.expand": "展开完整内容",
   "post.upvotes": "赞",
   "post.upvoted": "好评率",
   "post.refetch_title": "从 Reddit 重新抓取此帖",

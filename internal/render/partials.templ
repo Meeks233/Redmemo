@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"html/template"
 	"strconv"
 
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -431,12 +432,42 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 			}
 			<span class="label">{ " " + T(ctx, "post.upvotes") }</span>
 		</div>
-		<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+		@postPreview(post)
 		@poll(post.Poll)
 		<div class="post_footer">
 			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>{ post.Comments[0] } { commentsWord(post.Comments[1]) }</a>
 		</div>
 	</div>
+}
+
+// previewExpandThreshold is the body byte length above which a listing card is
+// assumed to overflow the 250px .post_preview clip and therefore earns an
+// in-place expander. Short bodies (link posts, one-liners) stay un-clipped and
+// get no button, so the chevron only appears where text is actually hidden.
+const previewExpandThreshold = 600
+
+// isLongBody reports whether a self-text body is long enough that the listing
+// preview clip (.post_preview, max-height:250px) is likely to truncate it.
+func isLongBody(body template.HTML) bool { return len(body) > previewExpandThreshold }
+
+// postPreview renders the listing-card text body. For bodies long enough to be
+// clipped by .post_preview it wraps the body in a pure-CSS, no-JS expander: a
+// hidden checkbox plus a chevron <label>. Clicking the label toggles the
+// checkbox, and CSS (.post_expand_toggle:checked ~ .post_preview) drops the
+// max-height + fade mask so the full body shows in place — no navigation, no
+// script. Short bodies render exactly as before with no extra markup.
+templ postPreview(post reddit.Post) {
+	if isLongBody(post.Body) {
+		<div class="post_body_wrap">
+			<input type="checkbox" id={ "expand-" + post.ID } class="post_expand_toggle"/>
+			<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+			<label for={ "expand-" + post.ID } class="post_expand_label" aria-label={ T(ctx, "post.expand") }>
+				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"></path></svg>
+			</label>
+		</div>
+	} else {
+		<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+	}
 }
 
 // repostVariants renders the cluster head's RepostMembers as a compact

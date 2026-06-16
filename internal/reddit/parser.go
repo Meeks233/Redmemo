@@ -486,11 +486,25 @@ func parseFlair(d map[string]interface{}, prefix string) Flair {
 		Text:            getString(d, prefix+"_text"),
 		BackgroundColor: getString(d, prefix+"_background_color"),
 	}
-	textColor := getString(d, prefix+"_text_color")
-	if textColor == "dark" {
-		f.ForegroundColor = "black"
-	} else {
-		f.ForegroundColor = "white"
+	// Reddit uses "transparent" as its sentinel for "no flair background"; treat
+	// it as absent so the pill falls back to the themed var(--accent) instead of
+	// rendering a transparent box (which would expose hardcoded black text on a
+	// dark page).
+	if f.BackgroundColor == "transparent" {
+		f.BackgroundColor = ""
+	}
+	// Only pin a hardcoded contrast color when the flair carries its own
+	// background. With no custom background the pill falls back to the themed
+	// var(--accent)/var(--background) CSS, so leaving the foreground empty lets
+	// the text color follow the active theme instead of being stuck on a fixed
+	// black/white that mismatches dark themes.
+	if f.BackgroundColor != "" {
+		textColor := getString(d, prefix+"_text_color")
+		if textColor == "dark" {
+			f.ForegroundColor = "black"
+		} else {
+			f.ForegroundColor = "white"
+		}
 	}
 
 	flairType := getString(d, prefix+"_type")

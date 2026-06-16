@@ -31,23 +31,13 @@
     slider._galleryShown = newImg;
   }
 
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest('.gallery_nav');
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    var slider = btn.closest('.gallery_slider');
-    if (!slider) return;
-
+  function navigate(slider, dir) {
     var items;
     try { items = JSON.parse(slider.getAttribute('data-gallery-urls')); } catch (_) { return; }
     if (!items || items.length < 2) return;
 
     var prevIdx = parseInt(slider.getAttribute('data-gallery-idx') || '0', 10);
-    var idx = prevIdx;
-    if (btn.classList.contains('gallery_prev')) idx--;
-    else idx++;
+    var idx = prevIdx + dir;
     if (idx < 0 || idx >= items.length) return;
     var myIdx = idx;
     slider.setAttribute('data-gallery-idx', idx);
@@ -109,5 +99,45 @@
       clearPending(link);
       rollback();
     };
+  }
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.gallery_nav');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    var slider = btn.closest('.gallery_slider');
+    if (!slider) return;
+
+    navigate(slider, btn.classList.contains('gallery_prev') ? -1 : 1);
   });
+
+  // Touch swipe support for mobile (hover-based nav buttons never appear on touch).
+  var touchStartX = 0;
+  var touchStartY = 0;
+  var touchSlider = null;
+
+  document.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) { touchSlider = null; return; }
+    var slider = e.target.closest('.gallery_slider');
+    if (!slider) { touchSlider = null; return; }
+    touchSlider = slider;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function (e) {
+    if (!touchSlider) return;
+    var slider = touchSlider;
+    touchSlider = null;
+    var t = e.changedTouches[0];
+    if (!t) return;
+    var dx = t.clientX - touchStartX;
+    var dy = t.clientY - touchStartY;
+    // Require a mostly-horizontal swipe past a threshold.
+    if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return;
+    e.preventDefault();
+    navigate(slider, dx < 0 ? 1 : -1);
+  }, { passive: false });
 })();

@@ -1697,6 +1697,9 @@ video.lazy-media:not([src]) {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -1704,7 +1707,7 @@ video.lazy-media:not([src]) {
     background: rgba(0, 0, 0, 0.6);
     color: #fff;
     font-size: 22px;
-    line-height: 36px;
+    line-height: 1;
     text-align: center;
     cursor: pointer;
     z-index: 2;
@@ -1721,6 +1724,13 @@ video.lazy-media:not([src]) {
 .gallery_slider:hover .gallery_nav:not(.gallery_nav_hidden) {
     opacity: 1;
     pointer-events: auto;
+}
+
+@media (hover: none) {
+    .gallery_slider .gallery_nav:not(.gallery_nav_hidden) {
+        opacity: 1;
+        pointer-events: auto;
+    }
 }
 
 .gallery_nav:hover {
@@ -1861,6 +1871,64 @@ video.lazy-media:not([src]) {
     opacity: 0.8;
     max-height: 250px;
     overflow: hidden;
+}
+
+/* Pure-CSS, no-JS in-place expander for long text previews. The wrapper owns the
+   post_body grid cell; the inner .post_preview keeps its own clip/fade, and the
+   chevron <label> below it toggles a hidden sibling checkbox. The label sits
+   outside the clipped .post_preview so it is never hidden by overflow. */
+.post_body_wrap {
+    grid-area: post_body;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.post_body_wrap .post_body {
+    /* grid-area is now owned by the wrapper; let the body flow inside it. */
+    grid-area: auto;
+}
+
+.post_expand_toggle {
+    display: none;
+}
+
+.post_expand_label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Pull the chevron up over the gradient fade so it reads as a hint. */
+    margin: -32px 12px 0;
+    padding-bottom: 4px;
+    position: relative;
+    z-index: 1;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.post_expand_label svg {
+    transition: transform 0.2s ease;
+}
+
+/* Checked → reveal the full body and drop the fade; flip the chevron up. */
+.post_expand_toggle:checked ~ .post_preview {
+    max-height: none;
+    opacity: 0.9;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.post_expand_toggle:checked ~ .post_expand_label {
+    margin-top: 0;
+}
+
+.post_expand_toggle:checked ~ .post_expand_label svg {
+    transform: rotate(180deg);
+}
+
+/* Compact layout hides previews entirely — hide the expander to match. */
+.compact .post_expand_label {
+    display: none;
 }
 
 .post_footer {
