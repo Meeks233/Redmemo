@@ -976,6 +976,12 @@ func qrDataURI(secret string) (string, error) {
 
 var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>RedMemo · Authenticate</title>
+<!-- Mobile adaptation: this page is a hand-built document (not rendered through
+     layout.templ), so it must carry its own viewport meta. Without it mobile
+     browsers assume a ~980px layout viewport and scale the whole card down —
+     making the TOTP page look tiny and preventing the max-width:480px block
+     below from ever matching. Mirrors layout.templ's viewport meta. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="/style.css">
 {{if .ThemeStylesheet}}<link rel="stylesheet" href="/themes/{{.Theme}}.css">{{end}}
 {{if .AutoThemeCSS}}{{.AutoThemeCSS}}{{end}}
@@ -1004,7 +1010,12 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   p{color:var(--text)}
   /* Segmented one-time-code input (progressive enhancement of .otp-input) */
   .otp{display:flex;gap:.5rem;margin:.5rem 0 1rem;justify-content:center}
-  .otp-cell{width:100%;max-width:3rem;aspect-ratio:3/4;padding:0;text-align:center;font-family:monospace;font-size:1.5rem;font-weight:600;color:var(--text);background:var(--outside);border:2px solid transparent;border-radius:8px;box-shadow:var(--panel-border) 0 0 0 1px inset;transition:border-color .15s,box-shadow .15s;box-sizing:border-box;-moz-appearance:textfield}
+  /* min-width:0 is the critical bit: flex items default to min-width:auto, so an
+     <input> refuses to shrink below its intrinsic field width (~20 chars). Six of
+     those overflow a phone viewport, which makes iOS Safari "shrink-to-fit" and
+     scale the WHOLE page down — the classic "still tiny on iPhone" bug. min-width:0
+     lets the cells honour width:100%/max-width and the row fits the card instead. */
+  .otp-cell{width:100%;min-width:0;max-width:3rem;aspect-ratio:3/4;padding:0;text-align:center;font-family:monospace;font-size:1.5rem;font-weight:600;color:var(--text);background:var(--outside);border:2px solid transparent;border-radius:8px;box-shadow:var(--panel-border) 0 0 0 1px inset;transition:border-color .15s,box-shadow .15s;box-sizing:border-box;-moz-appearance:textfield}
   .otp-cell::-webkit-outer-spin-button,.otp-cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   .otp-cell:hover{border-color:var(--highlighted)}
   .otp-cell:focus{outline:none;border-color:var(--accent);box-shadow:var(--accent) 0 0 0 1px inset,0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}

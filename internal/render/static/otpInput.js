@@ -53,6 +53,10 @@
       c.inputMode = "numeric";
       c.autocomplete = i === 0 ? "one-time-code" : "off";
       c.maxLength = 1;
+      // size=1 trims the input's intrinsic width (default ~20 chars). Without it,
+      // even with min-width:0 the cells advertise a huge preferred width that can
+      // still nudge iOS Safari into shrink-to-fit on the narrowest viewports.
+      c.size = 1;
       c.setAttribute("aria-label", "Digit " + (i + 1));
 
       (function (idx, cell) {
