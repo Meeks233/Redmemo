@@ -981,10 +981,13 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
 {{if .AutoThemeCSS}}{{.AutoThemeCSS}}{{end}}
 <style>
   /* Layout + responsiveness reuse style.css's centred single-panel pattern
-     (#error wrapper + .prefs panel: width:100% capped at max-width). Only the
-     auth-specific controls below need bespoke styling. */
-  #error{align-items:flex-start}
-  .prefs{padding:2rem}
+     (#error wrapper + .prefs panel: width:100% capped at max-width). Unlike the
+     error pages (top-anchored), the auth card is centred both axes like .popup
+     — full-viewport flex centring. min-height (not height) keeps tall content
+     such as the enrollment QR scrollable instead of clipped. 100dvh tracks the
+     mobile dynamic viewport so the card stays centred under browser chrome. */
+  #error{align-items:center;min-height:100vh;min-height:100dvh;padding:2em 1em;box-sizing:border-box}
+  .prefs{padding:2rem;margin-bottom:0}
   h1{margin-top:0;font-size:1.2rem;color:var(--text)}
   input[type=text],input[type=password]{width:100%;padding:.6rem;margin:.5rem 0 1rem;background:var(--outside);color:var(--text);border:var(--panel-border);border-radius:4px;font-family:monospace;font-size:1rem;box-sizing:border-box}
   input[type=text]:focus,input[type=password]:focus{outline:2px solid var(--accent);outline-offset:1px}
@@ -1010,6 +1013,19 @@ var authPageTpl = template.Must(template.New("auth").Parse(`<!DOCTYPE html>
   .otp.shake{animation:otp-shake .4s cubic-bezier(.36,.07,.19,.97) both}
   @keyframes otp-shake{10%,90%{transform:translateX(-1px)}20%,80%{transform:translateX(2px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
   @media (prefers-reduced-motion:reduce){.otp.shake{animation:none}}
+  /* Narrow phones: reclaim horizontal room so the 6 cells never overflow, and
+     trim the card padding — mirrors style.css's screen-qualified breakpoints. */
+  @media screen and (max-width:480px){
+    /* The only horizontal gutter is 10vw each side, so the card spans 80vw —
+       no stacked hard padding squeezing it. Drop the 520px cap so it fills. */
+    #error{padding:1.5em 10vw}
+    #error .prefs{max-width:none}
+    .prefs{padding:1.25rem .6rem}
+    /* Big cells: high max-width lets the 6 cells grow to fill the wider card,
+       the 3/4 aspect-ratio scales their height to match. */
+    .otp{gap:.4rem}
+    .otp-cell{max-width:4rem;font-size:1.9rem;border-radius:6px}
+  }
 </style></head><body class="{{.BodyClass}}"><div id="error"><div class="prefs">
 {{if .Err}}<div class="err">{{.Err}}</div>{{end}}
 {{if eq .Stage "safe_env"}}
