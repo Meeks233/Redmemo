@@ -145,6 +145,55 @@ func TestReadPreferences_Defaults(t *testing.T) {
 	}
 }
 
+// TestReadPreferences_FrontPageSubsDefault pins the query-driven homepage
+// switch: with no toggle, an unset or empty front_page_subs resolves to "" so
+// handleFrontPage redirects to /archive (disabled), while a stored query is
+// honored verbatim. The default is "" — no query means no homepage.
+func TestReadPreferences_FrontPageSubsDefault(t *testing.T) {
+	t.Run("unset means disabled", func(t *testing.T) {
+		h := testHandler()
+		prefs := h.readPreferences(httptest.NewRequest("GET", "/", nil))
+		if prefs.FrontPageSubs != "" {
+			t.Errorf("FrontPageSubs = %q, want empty (disabled)", prefs.FrontPageSubs)
+		}
+	})
+	t.Run("explicit query is honored", func(t *testing.T) {
+		h := testHandler()
+		h.siteDefaults["front_page_subs"] = "sub:golang"
+		prefs := h.readPreferences(httptest.NewRequest("GET", "/", nil))
+		if prefs.FrontPageSubs != "sub:golang" {
+			t.Errorf("FrontPageSubs = %q, want %q", prefs.FrontPageSubs, "sub:golang")
+		}
+	})
+	t.Run("all renders a full feed", func(t *testing.T) {
+		h := testHandler()
+		h.siteDefaults["front_page_subs"] = "all"
+		prefs := h.readPreferences(httptest.NewRequest("GET", "/", nil))
+		if prefs.FrontPageSubs != "all" {
+			t.Errorf("FrontPageSubs = %q, want %q", prefs.FrontPageSubs, "all")
+		}
+	})
+}
+
+// TestHandleFrontPage_DisabledRedirects verifies the query-driven homepage:
+// with no front_page_subs configured the handler redirects to /archive before
+// touching the post store (so a nil store is fine here).
+func TestHandleFrontPage_DisabledRedirects(t *testing.T) {
+	h := testHandler()
+	h.cfg = configForTest()
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.handleFrontPage(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d (redirect)", rec.Code, http.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/archive" {
+		t.Errorf("Location = %q, want /archive", loc)
+	}
+}
+
 func TestRecovery_HandlerPanics(t *testing.T) {
 	panicking := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("test panic")

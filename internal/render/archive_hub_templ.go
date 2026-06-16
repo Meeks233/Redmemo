@@ -69,7 +69,7 @@ func archiveHubPage(d ArchiveHubPageData) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{
 			Title:   archiveHubTitle(d),
-			Search:  searchbox("/archive", d.SearchParams.Query),
+			Search:  searchbox("/archive", d.SearchParams.Query, d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 			Content: archiveHubContent(d),
 			Media:   true,
 		}).Render(ctx, templ_7745c5c3_Buffer)

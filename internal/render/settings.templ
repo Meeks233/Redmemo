@@ -40,7 +40,7 @@ templ settingsTitle(d SettingsPageData) {
 templ settingsPage(d SettingsPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:   settingsTitle(d),
-		Search:  searchbox("/search", ""),
+		Search:  searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 		Content: settingsContent(d),
 	})
 }
@@ -243,24 +243,16 @@ templ settingsContent(d SettingsPageData) {
 				<div class="prefs" id="sub_picker">
 					<fieldset>
 						<legend>{ T(ctx, "settings.homepage_subs") }</legend>
-						<div class="prefs-group">
-							<label for="remove_default_feeds">{ T(ctx, "settings.disable_homepage") }</label>
-							<input type="hidden" value="off" name="remove_default_feeds" form="settings-form"/>
-							<input type="checkbox" name="remove_default_feeds" id="remove_default_feeds" form="settings-form" checked?={ d.Prefs.RemoveDefaultFeeds == "on" } onchange="toggleHomepage(this)"/>
-						</div>
-						<div class="sub-picker-search" id="homepage_query_row" style={ displayNoneIf(d.Prefs.RemoveDefaultFeeds == "on") }>
+						<div class="sub-picker-search">
 							<textarea name="front_page_subs" id="front_page_subs" form="settings-form" rows="1" placeholder={ T(ctx, "settings.filter_placeholder") } title={ T(ctx, "search.hint") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">{ d.FrontPageQuery }</textarea>
+							<p class="query-skip-hint" id="front_page_subs_hint" hidden>{ T(ctx, "settings.homepage_skip_hint") }</p>
 						</div>
 					</fieldset>
 				</div>
 				<div class="prefs" id="prefetch_settings">
 					<fieldset>
 						<legend>{ T(ctx, "settings.natural_prefetch") }</legend>
-						<div class="prefs-group">
-							<label for="enable_natural_prefetch">{ T(ctx, "settings.enable_l1_main_fetch") }</label>
-							<input type="checkbox" id="enable_natural_prefetch" checked?={ d.Prefs.EnableNaturalPrefetch == "on" && d.Prefs.PrefetchSubs != "" } onchange="togglePrefetch(this)"/>
-						</div>
-						<div class="prefetch-picker" id="prefetch_picker" style={ displayNoneIf(d.Prefs.EnableNaturalPrefetch != "on" || d.Prefs.PrefetchSubs == "") }>
+						<div class="prefetch-picker" id="prefetch_picker">
 							<div class="prefs-group">
 								<label for="prefetch_threshold">{ T(ctx, "settings.np_threshold") }</label>
 								<input type="number" id="prefetch_threshold" min="1" max="99" step="1" value={ d.Prefs.PrefetchThreshold } style="width:60px" onchange="savePrefetchThreshold(this.value)"/>
@@ -302,6 +294,7 @@ templ settingsContent(d SettingsPageData) {
 							<div class="sub-picker-search">
 								<label for="prefetch_unified" title={ T(ctx, "settings.np_unified_title") }>{ T(ctx, "settings.np_unified") }</label>
 								<textarea id="prefetch_unified" name="prefetch_unified" form="settings-form" rows="2" placeholder={ T(ctx, "settings.np_unified_placeholder") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">{ d.PrefetchUnified }</textarea>
+								<p class="query-skip-hint" id="prefetch_unified_hint" hidden>{ T(ctx, "settings.prefetch_skip_hint") }</p>
 							</div>
 							<div class="sub-picker-list" id="prefetch_sub_list"></div>
 						</div>
@@ -446,12 +439,36 @@ templ settingsContent(d SettingsPageData) {
 			onChange: function() { checkDirty(); }
 		});
 
-		// "Disable homepage" collapses just the query box; the toggle itself stays
-		// visible so it can be turned back on. The actual disable (redirect to
-		// /archive) is applied by the backend when the form is saved.
-		function toggleHomepage(cb) {
-			document.getElementById('homepage_query_row').style.display = cb.checked ? 'none' : '';
+		// Neither the homepage feed nor Natural-Prefetch has an on/off switch any
+		// more: each is driven purely by whether its query box holds a usable
+		// value. A blank box, or one containing only whitespace/punctuation (no
+		// letters or digits), is treated by the backend as "skip" — the homepage
+		// redirects to /archive and NP stays idle. queryIsBlank mirrors the
+		// server's hasAlnum check so we can surface a friendly inline hint the
+		// instant the user types something that would be skipped, instead of
+		// letting them save a box they think is active.
+		function queryIsBlank(s) {
+			return !/[A-Za-z0-9]/.test(s || '');
 		}
+
+		// "all" is the homepage's match-everything default — non-blank and never a
+		// skip — so the hint only fires for genuinely empty/punctuation-only input.
+		function refreshSkipHint(inputId, hintId) {
+			var el = document.getElementById(inputId);
+			var hint = document.getElementById(hintId);
+			if (!el || !hint) return;
+			hint.hidden = !queryIsBlank(el.value);
+		}
+
+		['front_page_subs', 'prefetch_unified'].forEach(function(id) {
+			var el = document.getElementById(id);
+			if (!el) return;
+			var hintId = id + '_hint';
+			var update = function() { refreshSkipHint(id, hintId); };
+			el.addEventListener('input', update);
+			el.addEventListener('change', update);
+			update();
+		});
 
 		var saveBar = document.getElementById('save-bar');
 		var form = document.querySelector('#settings form');
@@ -471,41 +488,13 @@ templ settingsContent(d SettingsPageData) {
 		form.addEventListener('change', checkDirty);
 		form.addEventListener('input', checkDirty);
 
-		// The homepage filter and its disable toggle live outside the <form> element
+		// The homepage and NP query boxes live outside the <form> element
 		// (associated via form="settings-form"), so their events don't bubble to it
 		// — wire them up directly. FormData(form) still includes them on serialize.
-		['front_page_subs', 'remove_default_feeds', 'prefetch_unified', 'prefetch_default_depth', 'prefetch_l3_min_comments', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
+		['front_page_subs', 'prefetch_unified', 'prefetch_default_depth', 'prefetch_l3_min_comments', 'archive_control', 'disable_initiative_upstream_access', 'settings_token_ttl', 'page_limit'].forEach(function(id) {
 			var el = document.getElementById(id);
 			if (el) { el.addEventListener('change', checkDirty); el.addEventListener('input', checkDirty); }
 		});
-
-		function togglePrefetch(cb) {
-			if (cb.checked) {
-				cb.checked = false;
-				document.getElementById('prefetch-modal').classList.add('visible');
-			} else {
-				document.getElementById('prefetch_picker').style.display = 'none';
-				submitPrefetchSetting('off');
-			}
-		}
-
-		function confirmPrefetch() {
-			document.getElementById('prefetch-modal').classList.remove('visible');
-			document.getElementById('enable_natural_prefetch').checked = true;
-			document.getElementById('prefetch_picker').style.display = '';
-			submitPrefetchSetting('on');
-			if (prefetchPicker) prefetchPicker.render();
-		}
-
-		function cancelPrefetch() {
-			document.getElementById('prefetch-modal').classList.remove('visible');
-		}
-
-		function submitPrefetchSetting(val) {
-			var fd = new FormData();
-			fd.append('enable_natural_prefetch', val);
-			fetch('/settings', {method:'POST', body: new URLSearchParams(fd)});
-		}
 
 		function savePrefetchThreshold(val) {
 			var n = parseInt(val, 10);
@@ -564,16 +553,6 @@ templ settingsContent(d SettingsPageData) {
 				.then(function() { location.reload(); });
 		}
 	</script>
-	<div class="modal-overlay" id="prefetch-modal" onclick="if(event.target===this)cancelPrefetch()">
-		<div class="modal-box">
-			<h2>{ T(ctx, "settings.np_modal_title") }</h2>
-			<p>{ T(ctx, "settings.np_modal_body") }</p>
-			<div class="modal-actions">
-				<button class="modal-cancel" onclick="cancelPrefetch()">{ T(ctx, "settings.cancel") }</button>
-				<button class="modal-confirm" onclick="confirmPrefetch()">{ T(ctx, "settings.accept_risk") }</button>
-			</div>
-		</div>
-	</div>
 	<div class="modal-overlay" id="upstream-modal" onclick="if(event.target===this)cancelUpstream()">
 		<div class="modal-box">
 			<h2>{ T(ctx, "settings.upstream_modal_title") }</h2>

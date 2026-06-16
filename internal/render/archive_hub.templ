@@ -16,7 +16,7 @@ templ archiveHubPage(d ArchiveHubPageData) {
 	// here — no separate in-page search form, no filter-widget pile.
 	@layout(d.BasePage, pageSlots{
 		Title:   archiveHubTitle(d),
-		Search:  searchbox("/archive", d.SearchParams.Query),
+		Search:  searchbox("/archive", d.SearchParams.Query, d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 		Content: archiveHubContent(d),
 		Media:   true,
 	})

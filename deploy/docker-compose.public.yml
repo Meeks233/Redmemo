@@ -47,12 +47,12 @@ services:
       - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=on
 
       # ---- Homepage --------------------------------------------------
-      # OFF by default: `/` redirects to the archive hub instead of
-      # rendering the curated feed. Visitors land on what's actually
-      # stored locally, with no implicit "default subs" disclosure of
-      # operator taste. Users can flip it back on per-account from
-      # /settings.
-      - REDMEMO_DEFAULT_REMOVE_DEFAULT_FEEDS=on
+      # The homepage is query-driven and disabled by default (no query set),
+      # so `/` redirects to the archive hub — visitors land on what's actually
+      # stored locally, with no implicit "default subs" disclosure of operator
+      # taste. There is no on/off toggle; to render a feed instead, set a query
+      # here (e.g. REDMEMO_DEFAULT_FRONT_PAGE_SUBS=sub:golang+rust) or per
+      # account from /settings.
 
       # ---- SEO -------------------------------------------------------
       # Off by default — flip on only if you actually want the archive

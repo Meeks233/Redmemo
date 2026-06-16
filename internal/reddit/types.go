@@ -225,10 +225,8 @@ type Preferences struct {
 	Filters                        []string // cookie value split by "+"
 	HideAwards                     string
 	HideScore                      string
-	RemoveDefaultFeeds             string
 	FetchSubAbout                  string
 	EnableDebug                    string
-	EnableNaturalPrefetch          string
 	PrefetchSubs                   string
 	PrefetchThreshold              string
 	PrefetchSort                   string // global default sort for NP L1: hot|new|top|rising|controversial (default "hot")

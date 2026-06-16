@@ -14,7 +14,7 @@ templ archivePage(d ArchivePageData) {
 	// Pre-fill the navbar searchbox with a greedy `sub:<name> ` token so users
 	// can type more terms after it and search the local archive scoped to this
 	// subreddit. Trailing space keeps the caret at a token boundary.
-	@layout(d.BasePage, pageSlots{Title: archiveTitle(d), Search: searchbox("/archive", "sub:" + d.Sub + " "), Body: archiveBody(d), Media: true})
+	@layout(d.BasePage, pageSlots{Title: archiveTitle(d), Search: searchbox("/archive", "sub:" + d.Sub + " ", d.Prefs.DisableInitiativeUpstreamAccess == "on"), Body: archiveBody(d), Media: true})
 }
 
 templ archiveBody(d ArchivePageData) {

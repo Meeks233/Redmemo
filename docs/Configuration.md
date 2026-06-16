@@ -96,11 +96,10 @@ Master switch and dispatcher tick:
 | `prefetch.enabled` | `REDMEMO_PREFETCH_ENABLED` | `on` | Top-level kill switch for the prefetch subsystem. |
 | `prefetch.check_interval` | `REDMEMO_PREFETCH_CHECK_INTERVAL` | `30s` | Dispatcher tick. |
 
-The **crawl list** and the per-user **on/off toggle** live in the DB (settings keys `prefetch_subs` and `enable_natural_prefetch`) — set them from `/settings` or seed them at boot via:
+There is no separate on/off toggle: **the crawl list is the switch.** A non-empty `prefetch_subs` (settings key, in the DB) enables the layer; a blank one — including input that was pure punctuation/whitespace and got filtered down to nothing — leaves it idle. Set it from `/settings` or seed it at boot via:
 
 | Env var | Format | Example |
 |---------|--------|---------|
-| `REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH` | `on` / `off` | `on` |
 | `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | `sub:golang+rust+linux` |
 | `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` |
 | `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` | `none` / `l2` / `l3` / `l2+l3` | `l2+l3` |
@@ -109,7 +108,7 @@ The **crawl list** and the per-user **on/off toggle** live in the DB (settings k
 
 `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` is the L3 noise floor: any archived post with fewer than this many comments is frozen out of L3 (both bind and standalone) — the count comes from the post JSON locally, no upstream probe. `0` disables the filter. The value must be a non-negative integer in `[0, 100000]`; an invalid value causes the container to **refuse to start** (loud failure beats silent fallback). Combined with the L3 cycle-freeze (a post archived during L1 cycle N is automatically skipped during cycle N+1 regardless of count), this lets operators say "don't waste budget on 1-line threads" while still letting hot threads through.
 
-The settings page renames the master toggle to **Enable L1 main fetch**: when on, every sub's L1 listing runs. **Default depth** then controls whether L2 (media) and L3 (comments) run on top of L1 — `none` keeps the deployment to listings only; `l2+l3` is the full visit-like flow (default for local LAN). Per-sub overrides in the prefetch box can add a `depth:` clause to deviate for a single sub, e.g. global default `none` plus `golang=depth:l2+l3&sort:top` opts only r/golang into media+comments while every other sub stays at L1-only.
+The settings page has no enable checkbox: filling the prefetch box turns the layer on, clearing it turns it off. Once at least one sub is listed, every sub's L1 listing runs, and **Default depth** controls whether L2 (media) and L3 (comments) run on top of L1 — `none` keeps the deployment to listings only; `l2+l3` is the full visit-like flow (default for local LAN). Per-sub overrides in the prefetch box can add a `depth:` clause to deviate for a single sub, e.g. global default `none` plus `golang=depth:l2+l3&sort:top` opts only r/golang into media+comments while every other sub stays at L1-only.
 
 ## HR rate-limit layer
 

@@ -9,7 +9,7 @@ templ userTitle(d UserPageData) {
 templ userPage(d UserPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:  userTitle(d),
-		Search: searchbox("/search", ""),
+		Search: searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 		Body:   userBody(d),
 		Media:  true,
 	})

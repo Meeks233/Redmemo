@@ -60,7 +60,7 @@ templ searchMissState(visible, more bool) {
 }
 
 templ searchPage(d SearchPageData) {
-	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Search: searchbox("/search", d.Params.Query), Content: searchContent(d), Media: true})
+	@layout(d.BasePage, pageSlots{Title: searchTitle(d), Search: searchbox("/search", d.Params.Query, d.Prefs.DisableInitiativeUpstreamAccess == "on"), Content: searchContent(d), Media: true})
 }
 
 templ searchContent(d SearchPageData) {

@@ -1,6 +1,9 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"time"
+)
 
 type SettingsStore struct {
 	db *sql.DB
@@ -38,6 +41,42 @@ func (s *SettingsStore) Get(name string) (string, bool, error) {
 		return "", false, err
 	}
 	return value, true, nil
+}
+
+// GetMeta returns a row's value and its last-updated timestamp, found=false if
+// absent. Used by the managed-settings reconcile to compare the user shadow and
+// env shadow by recency.
+func (s *SettingsStore) GetMeta(name string) (value string, updatedAt time.Time, found bool, err error) {
+	err = s.db.QueryRow(`SELECT value, updated_at FROM site_settings WHERE name = $1`, name).Scan(&value, &updatedAt)
+	if err == sql.ErrNoRows {
+		return "", time.Time{}, false, nil
+	}
+	if err != nil {
+		return "", time.Time{}, false, err
+	}
+	return value, updatedAt, true, nil
+}
+
+// SetShadow upserts a hidden bookkeeping row with an EXPLICIT updated_at — unlike
+// SetBatch, which always stamps NOW(). The reconcile pass uses this to seed an
+// env value's first observation at the epoch (oldest) and to stamp a genuine env
+// change at the current time, so latest-writer-wins can order the two sides.
+func (s *SettingsStore) SetShadow(name, value string, at time.Time) error {
+	_, err := s.db.Exec(`
+		INSERT INTO site_settings (name, value, source, updated_at)
+		VALUES ($1, $2, 'shadow', $3)
+		ON CONFLICT (name) DO UPDATE SET value = $2, source = 'shadow', updated_at = $3
+	`, name, value, at.UTC())
+	return err
+}
+
+// Delete removes a single settings row. Used to "forget" a remembered-query
+// fallback key when the user clears the corresponding box, so a later restore
+// pass won't resurrect an intentionally-disabled feature. Missing rows are a
+// no-op, not an error.
+func (s *SettingsStore) Delete(name string) error {
+	_, err := s.db.Exec(`DELETE FROM site_settings WHERE name = $1`, name)
+	return err
 }
 
 func (s *SettingsStore) SetBatch(settings map[string]string, source string) error {
@@ -102,7 +141,10 @@ func (s *SettingsStore) SetBatchIfLowerPriority(settings map[string]string, sour
 // Called with the set of cookie names that currently have env vars.
 // Orphaned rows get source changed to "legacy_sync" so future syncs can update them.
 func (s *SettingsStore) DemoteOrphans(activeEnvKeys map[string]string) (int, error) {
-	rows, err := s.db.Query(`SELECT name FROM site_settings WHERE source = 'env_override'`)
+	// Exclude hidden bookkeeping rows ("_user_*", "_env_*"): they are not
+	// env_override values to begin with, and demoting them would corrupt the
+	// managed-settings reconcile state.
+	rows, err := s.db.Query(`SELECT name FROM site_settings WHERE source = 'env_override' AND name NOT LIKE '\_%'`)
 	if err != nil {
 		return 0, err
 	}

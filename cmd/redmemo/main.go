@@ -158,6 +158,18 @@ func main() {
 		log.Printf("settings: REDMEMO_DEFAULT_%s=%q ignored — %s",
 			strings.ToUpper(r.Key), r.Value, r.Reason)
 	}
+	// The managed keys (homepage / NP / archive-control) are NOT applied through
+	// the plain env_override path — they are reconciled by latest-writer-wins in
+	// Step C below. Pull them out of envSettings so Step B neither overwrites the
+	// live row nor lets DemoteOrphans touch it; their env value is carried into
+	// the reconcile via managedEnv instead.
+	managedEnv := make(map[string]string)
+	for _, k := range handler.ManagedSettingKeys {
+		if v, ok := envSettings[k]; ok {
+			managedEnv[k] = v
+			delete(envSettings, k)
+		}
+	}
 	// Demote DB rows whose env var was removed since last startup
 	if demoted, err := settingsStore.DemoteOrphans(envSettings); err != nil {
 		log.Printf("settings: demote orphans failed: %v", err)
@@ -170,6 +182,16 @@ func main() {
 		} else {
 			log.Printf("settings: persisted %d env var overrides to DB", len(envSettings))
 		}
+	}
+	// Step C: reconcile the managed keys by latest-writer-wins between the env
+	// default and the user's /settings save. The operator's REDMEMO_DEFAULT_*
+	// seeds the feature, but whichever side was touched most recently wins — so a
+	// manual change sticks across rebuilds, and a later compose edit still takes
+	// effect. (See handler.ReconcileManagedSettings.)
+	if written, err := handler.ReconcileManagedSettings(settingsStore, managedEnv, time.Now()); err != nil {
+		log.Printf("settings: reconcile managed settings failed: %v", err)
+	} else if written > 0 {
+		log.Printf("settings: reconciled %d managed setting(s) by latest-writer-wins", written)
 	}
 
 	// 6. Init shared context

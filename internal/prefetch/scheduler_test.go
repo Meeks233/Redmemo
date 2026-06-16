@@ -435,12 +435,16 @@ func TestIsEnabled(t *testing.T) {
 		settings SettingsProvider
 		want     bool
 	}{
+		// There is no on/off toggle any more: the crawl list IS the switch.
 		{"nil settings", nil, false},
-		{"off", &mockSettings{data: map[string]string{"enable_natural_prefetch": "off"}}, false},
-		{"on but no subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on"}}, false},
-		{"on with empty subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on", "prefetch_subs": ""}}, false},
-		{"on with subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on", "prefetch_subs": "sub:golang"}}, true},
-		{"empty", &mockSettings{data: map[string]string{}}, false},
+		{"no subs key", &mockSettings{data: map[string]string{}}, false},
+		{"empty subs", &mockSettings{data: map[string]string{"prefetch_subs": ""}}, false},
+		{"blank subs (whitespace)", &mockSettings{data: map[string]string{"prefetch_subs": "   "}}, false},
+		{"with subs", &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang"}}, true},
+		// A stale enable_natural_prefetch row must NOT gate anything now: subs
+		// present → enabled regardless; subs absent → disabled regardless.
+		{"stale toggle off but subs present", &mockSettings{data: map[string]string{"enable_natural_prefetch": "off", "prefetch_subs": "sub:golang"}}, true},
+		{"stale toggle on but no subs", &mockSettings{data: map[string]string{"enable_natural_prefetch": "on"}}, false},
 	}
 
 	for _, tt := range tests {

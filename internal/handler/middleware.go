@@ -80,7 +80,11 @@ func recovery(next http.Handler) http.Handler {
 
 var prefDefaults = map[string]string{
 	"front_page":      "default",
-	"front_page_subs":      "all",
+	// Empty by default: the homepage is query-driven and disabled when no query
+	// is configured (a missing REDMEMO_DEFAULT_FRONT_PAGE_SUBS or a cleared
+	// /settings box) — `/` then redirects to the archive hub. Seed a query
+	// (env or /settings) to render a feed. No separate on/off toggle.
+	"front_page_subs":      "",
 	"layout":        "card",
 	"wide":          "off",
 	"blur_spoiler":  "on",
@@ -92,13 +96,11 @@ var prefDefaults = map[string]string{
 	"hide_sidebar_and_summary":        "off",
 	"hide_awards":                     "off",
 	"hide_score":                      "off",
-	"remove_default_feeds":            "off",
 	"fetch_sub_about":                 "off",
 	"disable_visit_reddit_confirmation": "off",
 	"comment_sort": "confidence",
 	"post_sort":    "new",
 	"enable_debug":            "off",
-	"enable_natural_prefetch": "off",
 	"prefetch_subs":           "",
 	"prefetch_threshold":      "50",
 	"prefetch_sort":           "hot",
@@ -160,6 +162,9 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	}
 
 	p.FrontPage = pref("front_page")
+	// Homepage is query-driven: absent or empty front_page_subs both resolve to
+	// "" → handleFrontPage redirects to /archive (disabled). The default is ""
+	// so there is no special presence handling — no query means no homepage.
 	p.FrontPageSubs = pref("front_page_subs")
 	p.Layout = pref("layout")
 	p.Wide = pref("wide")
@@ -173,12 +178,10 @@ func (h *Handler) readPreferences(r *http.Request) reddit.Preferences {
 	p.PostSort = pref("post_sort")
 	p.HideAwards = pref("hide_awards")
 	p.HideScore = pref("hide_score")
-	p.RemoveDefaultFeeds = pref("remove_default_feeds")
 	p.FetchSubAbout = pref("fetch_sub_about")
 	p.DisableVisitRedditConfirmation = pref("disable_visit_reddit_confirmation")
 	p.FixedNavbar = pref("fixed_navbar")
 	p.EnableDebug = pref("enable_debug")
-	p.EnableNaturalPrefetch = pref("enable_natural_prefetch")
 	p.PrefetchSubs = pref("prefetch_subs")
 	p.PrefetchThreshold = pref("prefetch_threshold")
 	p.PrefetchSort = pref("prefetch_sort")

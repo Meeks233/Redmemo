@@ -45,7 +45,7 @@ templ postPage(d PostPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:     postTitle(d),
 		HeadExtra: postHead(d),
-		Search:    searchbox("/search", ""),
+		Search:    searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 		Content:   postContent(d),
 		Media:     true,
 	})

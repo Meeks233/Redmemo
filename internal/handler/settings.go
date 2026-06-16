@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -22,9 +23,9 @@ var settingsKeys = []string{
 	"autoplay_videos", "fixed_navbar",
 	"disable_visit_reddit_confirmation",
 	"comment_sort", "post_sort",
-	"hide_awards", "hide_score", "remove_default_feeds",
+	"hide_awards", "hide_score",
 	"fetch_sub_about",
-	"enable_debug", "enable_natural_prefetch", "prefetch_subs",
+	"enable_debug", "prefetch_subs",
 	"prefetch_sort", "prefetch_timeframe", "prefetch_sub_modes",
 	"prefetch_unified", "prefetch_default_depth",
 	"prefetch_l3_min_comments",
@@ -396,7 +397,7 @@ func NormalizeSettings(updates map[string]string) (map[string]string, []Rejected
 		p := searchquery.Parse(v)
 		p.WhiteSubs = filterValidSubsList(p.WhiteSubs)
 		p.BlackSubs = filterValidSubsList(p.BlackSubs)
-		out["front_page_subs"] = p.Canonical()
+		out["front_page_subs"] = blankIfNoAlnum(p.Canonical())
 	}
 
 	if v, ok := out["prefetch_subs"]; ok && v != "" {
@@ -538,6 +539,144 @@ type RejectedSetting struct {
 	Key    string
 	Value  string
 	Reason string
+}
+
+// ManagedSettingKeys are the settings whose live value is reconciled by
+// latest-writer-wins between the operator's env default and the user's manual
+// /settings save. These are the three "operator OR user, whoever touched it
+// last wins" knobs: the homepage feed query, the Natural-Prefetch crawl list,
+// and the archive-control filter. Every other setting keeps the plain
+// "env_override always wins" rule.
+var ManagedSettingKeys = []string{"front_page_subs", "prefetch_subs", "archive_control"}
+
+// userShadowKey / envShadowKey are the hidden rows that retain each side's last
+// value plus its timestamp (via updated_at). The "_" prefix keeps them out of
+// GetAll / siteDefaults / the settings form and out of DemoteOrphans.
+func userShadowKey(k string) string { return "_user_" + k }
+func envShadowKey(k string) string  { return "_env_" + k }
+
+// ResolveLatest picks the value whose timestamp is newer between the user side
+// and the env side — both are timestamped when they last CHANGED, so this is a
+// fully symmetric latest-writer-wins. Either may be absent. Returns the winning
+// value and true, or ("", false) when neither side has recorded a value (leave
+// the live row to its default). A tie favours the user (their intent is the
+// more specific), though distinct wall-clock stamps make ties effectively
+// impossible.
+func ResolveLatest(userVal string, userAt time.Time, userOK bool, envVal string, envAt time.Time, envOK bool) (string, bool) {
+	switch {
+	case userOK && envOK:
+		if envAt.After(userAt) {
+			return envVal, true
+		}
+		return userVal, true
+	case userOK:
+		return userVal, true
+	case envOK:
+		return envVal, true
+	default:
+		return "", false
+	}
+}
+
+// ManagedSettingsStore is the subset of *store.SettingsStore the reconcile pass
+// needs. Declared consumer-side so the logic is unit-testable against an
+// in-memory fake (no database).
+type ManagedSettingsStore interface {
+	// GetMeta returns value + last-updated time for a row, found=false if absent.
+	GetMeta(name string) (value string, updatedAt time.Time, found bool, err error)
+	// SetShadow upserts a hidden bookkeeping row with an explicit timestamp.
+	SetShadow(name, value string, at time.Time) error
+	// SetBatch writes live rows (updated_at = now).
+	SetBatch(settings map[string]string, source string) error
+	// Delete removes a row (no-op if absent).
+	Delete(name string) error
+}
+
+// ReconcileManagedSettings applies symmetric latest-writer-wins for every
+// managed key, given the env values scanned this boot (envValues[k] present ⇒
+// the compose declares it, even if the value is ""). It refreshes the env
+// shadow — stamping the value's timestamp with `now` ONLY when it is first seen
+// or genuinely changes (an unchanged env value is left untouched, so repeated
+// rebuilds never bump its time), and dropping the shadow when the env var is
+// withdrawn. It then writes the winner (newest of user-save vs env-change) into
+// the live row, skipping the write when the live value is already correct. `now`
+// is injected for deterministic tests. Returns how many live rows it wrote.
+func ReconcileManagedSettings(s ManagedSettingsStore, envValues map[string]string, now time.Time) (int, error) {
+	written := 0
+	for _, k := range ManagedSettingKeys {
+		envVal, envPresent := envValues[k]
+		prevEnv, _, prevEnvOK, err := s.GetMeta(envShadowKey(k))
+		if err != nil {
+			return written, err
+		}
+		switch {
+		case envPresent && (!prevEnvOK || prevEnv != envVal):
+			// First observation OR a genuine change to the compose value: stamp
+			// it `now`, exactly as a user save stamps the user shadow `now`. An
+			// unchanged value falls through and keeps its existing timestamp.
+			if err := s.SetShadow(envShadowKey(k), envVal, now); err != nil {
+				return written, err
+			}
+		case !envPresent && prevEnvOK:
+			// Env var removed: withdraw its vote entirely.
+			if err := s.Delete(envShadowKey(k)); err != nil {
+				return written, err
+			}
+		}
+
+		uVal, uAt, uOK, err := s.GetMeta(userShadowKey(k))
+		if err != nil {
+			return written, err
+		}
+		eVal, eAt, eOK, err := s.GetMeta(envShadowKey(k))
+		if err != nil {
+			return written, err
+		}
+		eff, ok := ResolveLatest(uVal, uAt, uOK, eVal, eAt, eOK)
+		if !ok {
+			continue
+		}
+		// Skip a no-op rewrite: when the live row already holds the resolved
+		// value, re-writing it would needlessly bump updated_at on every rebuild
+		// even though nothing changed. Combined with the change-guarded env/user
+		// shadows above, this keeps repeated rebuilds of the SAME env value fully
+		// timestamp-stable.
+		if curLive, _, liveOK, err := s.GetMeta(k); err != nil {
+			return written, err
+		} else if liveOK && curLive == eff {
+			continue
+		}
+		if err := s.SetBatch(map[string]string{k: eff}, "resolved"); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
+}
+
+// hasAlnum reports whether s carries at least one ASCII letter or digit. A
+// query string made only of whitespace and punctuation ("   ", "!!!", "+++")
+// has no usable constraint — every settings path that gates "run vs skip" on a
+// query treats such input as blank.
+func hasAlnum(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			return true
+		}
+	}
+	return false
+}
+
+// blankIfNoAlnum returns s, or "" when s carries no alphanumeric character.
+// Used to collapse a canonicalised homepage query that survived as pure
+// punctuation (e.g. free-text "!!!") down to the skip sentinel so the homepage
+// is treated as disabled rather than filtering on a junk term.
+func blankIfNoAlnum(s string) string {
+	if !hasAlnum(s) {
+		return ""
+	}
+	return s
 }
 
 // filterValidSubsList keeps only syntactically valid subreddit names — same
@@ -694,7 +833,7 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		p := searchquery.Parse(v)
 		p.WhiteSubs = h.filterUsableSubs(p.WhiteSubs)
 		p.BlackSubs = h.filterValidSubs(p.BlackSubs)
-		updates["front_page_subs"] = p.Canonical()
+		updates["front_page_subs"] = blankIfNoAlnum(p.Canonical())
 	}
 
 	if v, ok := updates["prefetch_subs"]; ok && v != "" {
@@ -703,6 +842,26 @@ func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			updates["prefetch_subs"] = ""
 		} else {
 			updates["prefetch_subs"] = "sub:" + searchquery.JoinSubs(names)
+		}
+	}
+
+	// Record a timestamped "user shadow" for any managed key the user actually
+	// CHANGED in this save (front_page_subs / prefetch_subs / archive_control).
+	// The startup reconcile compares this against the operator's env default by
+	// recency — latest writer wins. We stamp only on a real change: re-saving
+	// the same effective value (the form echoes every field back while the user
+	// edits an unrelated one) must NOT bump the timestamp and let it leapfrog
+	// the env default. h.siteDefault(k) still holds the pre-save value here.
+	if h.settingsStore != nil {
+		now := time.Now()
+		for _, k := range ManagedSettingKeys {
+			v, ok := updates[k]
+			if !ok || v == h.siteDefault(k) {
+				continue
+			}
+			if err := h.settingsStore.SetShadow(userShadowKey(k), v, now); err != nil {
+				log.Printf("[settings] record user shadow %s: %v", k, err)
+			}
 		}
 	}
 

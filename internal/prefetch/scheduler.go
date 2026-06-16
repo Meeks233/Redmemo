@@ -857,13 +857,12 @@ func (s *Scheduler) coordinatorLoop(ctx context.Context) {
 				lastSig = ""
 				lastSubs = nil
 			}
-			toggle, subs := "", ""
+			subs := ""
 			if s.settings != nil {
-				toggle = s.settings.Get("enable_natural_prefetch")
 				subs = s.settings.Get("prefetch_subs")
 			}
 			s.setL1Status("disabled", 0, 0, nil, nil, time.Time{})
-			s.Events.Addf(LevelSkip, "L1", "disabled (enable_natural_prefetch=%q, prefetch_subs=%q), sleeping 30s", toggle, subs)
+			s.Events.Addf(LevelSkip, "L1", "disabled (no crawl list, prefetch_subs=%q), sleeping 30s", subs)
 			if err := sleep(ctx, 30*time.Second); err != nil {
 				return
 			}
@@ -906,16 +905,13 @@ func (s *Scheduler) coordinatorLoop(ctx context.Context) {
 	}
 }
 
-// isEnabled reports whether NP should run. An empty crawl list (prefetch_subs
-// blank, whether from the settings UI or REDMEMO_DEFAULT_PREFETCH_SUBS=) is
-// treated the same as the toggle being off — without subs there is nothing for
-// the layer to do, so we surface "disabled" instead of looping on "no subs
-// configured".
+// isEnabled reports whether NP should run. There is no separate on/off toggle:
+// the crawl list IS the switch. A non-empty prefetch_subs (from the settings UI
+// or REDMEMO_DEFAULT_PREFETCH_SUBS) enables the layer; a blank one — including
+// input that was pure punctuation/whitespace and got filtered down to nothing —
+// disables it, since there is nothing to crawl.
 func (s *Scheduler) isEnabled() bool {
 	if s.settings == nil {
-		return false
-	}
-	if s.settings.Get("enable_natural_prefetch") != "on" {
 		return false
 	}
 	return len(s.activeSubs()) > 0

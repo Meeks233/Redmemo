@@ -53,7 +53,8 @@ services:
       # the unified search grammar (e.g. "sub:golang+rust+selfhosted")
       # OR leave it empty and set the list later from /settings.
       - REDMEMO_PREFETCH_ENABLED=true
-      - REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH=on
+      # NP has no separate on/off toggle — a non-empty crawl list IS the switch.
+      # Fill PREFETCH_SUBS to enable it; leave it blank and the layer stays idle.
       - REDMEMO_DEFAULT_PREFETCH_SUBS=
       # Default depth across every crawled sub: l2+l3 = full visit-like flow
       # (listings + media + comments). Set to "none" for L1 listings only,

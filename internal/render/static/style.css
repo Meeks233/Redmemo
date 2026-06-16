@@ -832,8 +832,84 @@ select {
     min-width: 0;
     padding: 0 10px;
     border-right: 2px var(--outside) solid;
-    border-radius: 5px 0 0 5px;
+    /* The cloud/local toggle (#search_mode) now owns the rounded left edge of
+       the searchbox; the field is the flat middle cell. */
+    border-radius: 0;
     cursor: text;
+}
+
+/* Cloud↔local source toggle — the first cell of the searchbox, between the
+   brand logo and the input. The checkbox is the accessible control but is
+   visually hidden; the label is the clickable cell. The icon is a single
+   lucide cloud with a diagonal slash that is *drawn on* (pure-CSS
+   stroke-dashoffset) when local mode is active, mirroring lucide's cloud →
+   cloud-off where the sole difference is the slash. searchMode.js swaps the
+   form action + tooltip on toggle. */
+#search_mode {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 9px;
+    border-right: 2px var(--outside) solid;
+    border-radius: 5px 0 0 5px;
+    color: var(--text);
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+#search_mode:hover {
+    color: var(--accent);
+}
+
+/* Locked: operator pinned the instance cache-only. The toggle stays visible
+   (so the local state still reads) but is non-interactive and dimmed. */
+#search_mode.locked {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+#search_mode.locked:hover {
+    color: var(--text);
+}
+
+/* Hidden but focusable: the checkbox stays in the tab order and drives the
+   :checked styling, while the label provides the visible hit area. */
+#search_mode > input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+#search_mode_toggle:focus-visible + .search_mode_icon {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
+.search_mode_icon {
+    display: block;
+}
+
+/* The slash retracts (cloud) / extends (cloud-off) along its own length.
+   "m2 2 20 20" measures ≈28.3 user units; 31 over-covers it so it fully hides
+   at the resting offset and draws cleanly to 0 when local mode engages. */
+.search_mode_slash {
+    stroke-dasharray: 31;
+    stroke-dashoffset: 31;
+    transition: stroke-dashoffset 0.28s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+#search_mode_toggle:checked + .search_mode_icon .search_mode_slash {
+    stroke-dashoffset: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .search_mode_slash {
+        transition: none;
+    }
 }
 
 /* Single-line search input, full width of the field. The shared bare #search
@@ -2449,6 +2525,17 @@ summary.comment_data {
     line-height: 1.4;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Inline "this query is blank → it will be skipped" notice shown under the
+   homepage and Natural-Prefetch query boxes. Toggled via the [hidden] attr from
+   settings.templ JS; muted-but-noticeable so it reads as guidance, not error. */
+.query-skip-hint {
+    margin: 4px 2px 0;
+    font-size: 0.82em;
+    line-height: 1.35;
+    color: var(--accent, #d54e21);
+    opacity: 0.85;
 }
 
 .sub-picker-list {

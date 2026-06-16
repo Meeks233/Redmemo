@@ -130,8 +130,12 @@ func (h *Handler) isTrustedProxy(ip string) bool {
 func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	prefs := h.readPreferences(r)
 
-	// When the homepage is removed, redirect to the archive hub instead.
-	if prefs.RemoveDefaultFeeds == "on" {
+	// The homepage is defined purely by its filter query: a blank one (the box
+	// cleared, or input that canonicalised to nothing usable — see
+	// blankIfNoAlnum) means "no homepage", so we skip it and redirect to the
+	// archive hub. A non-empty query (including the default "all") renders the
+	// feed below.
+	if strings.TrimSpace(prefs.FrontPageSubs) == "" {
 		http.Redirect(w, r, "/archive", http.StatusFound)
 		return
 	}

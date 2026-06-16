@@ -241,7 +241,7 @@ func postPage(d PostPageData) templ.Component {
 		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{
 			Title:     postTitle(d),
 			HeadExtra: postHead(d),
-			Search:    searchbox("/search", ""),
+			Search:    searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 			Content:   postContent(d),
 			Media:     true,
 		}).Render(ctx, templ_7745c5c3_Buffer)

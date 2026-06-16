@@ -66,7 +66,7 @@ func userPage(d UserPageData) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{
 			Title:  userTitle(d),
-			Search: searchbox("/search", ""),
+			Search: searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 			Body:   userBody(d),
 			Media:  true,
 		}).Render(ctx, templ_7745c5c3_Buffer)

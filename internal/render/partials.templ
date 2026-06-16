@@ -128,8 +128,22 @@ templ submitSVG() {
 // PostgreSQL). query pre-fills the input. It accepts RedMemo's e621-style query
 // syntax (see docs/reddit-search.md); there is no implicit subreddit scoping —
 // scope is expressed explicitly via the greedy sub: syntax in the query.
-templ searchbox(action, query string) {
-	<form action={ templ.SafeURL(action) } id="searchbox">
+// searchbox is the single shared search form used both in the navbar (action
+// "/search" — live Reddit) and on the /archive page (action "/archive" — local
+// PostgreSQL). query pre-fills the input. It accepts RedMemo's e621-style query
+// syntax (see docs/reddit-search.md); there is no implicit subreddit scoping —
+// scope is expressed explicitly via the greedy sub: syntax in the query.
+//
+// upstreamDisabled mirrors the operator's "disable initiative upstream access"
+// switch: when set, the instance is pinned cache-only, so the form is forced to
+// the local endpoint and the cloud↔local toggle is locked to local.
+templ searchbox(action, query string, upstreamDisabled bool) {
+	{{ effectiveAction := action }}
+	if upstreamDisabled {
+		{{ effectiveAction = "/archive" }}
+	}
+	<form action={ templ.SafeURL(effectiveAction) } id="searchbox" data-cloud-action="/search" data-local-action="/archive">
+		@searchModeToggle(effectiveAction == "/archive", upstreamDisabled)
 		<div id="search_field">
 			<input id="search" type="search" name="q" value={ query } placeholder={ T(ctx, "search.placeholder") } title={ T(ctx, "search.hint") } autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"/>
 		</div>
@@ -137,6 +151,43 @@ templ searchbox(action, query string) {
 			@submitSVG()
 		</button>
 	</form>
+}
+
+// searchModeToggle is the cloud↔local source switch that sits between the brand
+// logo and the search input. It picks whether the shared searchbox submits to
+// "/search" (live Reddit) or "/archive" (local PostgreSQL). The checked state
+// means "local"; the visual is a single lucide cloud with a diagonal slash that
+// is *drawn* on (pure-CSS stroke-dashoffset transition) when local is active —
+// matching lucide's cloud → cloud-off, where the only difference is the slash.
+// searchMode.js swaps the form's action attribute and the title on toggle, and
+// remembers a manual pick for the session; with JS off the control degrades to
+// a no-op that still reflects the page's mode.
+//
+// When locked (operator disabled upstream), the checkbox is forced local and
+// disabled so the user cannot flip it back to the unreachable cloud endpoint.
+templ searchModeToggle(local, locked bool) {
+	{{ title := T(ctx, "search.mode_cloud") }}
+	if locked {
+		{{ title = T(ctx, "search.mode_locked") }}
+	} else if local {
+		{{ title = T(ctx, "search.mode_local") }}
+	}
+	<label
+		id="search_mode"
+		class={ "search_mode", templ.KV("locked", locked) }
+		title={ title }
+		data-title-cloud={ T(ctx, "search.mode_cloud") }
+		data-title-local={ T(ctx, "search.mode_local") }
+		if locked {
+			data-locked="1"
+		}
+	>
+		<input id="search_mode_toggle" type="checkbox" checked?={ local } disabled?={ locked }/>
+		<svg class="search_mode_icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+			<path class="search_mode_slash" d="m2 2 20 20"></path>
+		</svg>
+	</label>
 }
 
 // poll renders a post poll, mirroring the old "poll" define exactly.

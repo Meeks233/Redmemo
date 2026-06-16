@@ -6,6 +6,17 @@ Like Redlib, every per-user setting can be given an **instance-wide default** by
 
 **The scan is fully dynamic** — `REDMEMO_DEFAULT_<ANY_KEY>` is written to the DB on every startup with the highest-priority `env_override` source, so it **overrides whatever was previously stored** (by the user, by legacy sync, or by an earlier env value). Removing the env var causes its `env_override` row to be demoted on the next boot, letting user changes stick again.
 
+### Managed settings: latest-writer-wins (homepage / Natural-Prefetch / archive-control)
+
+Three keys do **not** follow the plain "env_override always wins" rule above, because the operator and the user legitimately compete to set them: the homepage feed (`FRONT_PAGE_SUBS`), the Natural-Prefetch crawl list (`PREFETCH_SUBS`), and the archive filter (`ARCHIVE_CONTROL`). For these, the env default and the user's `/settings` save are reconciled by **whoever wrote most recently**:
+
+- The env value is a **seed**. Its first observation is timestamped as "oldest", so it only applies until the user picks their own value.
+- A `/settings` change is timestamped "now" and **wins over an unchanged env seed** — so a manual setting persists across rebuilds instead of being clobbered by the compose default on every boot.
+- If the operator later **changes** the compose value and rebuilds, that edit is timestamped "now" and **wins back** (it is newer than the user's last save).
+- Removing the env var withdraws its vote entirely; the user's value (or, if none, the disabled/default state) stands.
+
+Both sides' values and timestamps are kept under hidden `_user_*` / `_env_*` rows in the existing `site_settings` table (no new table; excluded from `GetAll`, the settings form, and orphan-demotion). There is no on/off toggle — a blank resolved value simply disables the homepage / NP.
+
 ## Normalization
 
 A few keys are format-canonicalised at env-application time, so the YAML/env path and the `/settings` UI produce the same stored value:
@@ -34,7 +45,6 @@ A few keys are format-canonicalised at env-application time, so the YAML/env pat
 | `HIDE_SCORE` | `on`, `off` | `off` |
 | `HIDE_SIDEBAR_AND_SUMMARY` | `on`, `off` | `off` |
 | `FIXED_NAVBAR` | `on`, `off` | `on` |
-| `REMOVE_DEFAULT_FEEDS` | `on`, `off` | `off` |
 
 ## Instance-only toggles (no per-user equivalent)
 
@@ -51,11 +61,10 @@ All overridable, all auto-translated from `REDLIB_DEFAULT_*`.
 
 | Name | Possible values | Default | Description |
 |------|-----------------|---------|-------------|
-| `REDMEMO_DEFAULT_FRONT_PAGE_SUBS` | unified search grammar | `default` | Home-page feed query, e.g. `sub:golang+rust score>10`. |
+| `REDMEMO_DEFAULT_FRONT_PAGE_SUBS` | unified search grammar | _(empty → disabled)_ | Home-page feed query, e.g. `sub:golang+rust score>10`. The query is the switch and the homepage is **disabled by default**: with no query set (env unset or a cleared /settings box), `/` redirects to `/archive`. Set `all` to render a feed of every archived post, or any query (real subreddit/term) to filter it. Pure-punctuation/whitespace input also counts as empty. |
 | `REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS` | `on`, `off` | `on` | Block outbound Reddit calls outside the NP-scheduled budget. |
 | `REDMEMO_DEFAULT_ENABLE_DEBUG` | `on`, `off` | `off` | Expose `/debug` to all visitors of this instance. |
-| `REDMEMO_DEFAULT_ENABLE_NATURAL_PREFETCH` | `on`, `off` | `off` | Master toggle for the L1/L2/L5 background prefetch loops. |
-| `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | (empty) | NP crawl list, e.g. `sub:golang+rust`. |
+| `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | (empty) | NP crawl list, e.g. `sub:golang+rust`. A non-empty list enables the background prefetch loops; empty leaves them idle (no separate toggle). |
 | `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` | Per-sub freshness threshold (%). |
 | `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` | `0..100000` | `0` (compose presets ship `50`) | L3 noise floor — posts with fewer comments are frozen out of bind + standalone L3. Invalid value aborts startup. |
 | `REDMEMO_DEFAULT_ARCHIVE_CONTROL` | `+`/`-` sub list | (empty) | Archive whitelist/blacklist, e.g. `cats+dogs` (only those) or `-spam-meta` (everything except). Any `+` discards all `-` entries; duplicate names are dropped entirely. Empty = archive everything. Full grammar: [Archive Control](Archive-Control.md). |

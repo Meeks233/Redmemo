@@ -91,7 +91,7 @@ func subredditPage(d SubredditPageData) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = layout(d.BasePage, pageSlots{
 			Title:  subredditTitle(d),
-			Search: searchbox("/search", ""),
+			Search: searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 			Body:   subredditBody(d),
 			Media:  true,
 		}).Render(ctx, templ_7745c5c3_Buffer)

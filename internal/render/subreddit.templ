@@ -18,7 +18,7 @@ templ subredditTitle(d SubredditPageData) {
 templ subredditPage(d SubredditPageData) {
 	@layout(d.BasePage, pageSlots{
 		Title:  subredditTitle(d),
-		Search: searchbox("/search", ""),
+		Search: searchbox("/search", "", d.Prefs.DisableInitiativeUpstreamAccess == "on"),
 		Body:   subredditBody(d),
 		Media:  true,
 	})
