@@ -59,7 +59,7 @@ func (f *fakeDeviceStore) Create(hash, prefix, ip string, expiresAt time.Time) e
 // Check mirrors store.Check: a live row is touched and reported TrustValid; an
 // expired row is deleted on the spot and reported TrustExpired; a missing row
 // is TrustAbsent.
-func (f *fakeDeviceStore) Check(hash string) (store.TrustVerdict, error) {
+func (f *fakeDeviceStore) Check(hash string, newExpiry time.Time) (store.TrustVerdict, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i, r := range f.rows {
@@ -69,6 +69,7 @@ func (f *fakeDeviceStore) Check(hash string) (store.TrustVerdict, error) {
 		if r.expiresAt.After(time.Now()) {
 			now := time.Now()
 			r.lastUsed = &now
+			r.expiresAt = newExpiry // sliding-window renewal, mirrors the store CTE
 			return store.TrustValid, nil
 		}
 		f.rows = append(f.rows[:i], f.rows[i+1:]...)
@@ -131,6 +132,14 @@ func (f *fakeDeviceStore) DeleteExpired() (int64, error) {
 	return removed, nil
 }
 
+func (f *fakeDeviceStore) DeleteAll() (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	removed := int64(len(f.rows))
+	f.rows = nil
+	return removed, nil
+}
+
 func (f *fakeDeviceStore) len() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -183,6 +192,121 @@ func TestTrustedDeviceRevokedImmediatelyRejected(t *testing.T) {
 	}
 	if a.HasValidTrustedDevice(req) {
 		t.Fatal("revoked trusted device must be rejected immediately on the next request")
+	}
+}
+
+// TestRevokeAllTrustedDevicesOnTOTPReset proves that wiping the second factor
+// (the --reset-totp CLI path / a TOTP rotation) de-authorises EVERY trusted
+// device. A 365-day trust cookie minted under the old secret must not survive a
+// reset the operator performs precisely because they suspect compromise.
+func TestRevokeAllTrustedDevicesOnTOTPReset(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	toks := []string{
+		"deadbeefcafef00d0123456789abcdef",
+		"feedface0123456789abcdeffeedface",
+	}
+	for _, tok := range toks {
+		if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", time.Now().Add(trustedTokenTTL)); err != nil {
+			t.Fatalf("seed device: %v", err)
+		}
+	}
+	for _, tok := range toks {
+		if !a.HasValidTrustedDevice(trustedReq(tok)) {
+			t.Fatal("seeded trusted device should validate before reset")
+		}
+	}
+
+	n, err := a.RevokeAllTrustedDevices()
+	if err != nil {
+		t.Fatalf("revoke all: %v", err)
+	}
+	if n != int64(len(toks)) {
+		t.Fatalf("want %d devices revoked, got %d", len(toks), n)
+	}
+	for _, tok := range toks {
+		if a.HasValidTrustedDevice(trustedReq(tok)) {
+			t.Fatal("every trusted device must be rejected after a TOTP reset")
+		}
+	}
+	if f.len() != 0 {
+		t.Fatalf("store should be empty after revoke-all, has %d rows", f.len())
+	}
+}
+
+// TestRevokeAllTrustedDevicesNilStore guards the no-store path (tests / a
+// misconfig with no trusted-device backing): revoke-all must be a clean no-op,
+// never a nil dereference.
+func TestRevokeAllTrustedDevicesNilStore(t *testing.T) {
+	a := newTestAuth() // no devices wired
+	n, err := a.RevokeAllTrustedDevices()
+	if err != nil || n != 0 {
+		t.Fatalf("nil store revoke-all: want (0,nil), got (%d,%v)", n, err)
+	}
+}
+
+// TestSessionTokenBoundToIP proves the ephemeral /settings session cookie only
+// authorises requests from the IP it was minted for: the same cookie replayed
+// from a different address is rejected (theft / exfiltration), while the
+// original address keeps working until the token expires.
+func TestSessionTokenBoundToIP(t *testing.T) {
+	a := newTestAuth()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/settings", nil)
+	a.issueToken(w, r, 10*time.Minute, "192.0.2.10")
+
+	var tok string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == authTokenCookie {
+			tok = c.Value
+		}
+	}
+	if tok == "" {
+		t.Fatal("issueToken should set the session cookie")
+	}
+
+	sameIP := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	sameIP.AddCookie(&http.Cookie{Name: authTokenCookie, Value: tok})
+	if !a.HasValidToken(sameIP, "192.0.2.10") {
+		t.Fatal("token must validate from the IP it was issued to")
+	}
+
+	otherIP := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	otherIP.AddCookie(&http.Cookie{Name: authTokenCookie, Value: tok})
+	if a.HasValidToken(otherIP, "203.0.113.7") {
+		t.Fatal("token replayed from a different IP must be rejected")
+	}
+	// Rejection must NOT delete the row — the legitimate IP can still use it.
+	if !a.HasValidToken(sameIP, "192.0.2.10") {
+		t.Fatal("a cross-IP rejection must not invalidate the token for its own IP")
+	}
+}
+
+// TestTrustedDeviceSlidingRenewal proves the trusted-device window slides: a
+// near-expiry token that gets validated has its expiry pushed forward, so a
+// browser in regular use never lapses.
+func TestTrustedDeviceSlidingRenewal(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "0011223344556677889900aabbccddee"
+	// Seed a row expiring in 1 minute — well inside its window but close to lapse.
+	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	if !a.HasValidTrustedDevice(trustedReq(tok)) {
+		t.Fatal("near-expiry trusted device should still validate")
+	}
+
+	// After one validation the stored expiry should have jumped to ~now+TTL.
+	list, err := a.ListTrustedDevices()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list devices: err=%v len=%d", err, len(list))
+	}
+	if got := time.Until(list[0].ExpiresAt); got < trustedTokenTTL-time.Hour {
+		t.Fatalf("validation should have slid expiry to ~%s out, got %s", trustedTokenTTL, got)
 	}
 }
 
@@ -275,7 +399,7 @@ func TestSelfRevokeDropsAccessAndRedirectsHome(t *testing.T) {
 
 	// The revoking request carries this device's own trusted cookie plus a stray
 	// live session token — both must be cleared on self-revoke.
-	a.tokens["sess123"] = time.Now().Add(time.Hour)
+	a.tokens["sess123"] = sessionToken{exp: time.Now().Add(time.Hour), ip: "192.0.2.7"}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/settings/trusted/revoke", nil)
 	r.AddCookie(&http.Cookie{Name: trustedCookie, Value: tok})

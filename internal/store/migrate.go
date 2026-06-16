@@ -658,7 +658,7 @@ var migrations = []string{
 	 ON CONFLICT (name) DO NOTHING;`,
 
 	// v33: trusted-device long tokens. A "Trust this device" tick on the TOTP
-	// gate mints a 365-day cookie whose SHA-256 is persisted here (never the
+	// gate mints a sliding 30-day cookie whose SHA-256 is persisted here (never the
 	// plaintext — a DB leak must not yield a usable session token). token_prefix
 	// keeps the first few plaintext chars purely so the management table can show
 	// the operator which cookie a row maps to. The instance caps live rows at 3

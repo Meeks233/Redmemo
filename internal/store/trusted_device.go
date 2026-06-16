@@ -7,9 +7,10 @@ import (
 )
 
 // TrustedDevice is one persisted long-lived "trusted device" session — the
-// 365-day cookie minted when the operator ticks "Trust this device" on the
-// TOTP gate. Only the token's SHA-256 is stored (TokenHash is never read back
-// out by the management UI); TokenPrefix is the cosmetic first-few-chars label.
+// sliding 30-day cookie minted when the operator ticks "Trust this device" on
+// the TOTP gate (its expiry is pushed forward on every use). Only the token's
+// SHA-256 is stored (TokenHash is never read back out by the management UI);
+// TokenPrefix is the cosmetic first-few-chars label.
 type TrustedDevice struct {
 	ID          int64
 	TokenPrefix string
@@ -70,18 +71,22 @@ const (
 )
 
 // Check verifies a presented token hash and self-heals in one round-trip:
-//   - a live row is touched (last_used = NOW) and reported TrustValid;
+//   - a live row is touched (last_used = NOW) AND its expiry is slid forward to
+//     newExpiry, then reported TrustValid — this is the sliding window: a token
+//     in regular use never lapses, while one left idle past the window expires;
 //   - an expired row is deleted on the spot and reported TrustExpired (so an
 //     invalid-but-uncleaned token is reaped exactly when it is presented);
 //   - a missing row is reported TrustAbsent.
 //
 // The two writes run inside one CTE so the valid-touch and expired-delete are a
-// single atomic statement — a token is never both touched and deleted.
-func (s *TrustedDeviceStore) Check(tokenHash string) (TrustVerdict, error) {
+// single atomic statement — a token is never both touched and deleted. The
+// renewal only fires on the valid branch, so an already-expired token can never
+// be resurrected by a late presentation.
+func (s *TrustedDeviceStore) Check(tokenHash string, newExpiry time.Time) (TrustVerdict, error) {
 	var validN, expiredN int
 	err := s.db.QueryRow(`
 		WITH valid AS (
-			UPDATE trusted_devices SET last_used = NOW()
+			UPDATE trusted_devices SET last_used = NOW(), expires_at = $2
 			WHERE token_hash = $1 AND expires_at > NOW()
 			RETURNING 1
 		),
@@ -91,7 +96,7 @@ func (s *TrustedDeviceStore) Check(tokenHash string) (TrustVerdict, error) {
 			RETURNING 1
 		)
 		SELECT (SELECT COUNT(*) FROM valid), (SELECT COUNT(*) FROM expired)`,
-		tokenHash,
+		tokenHash, newExpiry,
 	).Scan(&validN, &expiredN)
 	if err != nil {
 		return TrustAbsent, fmt.Errorf("check trusted device: %w", err)
@@ -161,6 +166,19 @@ func (s *TrustedDeviceStore) DeleteExpired() (int64, error) {
 	res, err := s.db.Exec(`DELETE FROM trusted_devices WHERE expires_at <= NOW()`)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired trusted devices: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// DeleteAll drops every trusted-device row — live or expired. Called whenever the
+// TOTP second factor is reset or rotated: a trusted cookie outlives the
+// secret it was minted under, so resetting the second factor (operator suspects
+// compromise) MUST also de-authorise every trusted device, otherwise an attacker
+// holding a trusted cookie keeps full /settings access across the reset.
+func (s *TrustedDeviceStore) DeleteAll() (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM trusted_devices`)
+	if err != nil {
+		return 0, fmt.Errorf("delete all trusted devices: %w", err)
 	}
 	return res.RowsAffected()
 }

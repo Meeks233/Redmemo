@@ -95,11 +95,12 @@ type hrManager interface {
 type trustedDeviceStore interface {
 	CountActive() (int, error)
 	Create(tokenHash, prefix, ip string, expiresAt time.Time) error
-	Check(tokenHash string) (store.TrustVerdict, error)
+	Check(tokenHash string, newExpiry time.Time) (store.TrustVerdict, error)
 	ListActive() ([]store.TrustedDevice, error)
 	HashByID(id int64) (string, error)
 	Revoke(id int64) (int64, error)
 	DeleteExpired() (int64, error)
+	DeleteAll() (int64, error)
 }
 
 // Compile-time guards that concrete production types still satisfy the

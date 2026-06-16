@@ -10,7 +10,7 @@ import (
 // up. registerFailure/locked never touch the store, so a nil store is fine here.
 func newTestAuth() *AuthManager {
 	return &AuthManager{
-		tokens:    make(map[string]time.Time),
+		tokens:    make(map[string]sessionToken),
 		tries:     make(map[string]*attempt),
 		usedCodes: make(map[string]time.Time),
 	}

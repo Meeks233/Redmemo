@@ -288,7 +288,7 @@
   "settings.enabled": "已启用",
   "settings.disabled": "已禁用",
   "settings.trusted_devices": "受信任的设备",
-  "settings.trusted_devices_desc": "你在登录页勾选过\"信任此设备\"的浏览器。每个会持有一个 365 天有效的长令牌，无需 TOTP 验证码即可打开设置。最多同时保留 3 个——若有不认识的请立即吊销。",
+  "settings.trusted_devices_desc": "你在登录页勾选过\"信任此设备\"的浏览器。每个持有一个 30 天长令牌——每次访问自动续期，仅在闲置满 30 天后才失效——无需 TOTP 验证码即可打开设置。最多同时保留 3 个——若有不认识的请立即吊销。",
   "settings.trusted_limit": "你已经有 3 个受信任的设备（已达上限），本次请求被丢弃。要么是你的设备太多（请在下方吊销一个），要么是有人擅自信任了不该信任的设备。如果有不认识的条目，请立即吊销。",
   "settings.trusted_none": "暂无受信任的设备。",
   "settings.trusted_th_token": "令牌",

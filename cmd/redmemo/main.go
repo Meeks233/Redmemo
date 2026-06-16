@@ -102,6 +102,15 @@ func main() {
 		if err := totpStore.Reset(); err != nil {
 			log.Fatalf("reset-totp: %v", err)
 		}
+		// A "Trust this device" cookie outlives the secret it was minted
+		// under. An operator resets the second factor precisely when they suspect
+		// compromise, so the reset MUST also de-authorise every trusted device —
+		// otherwise a stolen trusted cookie keeps full /settings access across it.
+		if n, err := trustedDeviceStore.DeleteAll(); err != nil {
+			log.Fatalf("reset-totp: revoke trusted devices: %v", err)
+		} else if n > 0 {
+			log.Printf("reset-totp: revoked %d trusted device(s).", n)
+		}
 		log.Println("reset-totp: cleared. Next /settings visit will re-enroll.")
 		return
 	}

@@ -288,7 +288,7 @@
   "settings.enabled": "Enabled",
   "settings.disabled": "Disabled",
   "settings.trusted_devices": "Trusted devices",
-  "settings.trusted_devices_desc": "Browsers you ticked \"Trust this device\" on the login page. Each holds a 365-day token that opens settings without a TOTP code. Up to 3 at a time — revoke any you don't recognise.",
+  "settings.trusted_devices_desc": "Browsers you ticked \"Trust this device\" on the login page. Each holds a 30-day token — renewed on every visit, so it lapses only after 30 days of inactivity — that opens settings without a TOTP code. Up to 3 at a time — revoke any you don't recognise.",
   "settings.trusted_limit": "You already have 3 trusted devices — the maximum. This request was dropped. Either you have too many devices (revoke one below), or someone else trusted a device they shouldn't have. If you don't recognise a row, revoke it now.",
   "settings.trusted_none": "No trusted devices.",
   "settings.trusted_th_token": "Token",
