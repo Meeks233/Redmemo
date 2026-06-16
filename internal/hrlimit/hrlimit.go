@@ -11,6 +11,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -214,13 +215,19 @@ func (m *Manager) RecordUpstream(ctx context.Context) {
 		return
 	}
 	now := m.now().Unix()
-	_, _ = recordScript.Run(
+	if _, err := recordScript.Run(
 		ctx, m.client, nil,
 		now,
 		int64(m.tiers[0].window.Seconds()), m.tiers[0].threshold,
 		int64(m.tiers[1].window.Seconds()), m.tiers[1].threshold,
 		int64(m.tiers[2].window.Seconds()), m.tiers[2].threshold,
-	).Result()
+	).Result(); err != nil {
+		// A failed counter increment under-counts upstream traffic, weakening the
+		// cap precisely when Redis is unhealthy. Surface it so the failure is
+		// observable rather than silent (upstream calls are themselves throttled,
+		// so this cannot spam). Admit() fails closed separately on Redis errors.
+		log.Printf("hrlimit: RecordUpstream counter increment failed: %v", err)
+	}
 }
 
 // CooldownReason returns the most-severe active cooldown tier and the unix

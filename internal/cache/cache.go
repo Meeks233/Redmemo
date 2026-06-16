@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -68,8 +69,19 @@ func (c *Cache) InvalidateHTML(ctx context.Context, urlPath string) error {
 // given URL path — used to flush all per-prefs / per-query variants of one page
 // when a user-triggered refresh changes the underlying archive.
 func (c *Cache) InvalidateHTMLPrefix(ctx context.Context, urlPath string) error {
-	pattern := htmlKey(urlPath) + "*"
+	// Escape Redis glob metacharacters in the user-influenced path before
+	// appending the "*" wildcard. Without this, a path segment containing '*',
+	// '?', '[' or '\' (these routes don't validate {sub}/{id}) would over-match
+	// and flush unrelated pages' cache entries, thrashing the shared HTML cache.
+	pattern := escapeRedisGlob(htmlKey(urlPath)) + "*"
 	return c.scanDelete(ctx, pattern)
+}
+
+// escapeRedisGlob backslash-escapes the metacharacters Redis SCAN MATCH treats
+// as glob syntax so the input is matched literally.
+func escapeRedisGlob(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`, `]`, `\]`)
+	return r.Replace(s)
 }
 
 // InvalidateAllHTML drops every cache:html:* entry. Called after a settings

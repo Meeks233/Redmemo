@@ -110,15 +110,15 @@ func (c *PublicClient) FetchSubreddit(ctx context.Context, sub, sort, t, after, 
 	if limit <= 0 || limit > 100 {
 		limit = 25
 	}
-	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&limit=%d", sub, sort, limit)
+	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&limit=%d", url.PathEscape(sub), url.PathEscape(sort), limit)
 	if t != "" {
 		path += "&t=" + url.QueryEscape(t)
 	}
 	if after != "" {
-		path += "&after=" + after
+		path += "&after=" + url.QueryEscape(after)
 	}
 	if before != "" {
-		path += "&before=" + before
+		path += "&before=" + url.QueryEscape(before)
 	}
 	data, err := c.fetch(ctx, path)
 	if err != nil {
@@ -135,7 +135,7 @@ func (c *PublicClient) FetchPostLimited(ctx context.Context, sub, id, commentSor
 	if commentSort == "" {
 		commentSort = "confidence"
 	}
-	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&sort=%s", sub, id, commentSort)
+	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&sort=%s", url.PathEscape(sub), url.PathEscape(id), url.QueryEscape(commentSort))
 	if limit > 0 {
 		path += fmt.Sprintf("&limit=%d", limit)
 	}
@@ -179,7 +179,7 @@ func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, aft
 	eq := url.QueryEscape(query)
 	var path string
 	if sub != "" {
-		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&limit=%d&q=%s", sub, limit, eq)
+		path = fmt.Sprintf("/r/%s/search.json?raw_json=1&limit=%d&q=%s", url.PathEscape(sub), limit, eq)
 	} else {
 		path = fmt.Sprintf("/search.json?raw_json=1&limit=%d&q=%s", limit, eq)
 	}
@@ -204,7 +204,7 @@ func (c *PublicClient) FetchSearch(ctx context.Context, query, sub, sort, t, aft
 }
 
 func (c *PublicClient) FetchUser(ctx context.Context, username, listing, sort, after string) (User, []Post, []Comment, error) {
-	aboutData, err := c.fetch(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1", username))
+	aboutData, err := c.fetch(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1", url.PathEscape(username)))
 	if err != nil {
 		return User{}, nil, nil, err
 	}
@@ -216,12 +216,12 @@ func (c *PublicClient) FetchUser(ctx context.Context, username, listing, sort, a
 	if listing == "" {
 		listing = "overview"
 	}
-	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1", username, listing)
+	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1", url.PathEscape(username), url.PathEscape(listing))
 	if sort != "" {
-		listPath += "&sort=" + sort
+		listPath += "&sort=" + url.QueryEscape(sort)
 	}
 	if after != "" {
-		listPath += "&after=" + after
+		listPath += "&after=" + url.QueryEscape(after)
 	}
 	listData, err := c.fetch(ctx, listPath)
 	if err != nil {
@@ -232,7 +232,7 @@ func (c *PublicClient) FetchUser(ctx context.Context, username, listing, sort, a
 }
 
 func (c *PublicClient) FetchSubredditAbout(ctx context.Context, sub string) (Subreddit, error) {
-	path := fmt.Sprintf("/r/%s/about.json?raw_json=1", sub)
+	path := fmt.Sprintf("/r/%s/about.json?raw_json=1", url.PathEscape(sub))
 	data, err := c.fetch(ctx, path)
 	if err != nil {
 		return Subreddit{}, err

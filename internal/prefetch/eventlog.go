@@ -50,10 +50,14 @@ func (e Event) RelativeTime() string {
 	return fmt.Sprintf("%dh%dm ago", int(d.Hours()), int(d.Minutes())%60)
 }
 
+// EventLog is a fixed-capacity ring buffer of recent events. Eviction is O(1)
+// (overwrite at head) rather than an O(cap) slice shift on every append once
+// full, since Add is on the hot prefetch dispatch/wave path.
 type EventLog struct {
 	mu     sync.RWMutex
-	events []Event
+	events []Event // backing ring, len == number stored (grows up to cap)
 	cap    int
+	head   int // index of the oldest event once the ring is full
 }
 
 func NewEventLog(capacity int) *EventLog {
@@ -66,8 +70,7 @@ func NewEventLog(capacity int) *EventLog {
 func (l *EventLog) Add(level EventLevel, phase, msg string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	// A non-positive capacity log discards everything. Without this guard the
-	// eviction branch below would index l.events[-1] and panic.
+	// A non-positive capacity log discards everything.
 	if l.cap <= 0 {
 		return
 	}
@@ -77,12 +80,13 @@ func (l *EventLog) Add(level EventLevel, phase, msg string) {
 		Phase:   phase,
 		Message: msg,
 	}
-	if len(l.events) >= l.cap {
-		copy(l.events, l.events[1:])
-		l.events[len(l.events)-1] = e
-	} else {
+	if len(l.events) < l.cap {
 		l.events = append(l.events, e)
+		return
 	}
+	// Ring is full: overwrite the oldest slot and advance head. O(1).
+	l.events[l.head] = e
+	l.head = (l.head + 1) % l.cap
 }
 
 func (l *EventLog) Addf(level EventLevel, phase, format string, args ...interface{}) {
@@ -93,6 +97,9 @@ func (l *EventLog) Snapshot() []Event {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	out := make([]Event, len(l.events))
-	copy(out, l.events)
+	// Walk from head so the snapshot stays in chronological (oldest-first) order.
+	for i := range l.events {
+		out[i] = l.events[(l.head+i)%len(l.events)]
+	}
 	return out
 }

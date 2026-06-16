@@ -119,6 +119,13 @@ func (w *gzipResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *gzipResponseWriter) Flush() {
+	// A handler may Flush before its first Write (e.g. streaming/SSE). Commit the
+	// compression decision and status first, otherwise the underlying Flush would
+	// commit an uncompressed 200 with no Content-Encoding and strand any later
+	// gzip decision or intended status.
+	if !w.decided {
+		w.decide()
+	}
 	if w.gz != nil {
 		_ = w.gz.Flush()
 	}

@@ -35,11 +35,31 @@ const evictionFreeFraction = 0.10
 // already stops at the first row that crosses the target.
 const evictionCandidateCap = 5000
 
+// evictionWalkGateFraction is the safety margin on the cheap DB estimate that
+// decides whether a tick needs the expensive full-disk walk. The DB sum is a
+// strict LOWER BOUND on real usage (re-download orphans hold disk before their
+// file is unlinked — see store.EstimatedDiskBytes), so an estimate well below
+// the cap proves real usage is below the cap and the walk can be skipped. We
+// gate at 90% of the cap: once the estimate reaches that, the orphan slack
+// could plausibly push real usage over the cap, so we walk to get the truth.
+const evictionWalkGateFraction = 0.90
+
+// evictionReconcileEveryNTicks forces a full-disk walk every Nth tick even when
+// the estimate is below the gate, so accumulated orphan bytes the DB sum cannot
+// see (NULLed file_path, file still on disk) are eventually reconciled and
+// reclaimed. At the default 5-minute check interval, 12 ticks ≈ once per hour.
+const evictionReconcileEveryNTicks = 12
+
 type Evictor struct {
 	cfg        config.MediaConfig
 	mediaStore *store.MediaIndexStore
 	rootPath   string
 	Events     *EventLog
+
+	// tick counts cycles since start to drive the periodic reconciliation walk
+	// (see evictionReconcileEveryNTicks). Only touched from RunOnce, which the
+	// single ticker goroutine calls serially, so no synchronization is needed.
+	tick uint64
 }
 
 func NewEvictor(cfg config.MediaConfig, mediaStore *store.MediaIndexStore) *Evictor {
@@ -74,18 +94,46 @@ func (e *Evictor) Start(ctx context.Context) {
 }
 
 // RunOnce reclaims 10% of the configured cap when usage has reached the cap.
-// The selection is done in the database (highest cache-score first, cumulative
-// file_size crossing the target); each selected file is removed and its content
-// row dropped to the -1 absence sentinel under the row's per-hash publish lock,
-// so a concurrent re-download of the same content can never interleave.
+// A cheap DB-side size estimate gates the expensive full-disk walk: most ticks
+// skip the walk when the estimate proves usage is below the cap (see the
+// pre-check gate below). The selection is done in the database (highest
+// cache-score first, cumulative file_size crossing the target); each selected
+// file is removed and its content row dropped to the -1 absence sentinel under
+// the row's per-hash publish lock, so a concurrent re-download of the same
+// content can never interleave.
 func (e *Evictor) RunOnce() (freedBytes int64, evictedCount int, err error) {
+	maxBytes := int64(e.cfg.MaxSizeGB * 1024 * 1024 * 1024)
+	if maxBytes <= 0 {
+		return 0, 0, nil
+	}
+
+	e.tick++
+
+	// Pre-check gate: most ticks the cache sits comfortably below the cap, and
+	// the only reason to stat every file on disk is to decide whether to evict.
+	// The DB sum is a cheap (index-only) LOWER BOUND on real usage, so when it
+	// is well under the cap we can prove no eviction is needed and skip the walk
+	// entirely. We still walk when (a) the estimate is within the safety margin
+	// of the cap — orphan slack the sum can't see might push real usage over —
+	// or (b) it is a periodic reconciliation tick, so orphan bytes are bounded
+	// and eventually reclaimed even while the estimate stays low. A nil store
+	// (defensive) or estimate error falls back to always-walk (prior behavior),
+	// so the gate can never cause a needed eviction to be skipped.
+	reconcile := e.tick%evictionReconcileEveryNTicks == 0
+	if e.mediaStore != nil && !reconcile {
+		estBytes, estErr := e.mediaStore.EstimatedDiskBytes()
+		if estErr == nil && estBytes < int64(float64(maxBytes)*evictionWalkGateFraction) {
+			// Estimate proves real usage is below the cap; no walk this tick.
+			return 0, 0, nil
+		}
+	}
+
 	usedBytes, err := e.DiskUsage()
 	if err != nil {
 		return 0, 0, err
 	}
 
-	maxBytes := int64(e.cfg.MaxSizeGB * 1024 * 1024 * 1024)
-	if maxBytes <= 0 || usedBytes < maxBytes {
+	if usedBytes < maxBytes {
 		return 0, 0, nil
 	}
 

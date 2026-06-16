@@ -20,7 +20,6 @@ import (
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/oauth"
 	"github.com/redmemo/redmemo/internal/prefetch"
-	"github.com/redmemo/redmemo/internal/ratelimit"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
@@ -230,7 +229,6 @@ func main() {
 	publicCli := reddit.NewPublicClient(sessionUA)
 
 	// 10. Init modules
-	rateLimiter := ratelimit.New(cfg.RateLimit, oauthHolder)
 	hrLimiter := hrlimit.NewManager(redisCache.Client(), cfg.HRLimit)
 
 	renderer, err := render.New(cfg.Render)
@@ -282,7 +280,6 @@ func main() {
 	if err := oauthHolder.Start(ctx); err != nil {
 		log.Printf("oauth holder start: %v (continuing without tokens)", err)
 	}
-	rateLimiter.Start(ctx)
 	evictor.Start(ctx)
 	prefetcher.Start(ctx)
 
@@ -292,7 +289,7 @@ func main() {
 
 	// 12. Register routes, start HTTP server
 	h := handler.New(
-		rateLimiter, hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
+		hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
 		mediaProxy, archiver, prefetcher, evictor, subStatusStore, subIconStore, cfg,
 	).WithAuth(authMgr)
@@ -312,7 +309,6 @@ func main() {
 		log.Printf("received %v, shutting down...", sig)
 		cancel()
 		oauthHolder.Stop()
-		rateLimiter.Stop()
 		prefetcher.Stop()
 		srv.Shutdown(context.Background())
 	}()

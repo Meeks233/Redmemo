@@ -256,7 +256,12 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			opts.Sort = sort
 		}
 		opts.Limit = 25
-		stored, _, _ := h.postStore.ArchiveSearch(opts)
+		stored, _, asErr := h.postStore.ArchiveSearch(opts)
+		if asErr != nil {
+			// Don't let a DB failure masquerade as an empty archive — log it so the
+			// fault is diagnosable instead of silently degrading to "nothing found".
+			log.Printf("search: archive search failed for %q: %v", query, asErr)
+		}
 		if len(stored) > 0 {
 			var posts []reddit.Post
 			for _, sp := range stored {

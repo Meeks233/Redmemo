@@ -1,6 +1,9 @@
 package handler
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // singleFlight coalesces concurrent calls keyed by a string: when N goroutines
 // ask for the same key while a fetch is in flight, only the first actually
@@ -39,12 +42,31 @@ func (sf *singleFlight) Do(key string, fn func() (any, error)) (val any, err err
 	sf.m[key] = c
 	sf.mu.Unlock()
 
-	c.val, c.err = fn()
+	// Run fn with panic safety: the map cleanup and channel close MUST happen
+	// even if fn panics, otherwise every follower blocked on <-c.done hangs
+	// forever AND the poisoned entry is never removed from sf.m, permanently
+	// wedging all future requests for this key. On panic we record it in c.err
+	// so followers receive an error instead of deadlocking, then re-panic on the
+	// leader so the recovery middleware can turn it into a 500.
+	var panicked any
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = r
+				c.err = fmt.Errorf("singleflight: panic in flight for %q: %v", key, r)
+			}
+		}()
+		c.val, c.err = fn()
+	}()
 
 	sf.mu.Lock()
 	delete(sf.m, key)
 	sf.mu.Unlock()
 	close(c.done)
+
+	if panicked != nil {
+		panic(panicked)
+	}
 
 	return c.val, c.err, false
 }

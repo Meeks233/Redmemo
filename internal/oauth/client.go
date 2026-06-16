@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -236,9 +237,18 @@ func basicAuth(username, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 }
 
+// secretFieldRe matches JSON string fields that may carry token/session
+// material so they can be redacted before a token-endpoint response body is
+// echoed into an error/log line.
+var secretFieldRe = regexp.MustCompile(`("(?:access_token|refresh_token|loid|session|session_tracker)"\s*:\s*)"[^"]*"`)
+
+// truncate redacts known sensitive JSON fields and then caps the body length.
+// Token endpoints occasionally return secret material in the body; never echo
+// it verbatim into logs.
 func truncate(data []byte, maxLen int) string {
-	if len(data) <= maxLen {
-		return string(data)
+	s := secretFieldRe.ReplaceAllString(string(data), `$1"<redacted>"`)
+	if len(s) <= maxLen {
+		return s
 	}
-	return string(data[:maxLen]) + "..."
+	return s[:maxLen] + "..."
 }

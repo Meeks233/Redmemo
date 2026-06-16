@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -24,6 +25,19 @@ type httpDoer interface {
 
 const redditAPIBase = "https://oauth.reddit.com"
 
+// isRedditHost reports whether host (from a redirect Location) is a Reddit host
+// the client is allowed to follow. It matches exact apex/subdomains of
+// reddit.com and redd.it only — crucially NOT "oauth.reddit.com.evil.com",
+// which a naive string-prefix check would accept.
+func isRedditHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "reddit.com" || strings.HasSuffix(host, ".reddit.com") ||
+		host == "redd.it" || strings.HasSuffix(host, ".redd.it")
+}
+
 var (
 	ErrNoTokenAvailable = errors.New("no OAuth token available")
 	ErrSuspended        = errors.New("user is suspended")
@@ -33,6 +47,11 @@ var (
 	ErrGated            = errors.New("subreddit is gated")
 	ErrUnauthorized     = errors.New("unauthorized")
 	ErrRateLimited      = errors.New("rate limited")
+	// ErrEmptyResponse marks a non-204 response with a zero-length body. This is
+	// distinct from ErrRateLimited: by this point genuine throttling (429 /
+	// 403+Retry-After) is already handled, so an empty body is an unexpected
+	// upstream condition rather than a rate limit and must not be misreported.
+	ErrEmptyResponse = errors.New("empty response body")
 )
 
 // TokenProvider abstracts the OAuth token source.
@@ -83,15 +102,15 @@ func (c *Client) FetchSubreddit(ctx context.Context, sub, sort, t, after, before
 		limit = 25
 	}
 
-	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&include_over_18=on&limit=%d", sub, sort, limit)
+	path := fmt.Sprintf("/r/%s/%s.json?raw_json=1&include_over_18=on&limit=%d", url.PathEscape(sub), url.PathEscape(sort), limit)
 	if t != "" {
 		path += "&t=" + url.QueryEscape(t)
 	}
 	if after != "" {
-		path += "&after=" + after
+		path += "&after=" + url.QueryEscape(after)
 	}
 	if before != "" {
-		path += "&before=" + before
+		path += "&before=" + url.QueryEscape(before)
 	}
 
 	data, _, err := c.doRequest(ctx, path)
@@ -115,7 +134,7 @@ func (c *Client) FetchPostLimited(ctx context.Context, sub, id, commentSort stri
 	if commentSort == "" {
 		commentSort = "confidence"
 	}
-	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&include_over_18=on&sort=%s", sub, id, commentSort)
+	path := fmt.Sprintf("/r/%s/comments/%s.json?raw_json=1&include_over_18=on&sort=%s", url.PathEscape(sub), url.PathEscape(id), url.QueryEscape(commentSort))
 	if limit > 0 {
 		path += fmt.Sprintf("&limit=%d", limit)
 	}
@@ -153,7 +172,7 @@ func (c *Client) FetchMoreChildren(ctx context.Context, sub, postID string, chil
 
 // FetchSubredditAbout fetches subreddit metadata.
 func (c *Client) FetchSubredditAbout(ctx context.Context, sub string) (Subreddit, error) {
-	path := fmt.Sprintf("/r/%s/about.json?raw_json=1&include_over_18=on", sub)
+	path := fmt.Sprintf("/r/%s/about.json?raw_json=1&include_over_18=on", url.PathEscape(sub))
 
 	data, _, err := c.doRequest(ctx, path)
 	if err != nil {
@@ -166,7 +185,7 @@ func (c *Client) FetchSubredditAbout(ctx context.Context, sub string) (Subreddit
 // FetchUser fetches user profile and listings.
 func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after string) (User, []Post, []Comment, error) {
 	// Fetch user about
-	aboutData, _, err := c.doRequest(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1&include_over_18=on", username))
+	aboutData, _, err := c.doRequest(ctx, fmt.Sprintf("/user/%s/about.json?raw_json=1&include_over_18=on", url.PathEscape(username)))
 	if err != nil {
 		return User{}, nil, nil, err
 	}
@@ -179,12 +198,12 @@ func (c *Client) FetchUser(ctx context.Context, username, listing, sort, after s
 	if listing == "" {
 		listing = "overview"
 	}
-	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1&include_over_18=on", username, listing)
+	listPath := fmt.Sprintf("/user/%s/%s.json?raw_json=1&include_over_18=on", url.PathEscape(username), url.PathEscape(listing))
 	if sort != "" {
-		listPath += "&sort=" + sort
+		listPath += "&sort=" + url.QueryEscape(sort)
 	}
 	if after != "" {
-		listPath += "&after=" + after
+		listPath += "&after=" + url.QueryEscape(after)
 	}
 
 	listData, _, err := c.doRequest(ctx, listPath)
@@ -327,10 +346,19 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 			if depth >= maxRedirects {
 				return nil, resp, fmt.Errorf("too many redirects (>%d) starting at %s", maxRedirects, path)
 			}
-			newPath := location
-			newPath = strings.TrimPrefix(newPath, redditAPIBase)
-			newPath = strings.TrimPrefix(newPath, "https://www.reddit.com")
-			newPath = strings.TrimPrefix(newPath, "https://oauth.reddit.com")
+			// Parse the Location and require it to stay on Reddit. Prefix-trimming
+			// alone is unsafe: a value like "https://oauth.reddit.com.evil.com/x"
+			// passes a naive TrimPrefix and would send the OAuth Bearer token to an
+			// attacker host. Reject any absolute redirect whose host is not a known
+			// Reddit host; relative redirects (no host) are fine.
+			loc, perr := url.Parse(location)
+			if perr != nil {
+				return nil, resp, fmt.Errorf("bad redirect location %q: %w", location, perr)
+			}
+			if loc.Host != "" && !isRedditHost(loc.Host) {
+				return nil, resp, fmt.Errorf("refusing cross-host redirect to %q", location)
+			}
+			newPath := loc.RequestURI()
 			if !strings.Contains(newPath, "raw_json=1") {
 				if strings.Contains(newPath, "?") {
 					newPath += "&raw_json=1"
@@ -353,7 +381,7 @@ func (c *Client) doRequestDepth(ctx context.Context, path string, depth int) ([]
 	}
 
 	if len(body) == 0 && resp.StatusCode != 204 {
-		return nil, resp, ErrRateLimited
+		return nil, resp, ErrEmptyResponse
 	}
 
 	if err := checkAPIError(body); err != nil {

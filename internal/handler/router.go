@@ -13,7 +13,6 @@ import (
 	"github.com/redmemo/redmemo/internal/media"
 	"github.com/redmemo/redmemo/internal/oauth"
 	"github.com/redmemo/redmemo/internal/prefetch"
-	"github.com/redmemo/redmemo/internal/ratelimit"
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
@@ -21,7 +20,6 @@ import (
 )
 
 type Handler struct {
-	ratelimit      *ratelimit.Manager
 	hr             hrManager
 	cache          htmlCache
 	renderer       *render.Engine
@@ -71,7 +69,6 @@ func (h *Handler) WithAuth(a *AuthManager) *Handler {
 }
 
 func New(
-	rl *ratelimit.Manager,
 	hr *hrlimit.Manager,
 	c *cache.Cache,
 	r *render.Engine,
@@ -96,7 +93,6 @@ func New(
 		defaults = make(map[string]string)
 	}
 	h := &Handler{
-		ratelimit:      rl,
 		cache:          c,
 		renderer:       r,
 		redditCli:      rc,

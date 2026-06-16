@@ -813,7 +813,10 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 
 	updates := make(map[string]string)
 	for _, key := range settingsKeys {

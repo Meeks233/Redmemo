@@ -230,15 +230,17 @@ func TestDoRequest_RateLimited403WithRetryAfter(t *testing.T) {
 	}
 }
 
-func TestDoRequest_EmptyBodyTreatedAsRateLimited(t *testing.T) {
+func TestDoRequest_EmptyBodyTreatedAsEmptyResponse(t *testing.T) {
 	tokens := &mockTokenProvider{token: defaultToken()}
 	c := newTestClient(t, tokens, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK) // 200 but no body
 	}))
 
+	// An empty non-204 body is no longer conflated with rate limiting; genuine
+	// throttling (429 / 403+Retry-After) is handled before this branch.
 	_, _, err := c.doRequest(context.Background(), "/r/test/hot.json")
-	if err != ErrRateLimited {
-		t.Fatalf("err = %v, want ErrRateLimited for empty 200 body", err)
+	if err != ErrEmptyResponse {
+		t.Fatalf("err = %v, want ErrEmptyResponse for empty 200 body", err)
 	}
 }
 

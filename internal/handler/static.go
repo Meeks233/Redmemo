@@ -299,7 +299,14 @@ func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstr
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	// HLS manifests are small text playlists; cap the read so a misbehaving
+	// upstream can't make us buffer an unbounded body, and surface a read error
+	// instead of silently serving a truncated manifest under a wrong Content-Length.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
 	s := strings.ReplaceAll(string(body), "https://v.redd.it/", "/vid/")
 
 	ct := resp.Header.Get("Content-Type")

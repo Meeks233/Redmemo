@@ -61,6 +61,10 @@ type TokenHolder struct {
 const (
 	refreshCooldown     = 10 * time.Second
 	maxConsecutiveFails = 5
+	// maxRefreshCooldown caps the exponential backoff so a long outage can't
+	// stretch the effective cooldown beyond a few minutes — we still want to
+	// probe for recovery on a bounded cadence.
+	maxRefreshCooldown = 5 * time.Minute
 )
 
 func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache, browserUA *useragent.Pool) *TokenHolder {
@@ -232,6 +236,29 @@ func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, 
 	log.Printf("oauth: installed new %s token (expires in %ds)", backend, result.ExpiresIn)
 }
 
+// effectiveCooldown returns the minimum spacing between refresh attempts given
+// the current consecutive-failure count. Below the threshold it is the flat
+// refreshCooldown; at and above it the cooldown doubles per extra failure
+// (refreshCooldown * 2^(fails-maxConsecutiveFails+1)), capped at
+// maxRefreshCooldown. A successful install resets consecutiveFail to 0, so the
+// backoff collapses back to the flat cooldown automatically.
+func effectiveCooldown(fails int) time.Duration {
+	if fails < maxConsecutiveFails {
+		return refreshCooldown
+	}
+	shift := uint(fails - maxConsecutiveFails + 1)
+	// Cap the shift before the bit-shift can overflow the duration; any shift
+	// past the cap already exceeds maxRefreshCooldown anyway.
+	if shift > 16 {
+		return maxRefreshCooldown
+	}
+	cd := refreshCooldown << shift
+	if cd > maxRefreshCooldown {
+		return maxRefreshCooldown
+	}
+	return cd
+}
+
 func (p *TokenHolder) refreshLoop(ctx context.Context) {
 	defer p.wg.Done()
 	for {
@@ -285,11 +312,19 @@ func (p *TokenHolder) forceRefresh(reason string) {
 	}
 	defer p.refreshMu.Unlock()
 
-	if time.Since(p.lastRefreshAt) < refreshCooldown {
+	// lastRefreshAt and consecutiveFail are written under p.mu (installToken /
+	// the failure path below), so read them under the same lock — reading them
+	// under refreshMu alone is a data race. The effective cooldown escalates
+	// once the failure threshold is crossed (see effectiveCooldown).
+	p.mu.RLock()
+	lastRefresh := p.lastRefreshAt
+	fails := p.consecutiveFail
+	p.mu.RUnlock()
+	if time.Since(lastRefresh) < effectiveCooldown(fails) {
 		return
 	}
 
-	log.Printf("oauth: force refresh (%s), backend=%s, consecutive_fail=%d", reason, p.backend, p.consecutiveFail)
+	log.Printf("oauth: force refresh (%s), backend=%s, consecutive_fail=%d", reason, p.backend, fails)
 
 	backend := p.backend
 
@@ -309,10 +344,21 @@ func (p *TokenHolder) forceRefresh(reason string) {
 
 	result, err := p.client.Authenticate(tcfg)
 	if err != nil {
+		// consecutiveFail is reset under p.mu in installToken, so mutate it under
+		// the same lock to keep the backoff gate's read (above) race-free.
+		p.mu.Lock()
 		p.consecutiveFail++
-		log.Printf("oauth: refresh failed (%s): %v (consecutive=%d)", backend, err, p.consecutiveFail)
+		fails = p.consecutiveFail
+		p.mu.Unlock()
+		log.Printf("oauth: refresh failed (%s): %v (consecutive=%d)", backend, err, fails)
 		// generic_web auto-switch is intentionally removed: mobile_spoof is the
 		// only active backend, so a failed refresh just retries mobile_spoof.
+		// Instead of switching, we slow down: once the failure threshold is
+		// crossed the effective cooldown grows exponentially (capped). Log the
+		// crossing exactly once so it stands apart from the per-failure line.
+		if fails == maxConsecutiveFails {
+			log.Printf("oauth: refresh backoff engaged after %d consecutive failures, cooldown now escalating (max %s)", fails, maxRefreshCooldown)
+		}
 		return
 	}
 
@@ -529,7 +575,8 @@ func (p *TokenHolder) TokenUsable() bool {
 	return p.Token() != nil
 }
 
-// RemainingBudget implements ratelimit.BudgetSource.
+// RemainingBudget reports the active token's remaining rate-limit budget for the
+// current window. Consumed by the handler's TokenSource interface (deps.go).
 func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

@@ -934,6 +934,12 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 		resp.Body.Close()
 		written += n
 		offset += n
+		// Abort a runaway upstream before it fills the disk. The loop otherwise
+		// trusts the CDN-declared total for termination, so a misbehaving response
+		// could stream without bound.
+		if written > maxStreamBytes {
+			return status, hdr, written, fmt.Errorf("upstream body exceeds %d bytes for %s", int64(maxStreamBytes), url)
+		}
 		if cerr != nil {
 			// Mid-body stream error. If we have a known total and haven't
 			// reached it yet, re-issue the Range from the new offset. n bytes
@@ -973,6 +979,13 @@ const (
 	streamReadRetries    = 2
 	streamReadRetryDelay = 250 * time.Millisecond
 )
+
+// maxStreamBytes is a hard per-request ceiling on bytes streamRangedTo will
+// write. Reddit media (videos, gifs, images) is far below this; the cap exists
+// only to abort a runaway or misbehaving upstream response before it can fill
+// the cache volume, since the loop's termination otherwise trusts the CDN's
+// Content-Range total.
+const maxStreamBytes = 2 << 30 // 2 GiB
 
 // reverseProxy streams targetURL straight through to the client, fetching it
 // from the CDN in flow-control-safe chunks (see streamRangedTo) while presenting
@@ -1056,9 +1069,18 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 	if live != nil {
 		firstDst = newLiveStreamWriter(r.Context(), w, live)
 	}
+	// committedLen is true once we've promised the client a fixed Content-Length.
+	// If a stream then truncates, a short-but-well-formed body would reach the
+	// browser as a silently corrupt file; aborting the connection instead makes
+	// the client see a transport error and retry.
+	committedLen := total >= 0
 	n, cerr := io.Copy(firstDst, first.Body)
 	first.Body.Close()
 	if cerr != nil {
+		if committedLen {
+			log.Printf("proxy: first-chunk truncated offset=%d url=%s err=%v; aborting", start, targetURL, cerr)
+			panic(http.ErrAbortHandler)
+		}
 		return
 	}
 	offset := start + n
@@ -1068,10 +1090,13 @@ func (p *Proxy) reverseProxy(w http.ResponseWriter, r *http.Request, targetURL s
 		(total >= 0 && offset >= total) || (total < 0 && n < mediaChunkSize) {
 		return
 	}
-	// Response headers are already committed; on failure the client gets a
-	// truncated body. Log so the truncation isn't silent — there's no clean
-	// abort path left.
 	if status, _, _, err := p.streamRangedTo(r.Context(), targetURL, offset, conditional, w, live); err != nil || (status != 0 && status != http.StatusOK && status != http.StatusPartialContent) {
 		log.Printf("proxy: ranged continuation failed offset=%d status=%d url=%s err=%v", offset, status, targetURL, err)
+		// Headers (and a fixed Content-Length) are already committed, so the body
+		// is now short of what we promised. Abort the connection rather than serve
+		// a truncated-but-clean file the browser renders as corrupt.
+		if committedLen {
+			panic(http.ErrAbortHandler)
+		}
 	}
 }

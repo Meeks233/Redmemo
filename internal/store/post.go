@@ -375,8 +375,17 @@ func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, low float64, hasHigh 
 	return scanPostsWithKey(rows)
 }
 
+// escapeLike escapes the LIKE/ILIKE wildcard metacharacters (\ % _) so a user's
+// free-text search term is matched literally rather than acting as wildcards.
+// Pair with `ESCAPE '\'` in the SQL.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
 func (s *PostStore) Search(query string, limit int, excludeNSFW bool) ([]*StoredPost, error) {
-	where := "title ILIKE '%' || $1 || '%'"
+	where := `title ILIKE '%' || $1 || '%' ESCAPE '\'`
+	query = escapeLike(query)
 	if excludeNSFW {
 		where += nsfwExcludeSQL
 	}
@@ -472,8 +481,8 @@ func archiveFilterClauses(opts ArchiveSearchOpts, startArg int) (string, []any, 
 	argN := startArg
 
 	if q := strings.TrimSpace(opts.Query); q != "" {
-		fmt.Fprintf(&where, " AND title ILIKE '%%' || $%d || '%%'", argN)
-		args = append(args, q)
+		fmt.Fprintf(&where, ` AND title ILIKE '%%' || $%d || '%%' ESCAPE '\'`, argN)
+		args = append(args, escapeLike(q))
 		argN++
 	}
 	if opts.After != nil {

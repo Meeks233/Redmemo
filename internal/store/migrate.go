@@ -658,6 +658,10 @@ var migrations = []string{
 	 ON CONFLICT (name) DO NOTHING;`,
 }
 
+// migrationAdvisoryLockKey is an arbitrary constant identifying the migration
+// lock. Any value works as long as it is stable across RedMemo instances.
+const migrationAdvisoryLockKey = 0x7265646d // "redm"
+
 func RunMigrations(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
 		version     INTEGER NOT NULL,
@@ -666,6 +670,18 @@ func RunMigrations(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("create schema_version table: %w", err)
 	}
+
+	// Serialize migration runners across instances/replicas. Without this, two
+	// processes starting against the same database read the same MAX(version)
+	// and both try to apply the same migrations; the non-idempotent statements
+	// (bare CREATE TABLE / ADD COLUMN / CREATE INDEX) make the loser's tx fail
+	// and that instance crashes on startup. A session-level advisory lock makes
+	// the second runner wait, then observe the up-to-date version. The lock auto-
+	// releases when the session ends, so a crash mid-migration cannot wedge it.
+	if _, err := db.Exec(`SELECT pg_advisory_lock($1)`, migrationAdvisoryLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer db.Exec(`SELECT pg_advisory_unlock($1)`, migrationAdvisoryLockKey)
 
 	var current int
 	row := db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version`)

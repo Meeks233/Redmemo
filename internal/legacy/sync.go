@@ -42,18 +42,20 @@ func SyncSettings(cfg config.LegacyConfig) (*SyncResult, error) {
 			continue
 		}
 
-		applied := 0
+		total := len(result.Settings)
 		for name, value := range result.Settings {
 			if config.IsSettingExplicitlySet(name) {
 				explicit := config.GetExplicitSetting(name)
 				log.Printf("legacy: skipping %s=%q (env override: %q)", name, value, explicit)
-				continue
 			}
-			applied++
 		}
+		// Actually drop the env-overridden keys from the returned map so it matches
+		// the log above and honours the documented REDMEMO_* > REDLIB_* precedence
+		// (otherwise the caller transiently writes the legacy value into the DB).
+		result.Settings = FilterByEnv(result.Settings)
 
 		log.Printf("legacy: synced %d settings from %s (%d applied, %d skipped by env override)",
-			len(result.Settings), addr, applied, len(result.Settings)-applied)
+			total, addr, len(result.Settings), total-len(result.Settings))
 		return result, nil
 	}
 
@@ -92,7 +94,10 @@ func tryFetchSettings(addr string) (*SyncResult, error) {
 		return nil, fmt.Errorf("%s returned HTTP %d", settingsURL, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Cap the body: the redlib /settings page is a few KB of HTML. A broken or
+	// misbehaving upstream returning a huge body would otherwise be fully buffered
+	// and then scanned by several regexes.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read body from %s: %w", settingsURL, err)
 	}

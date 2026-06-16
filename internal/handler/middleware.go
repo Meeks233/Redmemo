@@ -69,6 +69,14 @@ func recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
+				// http.ErrAbortHandler is a deliberate connection abort (e.g. a
+				// media stream that truncated after its Content-Length was already
+				// committed). Re-panic so net/http's own handler aborts the
+				// connection cleanly instead of attempting a 500 on a committed
+				// response.
+				if err == http.ErrAbortHandler {
+					panic(err)
+				}
 				log.Printf("panic: %v\n%s", err, debug.Stack())
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}

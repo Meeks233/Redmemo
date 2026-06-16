@@ -74,7 +74,13 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 	// upstream_removed=true we skip the upstream call entirely — there is
 	// nothing useful left to fetch and re-asking would just burn quota.
 	degrade, reason := h.shouldDegrade(r.Context())
-	storedPost, _ := h.postStore.Get(urlPath)
+	storedPost, err := h.postStore.Get(urlPath)
+	if err != nil {
+		// Get returns (nil, nil) on a genuine miss; a non-nil error is a transient
+		// DB fault. Log it so a DB hiccup that silently bypasses the archive
+		// fallback (storedPost stays nil) is observable rather than invisible.
+		log.Printf("post: load archived post %q failed: %v", urlPath, err)
+	}
 	if !degrade && (storedPost == nil || !storedPost.UpstreamRemoved) {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t, cacheKey) {
 			return

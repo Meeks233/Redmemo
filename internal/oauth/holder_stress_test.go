@@ -270,6 +270,58 @@ func TestForceRefresh_DoesNotSwitchBackend(t *testing.T) {
 	}
 }
 
+// effectiveCooldown stays flat below the failure threshold, then doubles per
+// extra failure, capped at maxRefreshCooldown.
+func TestEffectiveCooldown_Escalates(t *testing.T) {
+	if got := effectiveCooldown(0); got != refreshCooldown {
+		t.Errorf("fails=0: cooldown = %v, want %v", got, refreshCooldown)
+	}
+	if got := effectiveCooldown(maxConsecutiveFails - 1); got != refreshCooldown {
+		t.Errorf("just below threshold: cooldown = %v, want %v", got, refreshCooldown)
+	}
+	// At the threshold the cooldown is the first doubling (2x).
+	if got := effectiveCooldown(maxConsecutiveFails); got != refreshCooldown*2 {
+		t.Errorf("at threshold: cooldown = %v, want %v", got, refreshCooldown*2)
+	}
+	// One past the threshold quadruples.
+	if got := effectiveCooldown(maxConsecutiveFails + 1); got != refreshCooldown*4 {
+		t.Errorf("threshold+1: cooldown = %v, want %v", got, refreshCooldown*4)
+	}
+	// Backoff is bounded.
+	if got := effectiveCooldown(maxConsecutiveFails + 100); got != maxRefreshCooldown {
+		t.Errorf("far past threshold: cooldown = %v, want cap %v", got, maxRefreshCooldown)
+	}
+	if got := effectiveCooldown(maxConsecutiveFails + 1000000); got != maxRefreshCooldown {
+		t.Errorf("overflow guard: cooldown = %v, want cap %v", got, maxRefreshCooldown)
+	}
+}
+
+// Once the failure threshold is crossed, the escalated cooldown blocks a
+// refresh whose elapsed time would have cleared the flat refreshCooldown.
+func TestForceRefresh_BackoffBlocksWithinEscalatedCooldown(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	p := newTestHolder(&ManagedToken{StoredToken: store.StoredToken{ID: 1}, RateRemaining: 50})
+	p.client = newClientToServer(t, srv)
+	p.backend = "mobile_spoof"
+	// Past the threshold: effectiveCooldown is at least refreshCooldown*2.
+	p.consecutiveFail = maxConsecutiveFails
+	// Last refresh was longer ago than the flat cooldown but well inside the
+	// escalated one, so the attempt must still be suppressed.
+	p.lastRefreshAt = time.Now().Add(-(refreshCooldown + time.Second))
+
+	p.forceRefresh("test")
+
+	if h := atomic.LoadInt32(&hits); h != 0 {
+		t.Errorf("auth endpoint hit %d times despite escalated backoff cooldown", h)
+	}
+}
+
 func TestForceRefresh_RespectsCooldown(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

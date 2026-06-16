@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/lib/pq"
@@ -508,6 +509,13 @@ func (s *MediaIndexStore) RecordAudioFailure(rawURL string, abandonThreshold int
 		key, abandonThreshold,
 	).Scan(&state)
 	if err != nil {
+		// The content/alias row was concurrently deleted (e.g. Delete(rawURL) ran
+		// while the mux pipeline finished). There is nothing to record; mirror the
+		// silent no-op semantics of the sibling audio methods rather than surfacing
+		// a spurious hard error. "failed" matches the caller's own fallback verdict.
+		if errors.Is(err, sql.ErrNoRows) {
+			return "failed", nil
+		}
 		return "", fmt.Errorf("record audio failure: %w", err)
 	}
 	return state, nil

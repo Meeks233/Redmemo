@@ -42,6 +42,15 @@ const (
 	maxTokenTTL     = 60 * time.Minute
 	maxAttempts     = 3
 	lockoutWindow   = totp.Period * time.Second
+	// globalMaxAttempts is the instance-wide failure ceiling that backstops the
+	// per-IP lockout: when RedMemo sits behind a proxy with no TrustedProxyCIDRs,
+	// every client collapses to one IP and the per-IP bucket alone is useless
+	// (one attacker locks everyone, or — flipped — the shared bucket dilutes
+	// protection). The global counter trips independently of source IP. It is set
+	// above maxAttempts so a single legitimate fat-fingered round (up to
+	// maxAttempts misses) never trips it on a correctly-configured instance; only
+	// a sustained burst does. Self-clears via the same lockoutWindow semantics.
+	globalMaxAttempts = 10
 	// triesRetention bounds how long an idle per-IP attempt record is kept. The
 	// sweep in registerFailure drops entries past this with no active lockout, so
 	// a flood of one-off failures from many distinct source IPs cannot grow
@@ -62,6 +71,15 @@ type AuthManager struct {
 	tokens    map[string]time.Time // token -> expiry
 	tries     map[string]*attempt  // ip   -> attempt state
 	usedCodes map[string]time.Time // code  -> expiry; single-use enforcement
+
+	// Global backstop (guarded by mu, same as the per-IP state). globalCount is a
+	// rolling failed-attempt tally over the current window; globalUntil is set
+	// when the ceiling trips and locks ALL source IPs until it elapses. Self-
+	// clearing: a failure that lands after globalWindowStart+lockoutWindow resets
+	// the tally, so there is no permanent lockout.
+	globalCount       int
+	globalWindowStart time.Time
+	globalUntil       time.Time
 }
 
 type attempt struct {
@@ -200,6 +218,21 @@ func (a *AuthManager) registerFailure(ip string) (locked bool, remaining int) {
 			delete(a.tries, k)
 		}
 	}
+	// Global backstop: a failure increments BOTH the per-IP and the instance-wide
+	// tally; the gate locks if EITHER trips. The global window is rolling and
+	// self-clearing — once lockoutWindow has elapsed since it opened, the next
+	// failure starts a fresh window rather than accumulating forever.
+	if a.globalWindowStart.IsZero() || now.Sub(a.globalWindowStart) > lockoutWindow {
+		a.globalWindowStart = now
+		a.globalCount = 0
+	}
+	a.globalCount++
+	if a.globalCount >= globalMaxAttempts {
+		a.globalUntil = now.Add(lockoutWindow)
+		a.globalCount = 0
+		return true, 0
+	}
+
 	st := a.tries[ip]
 	if st == nil {
 		st = &attempt{}
@@ -219,6 +252,12 @@ func (a *AuthManager) registerFailure(ip string) (locked bool, remaining int) {
 func (a *AuthManager) locked(ip string) (bool, time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Global backstop wins regardless of source IP — under a shared-IP misconfig
+	// this is the only lockout that still discriminates a brute-force burst. The
+	// window self-clears as time.Until goes non-positive.
+	if d := time.Until(a.globalUntil); d > 0 {
+		return true, d
+	}
 	st := a.tries[ip]
 	if st == nil {
 		return false, 0
@@ -385,7 +424,10 @@ func (h *Handler) serveAuthGate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleAuthPost(w http.ResponseWriter, r *http.Request, ip string) {
-	r.ParseForm()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 	stage := r.FormValue("stage")
 	switch stage {
 	case "safe_env":

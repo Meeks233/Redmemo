@@ -81,6 +81,14 @@ func remoteIP(r *http.Request) string {
 func (h *Handler) clientIP(r *http.Request) string {
 	src := remoteIP(r)
 	if !h.isTrustedProxy(src) {
+		// Misconfig warning (one-shot, no false positives): a forwarded header is
+		// present yet no proxy is trusted, so every request collapses to the proxy
+		// IP and shares one lockout bucket (DoS + diluted brute-force protection).
+		// Guarded so the warning never fires for direct deployments that emit no
+		// such header, and logs at most once regardless of request volume.
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" {
+			warnUntrustedForwardedHeader()
+		}
 		return src
 	}
 	xff := r.Header.Get("X-Forwarded-For")
@@ -95,6 +103,16 @@ func (h *Handler) clientIP(r *http.Request) string {
 		return src
 	}
 	return xff
+}
+
+// untrustedForwardedWarn fires the proxy-misconfig warning at most once for the
+// process lifetime, so a high-traffic instance can't flood the log.
+var untrustedForwardedWarn sync.Once
+
+func warnUntrustedForwardedHeader() {
+	untrustedForwardedWarn.Do(func() {
+		log.Print("auth: received X-Forwarded-For but no TrustedProxyCIDRs configured; per-IP lockout keyed on proxy IP — set Server.TrustedProxyCIDRs")
+	})
 }
 
 func (h *Handler) isTrustedProxy(ip string) bool {

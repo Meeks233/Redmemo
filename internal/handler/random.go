@@ -362,32 +362,41 @@ func (h *Handler) randomWalk(ctx context.Context, parsed searchquery.Parsed, opt
 	// filters still walk in parallel. Single-instance scope is sufficient: the
 	// self-hosted deployment runs one redmemo process.
 	unlock := lockRandomWalk(stateKey)
-	defer unlock()
 
 	origin, cursor := h.readWalkState(ctx, stateKey)
 
 	posts, newCursor, roundDone, err := h.postStore.RandomWalk(opts, mediaOnly, origin, cursor, n)
 	if err != nil {
+		unlock()
 		return nil, false, err
 	}
 
 	if roundDone {
-		// Wrap-around: a full no-replacement sweep just finished. Redraw the whole
-		// shuffle_key permutation (UPDATE posts SET shuffle_key = random()) so the
-		// next round is a fresh permutation rather than a replay, then open it at a
-		// golden-ratio-rotated origin so even back-to-back reshuffles enter at a
-		// maximally-spread point. The reshuffle is the design's only O(N) write and
-		// fires solely here, at sweep end — never per page. A short page at the wrap
-		// boundary is fine: the next request serves a full fresh round.
-		if err := h.postStore.Reshuffle(); err != nil {
-			return nil, false, err
-		}
+		// Wrap-around: a full no-replacement sweep just finished. Rotate the origin
+		// by the golden-ratio step so the next round enters the permutation at a
+		// maximally-spread point, and SIGNAL a background reshuffle to redraw the
+		// whole shuffle_key permutation.
+		//
+		// The reshuffle is the design's only O(N) write — a multi-second blocking
+		// UPDATE on a large archive. It must NOT run on this public request path
+		// nor under the shard mutex: a narrow filter (small q= subset) completes a
+		// sweep in a few requests and would otherwise trigger repeated full-table
+		// writes. signalReshuffle hands the work to a single throttled background
+		// worker (see random_reshuffle.go) and never blocks. The next round
+		// meanwhile replays the existing permutation from the rotated origin —
+		// still a valid, well-spread sweep — until the worker redraws shuffle_key.
 		origin = frac(origin + store.GoldenRatio)
 		cursor = origin
 	} else {
 		cursor = newCursor
 	}
 	h.writeWalkState(ctx, stateKey, origin, cursor)
+	// Release the shard mutex BEFORE signalling so the (non-blocking) signal — and
+	// any worker work it wakes — never happens while holding the lock.
+	unlock()
+	if roundDone {
+		h.signalReshuffle()
+	}
 	return posts, roundDone, nil
 }
 
