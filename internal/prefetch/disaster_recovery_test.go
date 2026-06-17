@@ -951,6 +951,146 @@ func TestResumePendingWave_EventLogFormat(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Orphaned-layer reclaim: depth changed away from a layer (e.g. → l3-only)
+// ---------------------------------------------------------------------------
+
+// TestDepthCoversLayer pins which layers each depth runs — the predicate the
+// reclaim path uses to decide whether a leftover wave should be revived or
+// retired.
+func TestDepthCoversLayer(t *testing.T) {
+	cases := []struct {
+		layer, depth string
+		want         bool
+	}{
+		{"L2", "l2", true}, {"L2", "l2+l3", true}, {"L2", "l3", false}, {"L2", "none", false},
+		{"L3", "l3", true}, {"L3", "l2+l3", true}, {"L3", "l2", false}, {"L3", "none", false},
+		// Unrecognised layer defaults to covered (never silently drop a wave).
+		{"L1", "none", true}, {"L4", "l2", true},
+	}
+	for _, c := range cases {
+		if got := depthCoversLayer(c.layer, c.depth); got != c.want {
+			t.Errorf("depthCoversLayer(%q,%q)=%v, want %v", c.layer, c.depth, got, c.want)
+		}
+	}
+}
+
+// TestDriveReclaimedCycle_OrphanedL2NotRecovered is the regression test for the
+// "/debug still shows L2 recovery after switching a sub to L3-only" bug. With
+// depth=l3, a set of leftover pending L2 waves must be retired without ever
+// firing or flipping the reclaim status to "recovering".
+func TestDriveReclaimedCycle_OrphanedL2NotRecovered(t *testing.T) {
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"prefetch_subs":          "sub:news",
+			"prefetch_default_depth": "l3", // L2 switched off
+		}},
+		pool:             &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
+		Events:           NewEventLog(200),
+		queue:            make(chan *workItem, 4),
+		dispatchCooldown: func() time.Duration { return 2 * time.Millisecond },
+	}
+
+	// Three past-due L2 waves left over from when the sub ran l2+l3.
+	waves := make([]store.PrefetchRun, 3)
+	for i := range waves {
+		waves[i] = makeTestRun(int64(i+1), "L2", "day", "news", int32(i+1),
+			time.Now().Add(-time.Hour), 5)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		s.driveReclaimedCycle(ctx, "L2", "day", "news", waves)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("driveReclaimedCycle did not return for an orphaned L2 layer")
+	}
+
+	// /debug must not show L2 recovery.
+	if ps := s.Status(); ps.ReclaimL2Phase != "" || ps.ReclaimL2Info != "" {
+		t.Errorf("orphaned L2 reclaim left status set: phase=%q info=%q (should be empty — no recovery)",
+			ps.ReclaimL2Phase, ps.ReclaimL2Info)
+	}
+
+	var retired, drove, fired bool
+	for _, e := range s.Events.Snapshot() {
+		if contains(e.Message, "orphaned wave(s) retired, not recovered") {
+			retired = true
+		}
+		if contains(e.Message, "driving 3 wave(s) sequentially") {
+			drove = true
+		}
+		if contains(e.Message, "firing (chunk=") {
+			fired = true
+		}
+	}
+	if !retired {
+		t.Error("expected an 'orphaned wave(s) retired, not recovered' event")
+	}
+	if drove {
+		t.Error("orphaned L2 waves must not be driven (saw 'driving … sequentially')")
+	}
+	if fired {
+		t.Error("orphaned L2 waves must not fire (saw 'firing (chunk=')")
+	}
+}
+
+// TestDriveReclaimedCycle_OrphanedL3NotRecovered is the symmetric case: a sub
+// flipped to depth=l2 must retire leftover L3 waves without recovering them.
+func TestDriveReclaimedCycle_OrphanedL3NotRecovered(t *testing.T) {
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"prefetch_subs":          "sub:news",
+			"prefetch_default_depth": "l2", // L3 switched off
+		}},
+		pool:             &mockPool{resetAt: time.Now().Add(time.Hour), capacity: 600, remaining: 100},
+		Events:           NewEventLog(200),
+		queue:            make(chan *workItem, 4),
+		dispatchCooldown: func() time.Duration { return 2 * time.Millisecond },
+	}
+
+	waves := []store.PrefetchRun{
+		makeTestRun(1, "L3", "day", "news", 1, time.Now().Add(-time.Hour), 3),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go s.dispatchLoop(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		s.driveReclaimedCycle(ctx, "L3", "day", "news", waves)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("driveReclaimedCycle did not return for an orphaned L3 layer")
+	}
+
+	if ps := s.Status(); ps.ReclaimL3Phase != "" || ps.ReclaimL3Info != "" {
+		t.Errorf("orphaned L3 reclaim left status set: phase=%q info=%q (should be empty)",
+			ps.ReclaimL3Phase, ps.ReclaimL3Info)
+	}
+	found := false
+	for _, e := range s.Events.Snapshot() {
+		if contains(e.Message, "orphaned wave(s) retired, not recovered") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected an 'orphaned wave(s) retired, not recovered' event for L3")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

@@ -211,9 +211,9 @@ templ errorContent(d ErrorPageData) {
 								</td>
 							</tr>
 							<tr>
-								<td class="ps-label">bind L3</td>
+								<td class="ps-label">enabled</td>
 								<td>
-									if d.PrefetchStatus.L2BindMode {
+									if d.PrefetchStatus.L2Enabled {
 										<span class="ps-on">on</span>
 									} else {
 										<span class="ps-off">off</span>
@@ -279,15 +279,57 @@ templ errorContent(d ErrorPageData) {
 								</td>
 							</tr>
 							<tr>
-								<td class="ps-label">bind mode</td>
+								<td class="ps-label">enabled</td>
 								<td>
-									if d.PrefetchStatus.L3BindMode {
+									if d.PrefetchStatus.L3Enabled {
 										<span class="ps-on">on</span>
 									} else {
 										<span class="ps-off">off</span>
 									}
 								</td>
 							</tr>
+							if len(d.PrefetchStatus.L3Cycles) > 0 {
+								for _, c := range d.PrefetchStatus.L3Cycles {
+									<tr>
+										<td class="ps-label">{ fmt.Sprintf("cycle %s/r/%s", c.TF, c.Sub) }</td>
+										<td>
+											{ fmt.Sprintf("wave %d/%d", c.CurrentWave, c.WaveCount) }
+											if c.PostCount != 0 {
+												{ fmt.Sprintf(" · %d posts", c.PostCount) }
+											}
+											if c.Period != "" {
+												{ " · period " + c.Period }
+											}
+											if c.StartedAgo != "" {
+												{ " · started " + c.StartedAgo }
+											}
+											if c.StartedAtAbs != "" {
+												<br/>
+												<span class="ps-time-abs">started { c.StartedAtAbs }</span>
+											}
+											<br/>
+											<span class="ps-cursor">offsets:
+												for i, off := range c.WaveOffsets {
+													if i == c.CurrentWave-1 {
+														<b>{ off }</b>
+													} else {
+														{ off }
+													}
+													if i < len(c.WaveOffsets)-1 {
+														{ " " }
+													}
+												}
+											</span>
+											<br/>
+											<span class="ps-cursor">intervals: { strings.Join(c.WaveIntervals, " / ") }</span>
+											if c.CycleID != "" {
+												<br/>
+												<span class="ps-cursor">cycle_id <code>{ c.CycleID }</code></span>
+											}
+										</td>
+									</tr>
+								}
+							}
 							if d.PrefetchStatus.L3LastAt != "" {
 								<tr>
 									<td class="ps-label">last fetch</td>

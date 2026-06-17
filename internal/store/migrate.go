@@ -612,10 +612,13 @@ var migrations = []string{
 	//                  do not currently emit)
 	//   post_id      — set on L2 (one wave fans across many posts: NULL) and
 	//                  on L3 (one row per comment fetch)
-	//   cycle_id     — groups L2 sub-interval waves with their parent L1 fetch;
-	//                  '<bucket>:<sub>:<unix_ts>' on the L1 row and copied to
-	//                  every L2 wave it scheduled
-	//   sub_interval — 1..5 for L2 sub-interval waves; NULL for L1/L3
+	//   cycle_id     — groups sub-interval waves with their parent cycle. L1/L2
+	//                  share the L1 fetch's id '<bucket>:<sub>:<unix_ts>' (L2 is
+	//                  bound to its parent listing snapshot). L3 is decoupled: it
+	//                  mints its OWN lineage 'L3:<bucket>:<sub>:<unix_ts>' so its
+	//                  freeze/supersede logic never collides with L1/L2 — comments
+	//                  are the scarce layer and stand on their own.
+	//   sub_interval — 1..5 for L2/L3 sub-interval waves; NULL for L1
 	//   scheduled_at — wall-clock time the run is supposed to start
 	//   started_at / finished_at — actual execution stamps
 	//   status       — pending|running|ok|fail|skipped

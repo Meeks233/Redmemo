@@ -588,7 +588,7 @@ type PrefetchStatusView struct {
 	L2Phase        string
 	L2Sub          string
 	L2Pending      int
-	L2BindMode     bool
+	L2Enabled      bool
 	L2Cycles       []PrefetchL2CycleView
 	L5Phase        string
 	L5Current      string
@@ -598,8 +598,9 @@ type PrefetchStatusView struct {
 	L3LastAt       string
 	L3LastAtAbs    string
 	L3Count        int
-	L3BindMode     bool
+	L3Enabled      bool
 	L3Recent       []PrefetchL3BindView
+	L3Cycles       []PrefetchL2CycleView
 	L4Phase        string
 	L4Current      string
 	L4QueueLen     int

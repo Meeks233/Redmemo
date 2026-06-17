@@ -20,7 +20,7 @@ func TestSplitNonUniform_SumAndFloor(t *testing.T) {
 		{100, 5},
 	}
 	for _, c := range cases {
-		got := splitNonUniform(c.postCount, c.waves)
+		got := splitNonUniform(c.postCount, c.waves, l2WaveCap)
 		if len(got) != c.waves {
 			t.Errorf("splitNonUniform(%d,%d): len=%d want %d", c.postCount, c.waves, len(got), c.waves)
 			continue
@@ -49,7 +49,7 @@ func TestSplitNonUniform_DistributionIsNonUniform(t *testing.T) {
 	const trials = 200
 	uniformRuns := 0
 	for i := 0; i < trials; i++ {
-		bins := splitNonUniform(50, 5)
+		bins := splitNonUniform(50, 5, l2WaveCap)
 		first := bins[0]
 		same := true
 		for _, v := range bins[1:] {
@@ -159,6 +159,88 @@ func TestPlanWaves_ChunksSumToPostCount(t *testing.T) {
 		}
 		if sum != postCount {
 			t.Errorf("planWaves(postCount=%d): chunks sum to %d, want %d (chunks=%v)", postCount, sum, postCount, chunks)
+		}
+	}
+}
+
+// TestSplitNonUniform_RespectsCap pins the per-wave ceiling: no bin may exceed
+// the supplied cap regardless of postCount, and when postCount overflows
+// waves*cap the bins saturate (sum below postCount is intentional — the L3
+// overflow is fetched in a later cycle, not bursted now).
+func TestSplitNonUniform_RespectsCap(t *testing.T) {
+	const waves = 5
+	for _, postCount := range []int{1, 5, 11, 25, 50, 76, 100, 500} {
+		for trial := 0; trial < 50; trial++ {
+			bins := splitNonUniform(postCount, waves, l3WaveCap)
+			sum := 0
+			for i, v := range bins {
+				if v < 0 || v > l3WaveCap {
+					t.Fatalf("splitNonUniform(%d,%d,cap=%d): bin %d = %d out of [0,%d] (bins=%v)",
+						postCount, waves, l3WaveCap, i, v, l3WaveCap, bins)
+				}
+				sum += v
+			}
+			// Never fetch more than the cumulative cap this cycle.
+			if max := waves * l3WaveCap; sum > max {
+				t.Fatalf("splitNonUniform(%d,%d,cap=%d): sum %d exceeds waves*cap %d (bins=%v)",
+					postCount, waves, l3WaveCap, sum, max, bins)
+			}
+			// Small workloads must still be fully covered.
+			if postCount <= waves*l3WaveCap && postCount <= waves && sum != postCount {
+				t.Fatalf("splitNonUniform(%d,%d,cap=%d): sum %d != postCount (bins=%v)",
+					postCount, waves, l3WaveCap, sum, bins)
+			}
+		}
+	}
+}
+
+// TestPlanL3Waves_ScalesWaveCount confirms L3's planner now sizes its wave count
+// to the work — ceil(postCount/l3WaveTarget), clamped to [1,l3MaxWaves] — so the
+// whole round's candidates are scheduled (no dropped overflow for realistic
+// counts), every per-wave chunk stays within l3WaveCap, the average lands near
+// l3WaveTarget, and all offsets fall inside the period (finish before next L1).
+func TestPlanL3Waves_ScalesWaveCount(t *testing.T) {
+	const period = 12 * time.Hour
+	for postCount := 0; postCount <= 320; postCount += 7 {
+		chunks, offsets := planL3Waves(postCount, period)
+		if len(chunks) != len(offsets) {
+			t.Fatalf("planL3Waves(%d): chunks/offsets length mismatch %d/%d", postCount, len(chunks), len(offsets))
+		}
+		if postCount == 0 {
+			if len(chunks) != 0 {
+				t.Fatalf("planL3Waves(0): want 0 waves, got %d", len(chunks))
+			}
+			continue
+		}
+		wantWaves := (postCount + l3WaveTarget - 1) / l3WaveTarget
+		if wantWaves > l3MaxWaves {
+			wantWaves = l3MaxWaves
+		}
+		if len(offsets) != wantWaves {
+			t.Fatalf("planL3Waves(%d): %d waves, want %d", postCount, len(offsets), wantWaves)
+		}
+		sum := 0
+		for i, c := range chunks {
+			if c > l3WaveCap {
+				t.Errorf("planL3Waves(%d): wave %d chunk %d exceeds cap %d (chunks=%v)",
+					postCount, i, c, l3WaveCap, chunks)
+			}
+			sum += c
+		}
+		// No silent overflow drop within the unclamped range (waves*cap ≥ pc).
+		if wantWaves < l3MaxWaves && sum != postCount {
+			t.Errorf("planL3Waves(%d): chunks sum to %d, want full coverage %d (chunks=%v)",
+				postCount, sum, postCount, chunks)
+		}
+		// Offsets sorted and strictly inside the period (the trailing tail keeps
+		// the final wave clear of the next L1 cycle).
+		for j := 1; j < len(offsets); j++ {
+			if offsets[j] < offsets[j-1] {
+				t.Fatalf("planL3Waves(%d): offsets not sorted: %v", postCount, offsets)
+			}
+		}
+		if last := offsets[len(offsets)-1]; last >= period {
+			t.Errorf("planL3Waves(%d): last offset %s overruns period %s", postCount, last, period)
 		}
 	}
 }

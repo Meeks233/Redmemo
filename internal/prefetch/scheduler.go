@@ -189,11 +189,11 @@ type Scheduler struct {
 	// pipeline fetched — independent of whether the post carried media.
 	l3FetchFn func(ctx context.Context, sub, postID, urlPath string) (int, error)
 
-	// l3RuminateFn, when non-nil, replaces s.postStore.ListL3Ruminate so the
-	// bind-mode rumination sweep in runL2Wave can be exercised without a DB.
-	// Tests feed crafted (current, last) comment-count candidates to assert
-	// which grown posts get re-fetched and which are correctly left frozen.
-	l3RuminateFn func(sub, cycleID string, limit, minComments int) ([]store.L3RuminateCandidate, error)
+	// l3CandidatesFn, when non-nil, replaces s.postStore.ListL3Candidates so the
+	// standalone L3 wave can be exercised without a DB. Tests feed a fixed slice
+	// of eligible posts to assert which ones the L3 pipeline fetches under the
+	// min-comments gate, independent of any media state.
+	l3CandidatesFn func(sub, cycleID, prevCycleID string, limit, minComments int) ([]*store.StoredPost, error)
 
 	// bucketGap and bucketBaseOverride let tests shrink the cadence so a
 	// full bucket cycle completes in milliseconds instead of hours.
@@ -231,7 +231,13 @@ type Scheduler struct {
 	// l2Cycles is the live wave-schedule view per active L2 cycle, keyed
 	// by "tf|sub". Populated when runL2Cycle starts a fresh cycle for an
 	// L1 fetch, advanced as each wave fires, and cleared on completion.
-	l2Cycles  map[string]*l2CycleSnap
+	l2Cycles map[string]*l2CycleSnap
+	// l3Cycles mirrors l2Cycles for the self-standing L3 comment layer so
+	// /debug surfaces the scheduled L3 wave plan (offsets, per-wave chunks,
+	// current wave) the moment a cycle is scheduled — even before the first
+	// wave fires. Without it an enabled L3 shows only Phase "—" between its
+	// 12-hourly L1-triggered cycles and looks dead.
+	l3Cycles  map[string]*l2CycleSnap
 	l5Phase   string
 	l5Current string
 	l5Pending int
@@ -259,6 +265,14 @@ type Scheduler struct {
 	reclaimL2Info  string
 	reclaimL3Phase string
 	reclaimL3Info  string
+
+	// drivers counts the live wave-driving goroutines per "layer|tf|sub" so
+	// reconcileLoop can tell whether a layer is actively firing (a healthy live
+	// or recovery cycle) or has gone quiet (paused by a mid-cycle disable, or
+	// never started). Guarded by its own driverMu so a slow status read on
+	// statusMu never blocks a driver enter/exit.
+	drivers  map[string]int
+	driverMu sync.Mutex
 }
 
 // Bucket identifiers — one per Reddit listing-API timeframe.
@@ -366,6 +380,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go s.dispatchLoop(ctx)
 	go s.coordinatorLoop(ctx)
 	go s.iconLoop(ctx)
+	go s.reconcileLoop(ctx)
 }
 
 // reclaimPendingRuns is the design contract for the L-layer ledger: the
@@ -423,9 +438,53 @@ func (s *Scheduler) reclaimPendingRuns(ctx context.Context) {
 	totalPending := 0
 	for _, key := range order {
 		g := groups[key]
-		if g.layer == "L2" {
-			s.rebuildL2CycleSnapshot(g.tf, g.sub, g.cycleID, g.runs)
+
+		// Skip groups whose layer the sub no longer runs (depth changed since
+		// the waves were scheduled). Retire any still-pending rows and do NOT
+		// rebuild the L2 cycle snapshot — otherwise /debug would show a phantom
+		// L2 cycle + "L2 recovering" for an L3-only sub. driveReclaimedCycle has
+		// the same guard, but bailing here also avoids the wasted snapshot work
+		// and cleans the ledger up front.
+		if !depthCoversLayer(g.layer, s.resolveSubDepth(g.sub)) {
+			retired := 0
+			for _, r := range g.runs {
+				if r.Status == "pending" {
+					if err := s.runStore.MarkFinished(r.ID, "skipped", "depth no longer covers "+g.layer); err == nil {
+						retired++
+					}
+				}
+			}
+			if retired > 0 {
+				s.Events.Addf(LevelInfo, "init", "reclaim: r/%s depth no longer covers %s — retired %d orphaned pending wave(s), not revived",
+					g.sub, g.layer, retired)
+			}
+			continue
 		}
+
+		// Hangover cleanup: discard a persisted L3 cycle whose plan is malformed
+		// (see l3PlanHangover) instead of recovering it. The old fixed-5-wave
+		// planner — or a conflicting/partial DB write — leaves a plan that no
+		// longer matches planL3Waves; replaying it would re-show the wrong wave
+		// count every restart. Retire its pending rows so the next L1 / reconcile
+		// rolls a fresh, correctly-dispersed cycle.
+		if g.layer == "L3" {
+			l1Count, _ := s.runStore.LastCyclePostCount(g.tf, g.sub)
+			if reason, bad := l3PlanHangover(g.runs, l1Count); bad {
+				retired := 0
+				for _, r := range g.runs {
+					if r.Status == "pending" {
+						if err := s.runStore.MarkFinished(r.ID, "skipped", "discarded malformed L3 cycle: "+reason); err == nil {
+							retired++
+						}
+					}
+				}
+				s.Events.Addf(LevelWarn, "init", "reclaim: r/%s discarded malformed L3 cycle %s (%s) — retired %d pending wave(s), not revived",
+					g.sub, g.cycleID, reason, retired)
+				continue
+			}
+		}
+
+		s.rebuildL2CycleSnapshot(g.layer, g.tf, g.sub, g.cycleID, g.runs)
 		var pending []store.PrefetchRun
 		for _, r := range g.runs {
 			if r.Status == "pending" {
@@ -453,7 +512,7 @@ func (s *Scheduler) reclaimPendingRuns(ctx context.Context) {
 // chunk from any wave's payload, and the 5 wave offsets from each row's
 // scheduled_at relative to cycleStart. currentWave is the number of waves
 // already past pending (ok/fail/skipped/running before crash, now failed).
-func (s *Scheduler) rebuildL2CycleSnapshot(tf, sub, cycleID string, runs []store.PrefetchRun) {
+func (s *Scheduler) rebuildL2CycleSnapshot(layer, tf, sub, cycleID string, runs []store.PrefetchRun) {
 	if len(runs) == 0 || cycleID == "" {
 		return
 	}
@@ -495,10 +554,14 @@ func (s *Scheduler) rebuildL2CycleSnapshot(tf, sub, cycleID string, runs []store
 
 	depth := s.resolveSubDepth(sub)
 	s.statusMu.Lock()
-	if s.l2Cycles == nil {
-		s.l2Cycles = make(map[string]*l2CycleSnap)
+	dst := &s.l2Cycles
+	if layer == "L3" {
+		dst = &s.l3Cycles
 	}
-	s.l2Cycles[l2CycleKey(tf, sub)] = &l2CycleSnap{
+	if *dst == nil {
+		*dst = make(map[string]*l2CycleSnap)
+	}
+	(*dst)[l2CycleKey(tf, sub)] = &l2CycleSnap{
 		tf:          tf,
 		sub:         sub,
 		postCount:   first.PostCount,
@@ -543,6 +606,25 @@ func parseCycleStart(cycleID string) time.Time {
 // the remaining waves in this group are skipped (they share the same cycle_id
 // and would all be superseded too).
 func (s *Scheduler) driveReclaimedCycle(ctx context.Context, layer, tf, sub string, waves []store.PrefetchRun) {
+	s.driverEnter(layer, tf, sub)
+	defer s.driverExit(layer, tf, sub)
+	// Orphan guard: if the sub's depth was changed away from this layer since
+	// these waves were scheduled (e.g. flipped to depth=l3, leaving stale L2
+	// waves behind), retire them instead of advertising a phantom "<layer>
+	// recovering" on /debug. We must NOT call setReclaimStatus here — that's the
+	// field /debug renders, and the whole point is that an L3-only sub shows no
+	// L2 recovery.
+	if !depthCoversLayer(layer, s.resolveSubDepth(sub)) {
+		if s.runStore != nil {
+			for _, w := range waves {
+				_ = s.runStore.MarkFinished(w.ID, "skipped", "depth no longer covers "+layer)
+			}
+		}
+		s.Events.Addf(LevelInfo, layer, "reclaim r/%s: depth no longer covers %s — %d orphaned wave(s) retired, not recovered",
+			sub, layer, len(waves))
+		return
+	}
+
 	total := len(waves)
 	overdue := 0
 	for _, w := range waves {
@@ -553,8 +635,19 @@ func (s *Scheduler) driveReclaimedCycle(ctx context.Context, layer, tf, sub stri
 	s.Events.Addf(LevelInfo, layer, "reclaim r/%s: driving %d wave(s) sequentially (%d overdue, %d future)",
 		sub, total, overdue, total-overdue)
 
+	superseded := false
 	for i, r := range waves {
 		if err := ctx.Err(); err != nil {
+			return
+		}
+		// Aggressive live disable: if the operator switched this layer off
+		// mid-recovery, stop driving at once and clear the "recovering" banner —
+		// but leave the remaining waves pending (do NOT retire them), so flipping
+		// the layer back on resumes the same plan via reconcileLayers.
+		if !depthCoversLayer(layer, s.resolveSubDepth(sub)) {
+			s.Events.Addf(LevelInfo, layer, "reclaim r/%s: %s disabled mid-recovery — paused, %d wave(s) left pending",
+				sub, layer, total-i)
+			s.clearReclaimStatus(layer)
 			return
 		}
 		remaining := total - i
@@ -562,10 +655,18 @@ func (s *Scheduler) driveReclaimedCycle(ctx context.Context, layer, tf, sub stri
 		if !s.resumePendingWave(ctx, r) {
 			s.Events.Addf(LevelInfo, layer, "reclaim r/%s: cycle superseded at wave %d/%d — discarding %d remaining wave(s)",
 				sub, i+1, total, remaining-1)
+			superseded = true
 			break
 		}
 	}
 	s.clearReclaimStatus(layer)
+	// L3 sizes its wave count to the work, so the final wave index varies per
+	// cycle; drop the live snapshot here on natural completion rather than via a
+	// fixed l2WavesPerCycle threshold inside resumePendingWave. Supersession
+	// already dropped it; a disable-pause returned early and deliberately kept it.
+	if layer == "L3" && !superseded && len(waves) > 0 {
+		s.dropL3Cycle(tf, sub, waves[len(waves)-1].CycleID.String)
+	}
 }
 
 // resumePendingWave fires a single reclaimed wave. Returns true if the caller
@@ -575,13 +676,14 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 	tf := r.Bucket.String
 	sub := r.Subreddit.String
 	subInterval := int(r.SubInterval.Int32)
+	waveTotal := s.cycleWaveCount(r.Layer, tf, sub, r.CycleID.String)
 	if wait := time.Until(r.ScheduledAt); wait > 0 {
 		if err := sleep(ctx, wait); err != nil {
 			return true
 		}
 	} else {
-		s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: overdue by %s — firing immediately (best-effort)",
-			sub, subInterval, l2WavesPerCycle, formatDur(-wait))
+		s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%s: overdue by %s — firing immediately (best-effort)",
+			sub, subInterval, fmtWaveTotal(waveTotal), formatDur(-wait))
 	}
 	var meta struct {
 		Chunk int `json:"chunk"`
@@ -602,17 +704,23 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 		if err != nil {
 			s.Events.Addf(LevelWarn, r.Layer, "reclaim r/%s wave %d: mark running: %v", sub, subInterval, err)
 		} else if !ok {
-			s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d: superseded by newer cycle — skipped",
-				sub, subInterval, l2WavesPerCycle)
+			s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%s: superseded by newer cycle — skipped",
+				sub, subInterval, fmtWaveTotal(waveTotal))
 			if r.Layer == "L2" {
 				s.maybeDropL2Cycle(tf, sub, cycleID, subInterval)
+			}
+			if r.Layer == "L3" {
+				s.dropL3Cycle(tf, sub, cycleID)
 			}
 			return false
 		}
 	}
-	s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%d firing (chunk=%d, cycle=%s)",
-		sub, subInterval, l2WavesPerCycle, chunk, cycleID)
+	s.Events.Addf(LevelInfo, r.Layer, "reclaim r/%s wave %d/%s firing (chunk=%d, cycle=%s)",
+		sub, subInterval, fmtWaveTotal(waveTotal), chunk, cycleID)
 
+	if r.Layer == "L3" {
+		s.advanceL3Wave(tf, sub, cycleID, subInterval)
+	}
 	if r.Layer == "L2" {
 		s.advanceL2Wave(tf, sub, cycleID, subInterval)
 	}
@@ -630,6 +738,13 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 		}
 		runErr = s.runL2Wave(ctx, tf, sub, chunk, cycleID, subInterval)
 	case "L3":
+		depth := s.resolveSubDepth(sub)
+		if !depthHasL3(depth) {
+			if s.runStore != nil {
+				_ = s.runStore.MarkFinished(r.ID, "skipped", "depth no longer covers L3")
+			}
+			return true
+		}
 		runErr = s.runL3Wave(ctx, tf, sub, chunk, cycleID, subInterval)
 	}
 	if s.runStore != nil {
@@ -642,6 +757,8 @@ func (s *Scheduler) resumePendingWave(ctx context.Context, r store.PrefetchRun) 
 	if r.Layer == "L2" {
 		s.maybeDropL2Cycle(tf, sub, cycleID, subInterval)
 	}
+	// L3's snapshot is dropped by driveReclaimedCycle on natural completion (its
+	// wave count is variable, so there is no fixed last-wave index here).
 	return true
 }
 
@@ -652,6 +769,202 @@ func (s *Scheduler) maybeDropL2Cycle(tf, sub, cycleID string, justFired int) {
 	if justFired >= l2WavesPerCycle {
 		s.dropL2Cycle(tf, sub, cycleID)
 	}
+}
+
+// driverKey, driverEnter, driverExit and driverActive track how many wave-driving
+// goroutines (live driveWaves or driveReclaimedCycle) are currently firing for a
+// (layer, tf, sub). reconcileLoop reads driverActive to avoid launching a
+// duplicate driver while a healthy cycle is still running.
+func driverKey(layer, tf, sub string) string { return layer + "|" + tf + "|" + sub }
+
+func (s *Scheduler) driverEnter(layer, tf, sub string) {
+	s.driverMu.Lock()
+	if s.drivers == nil {
+		s.drivers = make(map[string]int)
+	}
+	s.drivers[driverKey(layer, tf, sub)]++
+	s.driverMu.Unlock()
+}
+
+func (s *Scheduler) driverExit(layer, tf, sub string) {
+	s.driverMu.Lock()
+	k := driverKey(layer, tf, sub)
+	if s.drivers[k] > 1 {
+		s.drivers[k]--
+	} else {
+		delete(s.drivers, k)
+	}
+	s.driverMu.Unlock()
+}
+
+func (s *Scheduler) driverActive(layer, tf, sub string) bool {
+	s.driverMu.Lock()
+	defer s.driverMu.Unlock()
+	return s.drivers[driverKey(layer, tf, sub)] > 0
+}
+
+// reconcileInterval is how often reconcileLoop polls for re-enable transitions.
+// Short enough that flipping a layer back on feels responsive, long enough that
+// the ListWavesForActiveCycles scan is negligible.
+const reconcileInterval = 15 * time.Second
+
+// reconcileLoop is the live re-enable supervisor. The coordinator already
+// rebuilds bucket loops when settings change, and the per-wave depth re-check
+// (driveWaves / driveReclaimedCycle) pauses a layer the instant it is switched
+// off — but a layer switched back *on* mid-period would otherwise sit idle until
+// the next L1 fetch. This loop closes that gap: on a disabled→enabled transition
+// for a (layer, sub) it resumes the paused wave plan if rows are still pending,
+// or generates a fresh plan from scratch (dispersed across the time left until
+// the next L1 cycle) and drives it. In steady state — no transition — it does
+// nothing, leaving normal L1-triggered cycling untouched.
+func (s *Scheduler) reconcileLoop(ctx context.Context) {
+	if s.runStore == nil {
+		return
+	}
+	prev := map[string]bool{}
+	seeded := false
+	for {
+		if err := sleep(ctx, reconcileInterval); err != nil {
+			return
+		}
+		if !s.isEnabled() {
+			// Forget transitions while the whole instance is off, so re-enabling
+			// it later doesn't read as a per-sub transition storm.
+			prev = map[string]bool{}
+			seeded = false
+			continue
+		}
+		cur := map[string]bool{}
+		for tf, subs := range s.groupSubsByBucket(s.activeSubs()) {
+			for _, sub := range subs {
+				depth := s.resolveSubDepth(sub)
+				for _, layer := range []string{"L2", "L3"} {
+					if !depthCoversLayer(layer, depth) {
+						continue
+					}
+					key := driverKey(layer, tf, sub)
+					cur[key] = true
+					// Only act on a genuine disabled→enabled transition; the first
+					// pass merely seeds `prev` so steady state never regenerates.
+					if seeded && !prev[key] {
+						s.resumeOrRegenerate(ctx, layer, tf, sub)
+					}
+				}
+			}
+		}
+		prev = cur
+		seeded = true
+	}
+}
+
+// resumeOrRegenerate is invoked when a layer flips back on for a sub. It resumes
+// the surviving paused plan if any waves are still pending, otherwise generates a
+// fresh plan and drives it ("recovery on top of a freshly generated plan"). It
+// is a no-op when a driver is already firing — i.e. the disable was too brief
+// for the cycle to ever pause.
+func (s *Scheduler) resumeOrRegenerate(ctx context.Context, layer, tf, sub string) {
+	if s.driverActive(layer, tf, sub) {
+		return
+	}
+	if pending := s.pendingWavesFor(layer, tf, sub); len(pending) > 0 {
+		s.Events.Addf(LevelInfo, layer, "reconcile r/%s: %s re-enabled — resuming %d pending wave(s)",
+			sub, layer, len(pending))
+		go s.driveReclaimedCycle(ctx, layer, tf, sub, pending)
+		return
+	}
+	// No surviving plan — roll a fresh one across the time remaining before the
+	// next L1 cycle so the whole batch still lands before L1 comes round again.
+	// Size it like one L1 round (reconcilePostCount), NOT the full archive
+	// backlog — sizing off the candidate pool is what produced the runaway
+	// 184-wave cycle. The actual posts are still chosen per wave by the
+	// candidate query; postCount only sets the wave plan's shape.
+	period := s.timeUntilNextCycle(tf)
+	postCount := s.reconcilePostCount(tf, sub)
+	switch layer {
+	case "L2":
+		go func() {
+			cycleID := fmt.Sprintf("L2:%s:%s:%d", tf, sub, time.Now().Unix())
+			s.Events.Addf(LevelInfo, "L2", "reconcile r/%s: L2 re-enabled with no pending plan — generating a fresh cycle (post_count=%d)", sub, postCount)
+			s.driveL2Cycle(ctx, tf, sub, postCount, period, cycleID, s.resolveSubDepth(sub))
+		}()
+	case "L3":
+		go func() {
+			s.Events.Addf(LevelInfo, "L3", "reconcile r/%s: L3 re-enabled with no pending plan — generating a fresh cycle (post_count=%d)", sub, postCount)
+			s.runL3Cycle(ctx, tf, sub, postCount, period)
+		}()
+	}
+}
+
+// pendingWavesFor returns this (layer, tf, sub)'s still-pending wave rows, sorted
+// by wave index — the surviving plan reconcileLoop resumes after a re-enable.
+func (s *Scheduler) pendingWavesFor(layer, tf, sub string) []store.PrefetchRun {
+	if s.runStore == nil {
+		return nil
+	}
+	rows, err := s.runStore.ListWavesForActiveCycles()
+	if err != nil {
+		return nil
+	}
+	var out []store.PrefetchRun
+	for _, r := range rows {
+		if r.Layer == layer && r.Status == "pending" &&
+			r.Bucket.String == tf && r.Subreddit.String == sub {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].SubInterval.Int32 < out[j].SubInterval.Int32
+	})
+	return out
+}
+
+// timeUntilNextCycle reports how long until the sub's bucket fires its next L1
+// fetch, used as the dispersal window for a reconcile-generated plan so it still
+// completes before the next L1 round. Floors at minCyclePeriod when the next
+// cycle is unknown or already due.
+func (s *Scheduler) timeUntilNextCycle(tf string) time.Duration {
+	if st := s.loadBucketState(tf); st != nil && !st.NextCycleAt.IsZero() {
+		if d := time.Until(st.NextCycleAt); d > minCyclePeriod {
+			return d
+		}
+	}
+	return minCyclePeriod
+}
+
+// reconcilePostCount sizes a reconcile-generated L2/L3 cycle the SAME way a real
+// L1 round does: by the number of posts the last listing fetch surfaced for this
+// (tf, sub) — NOT by the full eligible backlog. Sizing off ListL3Candidates /
+// ListNeedingMedia (the whole archive) would plan an absurd cycle — e.g. 184
+// waves' worth of comments in one period when a round only ever surfaces ~one
+// listing page. Falls back to the configured listing page size (page_limit),
+// then to a sane default, when no prior cycle exists yet.
+func (s *Scheduler) reconcilePostCount(tf, sub string) int {
+	if s.runStore != nil {
+		if n, err := s.runStore.LastCyclePostCount(tf, sub); err == nil && n > 0 {
+			return n
+		}
+	}
+	if s.settings != nil {
+		if n := parsePositiveInt(s.settings.Get("page_limit")); n > 0 {
+			return n
+		}
+	}
+	return defaultReconcilePostCount
+}
+
+// defaultReconcilePostCount is the last-resort L1-round size for a regenerated
+// cycle when neither a prior cycle nor a page_limit setting is available. Mirrors
+// the default "posts per upstream page" so a fresh re-enable behaves like one
+// ordinary listing round.
+const defaultReconcilePostCount = 50
+
+// parsePositiveInt parses a trimmed positive integer, returning 0 on any miss.
+func parsePositiveInt(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 func (s *Scheduler) Stop() {}
@@ -1102,6 +1415,30 @@ func cursorKey(sub string, m subMode) string {
 	return sub + "|" + m.Sort
 }
 
+// pruneCursors removes cursor entries whose subreddit is not in the active crawl
+// set `subs`. Cursor keys are "<sub>|<sort>[|<tf>]" (see cursorKey), so the sub
+// is the segment before the first '|'. Used on bucket-state load so a sub
+// dropped from the crawl list does not leave a phantom cursor lingering in the
+// persisted map and showing up on /debug. Mutates the map in place.
+func pruneCursors(cursors map[string]string, subs []string) {
+	if len(cursors) == 0 {
+		return
+	}
+	keep := make(map[string]bool, len(subs))
+	for _, sub := range subs {
+		keep[strings.ToLower(strings.TrimSpace(sub))] = true
+	}
+	for k := range cursors {
+		sub := k
+		if i := strings.IndexByte(k, '|'); i >= 0 {
+			sub = k[:i]
+		}
+		if !keep[strings.ToLower(sub)] {
+			delete(cursors, k)
+		}
+	}
+}
+
 func (s *Scheduler) userRequestedRecently() bool {
 	last := s.lastUserReq.Load()
 	if last == 0 {
@@ -1187,6 +1524,12 @@ func (s *Scheduler) bucketLoop(ctx context.Context, tf string, subs []string) {
 	if saved != nil && saved.Cursors != nil {
 		cursors = saved.Cursors
 	}
+	// Drop cursors for subs no longer in this bucket's crawl list. bucketState
+	// persists across settings changes, so a sub removed from prefetch_subs
+	// (e.g. an old r/gfur) would otherwise linger in the map and surface as a
+	// phantom L1 cursor on /debug forever. Pruning here cleans both the live
+	// display and — on the cycle's next saveBucketState — the persisted state.
+	pruneCursors(cursors, subs)
 
 	base := bucketBasePeriod(tf)
 	if s.bucketBaseOverride > 0 {
@@ -1278,20 +1621,21 @@ func (s *Scheduler) bucketLoop(ctx context.Context, tf string, subs []string) {
 			// silently pushed the fetch indefinitely into the future.
 			postCount, cycleID := s.runOneSubFetch(ctx, tf, sub, cursors, exhausted)
 
-			// L2/L3 work is strictly bound to the most recent L1 cycle
-			// for this (tf, sub). Every L1 fetch — success, fail, empty,
-			// or depth=none — supersedes any prior pending L2/L3 waves
-			// here, BEFORE runL2Cycle's own short-circuits (postCount=0,
-			// depth=none, depth=l3 delegation) might return without ever
+			// L2 media work is bound to the most recent L1 cycle for this
+			// (tf, sub): every L1 fetch — success, fail, empty, or depth=none —
+			// supersedes any prior pending L2 wave here, BEFORE runL2Cycle's own
+			// short-circuits (postCount=0, depth=none) might return without ever
 			// calling supersede themselves. cycleID is always non-empty
-			// (runOneSubFetch stamps it before the fetch), so prior-cycle
-			// rows always lose the cycle_id comparison.
+			// (runOneSubFetch stamps it before the fetch), so prior-cycle rows
+			// always lose the cycle_id comparison.
+			//
+			// L3 is NOT superseded here. It is a self-standing layer with its
+			// own cycle lineage (L3:<tf>:<sub>:<unix>) decoupled from L1/L2 in
+			// the ledger; runL3Cycle supersedes its own prior pending waves
+			// against its freshly-minted L3 cycle id.
 			if s.runStore != nil {
 				if n, err := s.runStore.SupersedePending("L2", tf, sub, cycleID, "superseded by newer L1 cycle"); err == nil && n > 0 {
 					s.Events.Addf(LevelInfo, "L2", "r/%s: discarded %d stale wave(s) from previous cycle", sub, n)
-				}
-				if n, err := s.runStore.SupersedePending("L3", tf, sub, cycleID, "superseded by newer L1 cycle"); err == nil && n > 0 {
-					s.Events.Addf(LevelInfo, "L3", "r/%s: discarded %d stale wave(s) from previous cycle", sub, n)
 				}
 			}
 
@@ -1496,11 +1840,10 @@ const l2GraceWindow = 35 * time.Second
 // frozenPost is an L2 post with media that was being fetched on-demand when L2
 // reached it. Its frozen items are re-checked after l2GraceWindow.
 type frozenPost struct {
-	urlPath     string
-	postID      string
-	items       []mediaItem
-	okSoFar     bool // whether the post's non-frozen items all downloaded cleanly
-	numComments int  // captured at unmarshal so bind L3 can re-apply min-comments
+	urlPath string
+	postID  string
+	items   []mediaItem
+	okSoFar bool // whether the post's non-frozen items all downloaded cleanly
 }
 
 // numCommentsOf returns the comment count Reddit reported at L1 fetch time.
@@ -1530,23 +1873,46 @@ const l2WavesPerCycle = 5
 // while guaranteeing no two waves bunch up inside the same 10% window.
 const waveMinGapFrac = 0.10
 
-// planWaves rolls the per-cycle stealth plan: l2WavesPerCycle time offsets
-// across `period` (with a guaranteed ≥10%-of-period gap between consecutive
-// waves to avoid bunching, plus a non-uniform random portion on top) and
-// per-wave chunk sizes drawn from a non-uniform partition of postCount. Both
-// the firing tempo *and* the per-wave request volume vary every cycle so an
-// observer cannot pin either to a fixed quintile.
-func planWaves(postCount int, period time.Duration) (chunks []int, offsets []time.Duration) {
+// l3WaveTarget is the desired *average* number of L3 comment fetches per wave.
+// Unlike L2 (CDN downloads, effectively unmetered), every L3 fetch spends one
+// real OAuth API request, so each wave should stay small. The number of L3
+// waves in a cycle is derived from postCount/l3WaveTarget (not a fixed 5 like
+// L2), so the whole round's candidates are drained before the next L1 fetch —
+// "before the next L1 round, L3 must finish this round's batch." The per-wave
+// chunk still fluctuates around this target (splitNonUniform's non-uniform
+// partition) rather than landing on a flat l3WaveTarget every wave.
+const l3WaveTarget = 5
+
+// l3WaveCap is the hard per-wave ceiling — a safety burst limit so a pathologic
+// non-uniform draw can't make one wave fire far more than the target. With the
+// wave *count* scaled to postCount the average stays at l3WaveTarget, so this
+// cap almost never bites; it exists purely to bound the worst case.
+const l3WaveCap = 10
+
+// l3MaxWaves bounds the per-cycle L3 wave count so an unexpectedly huge L1 round
+// can't schedule hundreds of waves into one period. Beyond this the leftover
+// candidates roll into the next L3 cycle (L3 re-walks recent posts each cycle),
+// matching the pre-existing "fetch later" overflow semantics. A normal L1
+// listing surfaces ≤~100 posts, so l3MaxWaves is reached only in extreme cases.
+const l3MaxWaves = 64
+
+// planWaveOffsets rolls `waves` non-uniform time offsets across `period`, with a
+// guaranteed ≥waveMinGapFrac-of-period gap between consecutive waves (to avoid
+// bunching) plus a non-uniform random portion on top. Shared by L2 and L3 so
+// both layers disperse their requests with the same stealth tempo. The trailing
+// i*minGap shift lets the last offset reach up to the full period — a deliberate
+// slight overrun of the random span that keeps the gaps honest.
+func planWaveOffsets(period time.Duration, waves int) []time.Duration {
 	minGap := time.Duration(float64(period) * waveMinGapFrac)
 	if minGap < 0 {
 		minGap = 0
 	}
-	reserved := time.Duration(l2WavesPerCycle-1) * minGap
+	reserved := time.Duration(waves-1) * minGap
 	randomSpan := period - reserved
 	if randomSpan < 0 {
 		randomSpan = 0
 	}
-	offsets = make([]time.Duration, l2WavesPerCycle)
+	offsets := make([]time.Duration, waves)
 	for i := range offsets {
 		offsets[i] = time.Duration(rand.Float64() * float64(randomSpan))
 	}
@@ -1556,21 +1922,209 @@ func planWaves(postCount int, period time.Duration) (chunks []int, offsets []tim
 	for i := range offsets {
 		offsets[i] += time.Duration(i) * minGap
 	}
-	chunks = splitNonUniform(postCount, l2WavesPerCycle)
+	return offsets
+}
+
+// planWaves rolls the per-cycle L2 stealth plan: l2WavesPerCycle time offsets
+// across `period` and per-wave chunk sizes drawn from a non-uniform partition of
+// postCount (capped at l2WaveCap). Both the firing tempo *and* the per-wave
+// request volume vary every cycle so an observer cannot pin either to a fixed
+// quintile.
+func planWaves(postCount int, period time.Duration) (chunks []int, offsets []time.Duration) {
+	offsets = planWaveOffsets(period, l2WavesPerCycle)
+	chunks = splitNonUniform(postCount, l2WavesPerCycle, l2WaveCap)
 	return chunks, offsets
 }
 
-// splitNonUniform partitions postCount across `waves` bins with a non-uniform
-// random distribution. iid uniform weights (floored at 0.1 so a near-zero
-// draw can't crush its wave) are normalized; each wave gets at least 1 post
-// when postCount ≥ waves, the rest is divided proportionally, and the result
-// is shuffled so the residual slot isn't always the same wave index. With
-// postCount ≤ waves, postCount waves get 1 each (still shuffled) and the
-// remainder gets 0.
-func splitNonUniform(postCount, waves int) []int {
+// planL3Waves rolls the per-cycle L3 stealth plan. Unlike L2 (a fixed
+// l2WavesPerCycle waves with overflow dropped), L3 sizes the *wave count* to the
+// work — ceil(postCount/l3WaveTarget), clamped to [1, l3MaxWaves] — so every
+// candidate this round is scheduled and the whole batch lands before the next
+// L1 fetch. The per-wave chunk still fluctuates (non-uniform partition) around
+// l3WaveTarget rather than being a flat target, and offsets are dispersed
+// non-uniformly across the period by planL3WaveOffsets, whose inter-wave floor
+// scales with the wave count so a large count never overruns into the next L1
+// round. Only when postCount exceeds l3MaxWaves*l3WaveCap does the tail roll
+// into the next cycle (the pre-existing "fetch later" overflow).
+func planL3Waves(postCount int, period time.Duration) (chunks []int, offsets []time.Duration) {
+	if postCount <= 0 {
+		return nil, nil
+	}
+	waves := (postCount + l3WaveTarget - 1) / l3WaveTarget
+	if waves < 1 {
+		waves = 1
+	}
+	if waves > l3MaxWaves {
+		waves = l3MaxWaves
+	}
+	offsets = planL3WaveOffsets(period, waves)
+	chunks = splitL3(postCount, waves, l3WaveCap)
+	return chunks, offsets
+}
+
+// l3CycleChunksInvalid encodes the validity invariant of an L3 plan produced by
+// planL3Waves, shared by the generation path and the startup hangover cleanup so
+// the two can never drift. A valid plan (1) fully covers the L1 post_count — the
+// sum of per-wave chunks equals postCount, the whole point of the new
+// many-waves-around-l3WaveTarget dispersal — and (2) never schedules a wave
+// larger than l3WaveCap. It returns a short human reason when the plan is
+// invalid. postCount==0 (no work) is always valid. The full-coverage check is
+// skipped above l3MaxWaves*l3WaveCap, the one regime where planL3Waves *does*
+// legitimately leave overflow for the next cycle.
+func l3CycleChunksInvalid(chunks []int, postCount int) (string, bool) {
+	if postCount <= 0 {
+		return "", false
+	}
+	sum, maxChunk := 0, 0
+	for _, c := range chunks {
+		sum += c
+		if c > maxChunk {
+			maxChunk = c
+		}
+	}
+	if maxChunk > l3WaveCap {
+		return fmt.Sprintf("wave chunk %d > cap %d", maxChunk, l3WaveCap), true
+	}
+	if postCount <= l3MaxWaves*l3WaveCap && sum < postCount {
+		return fmt.Sprintf("covers only %d of post_count %d", sum, postCount), true
+	}
+	return "", false
+}
+
+// l3PlanHangover reconstructs an L3 cycle's plan (per-wave chunks + its own
+// post_count) straight from its persisted prefetch_runs rows and decides whether
+// it should be discarded rather than recovered. It is the DB-facing "hangover"
+// detector the reclaim path uses to drop stale/old-planner/mis-sized L3 cycles.
+// Three ways a cycle is a hangover:
+//   - it under-covers its post_count, or has a wave > l3WaveCap (l3CycleChunksInvalid);
+//   - its post_count overshoots the L1 round size (l1Count) it should have been
+//     sized to — the runaway-184 bug, where the cycle was sized off the whole
+//     candidate backlog instead of one L1 listing round. l1Count<=0 (unknown)
+//     skips this check.
+//
+// Chunks/post_count are read across *all* rows of the cycle (fired or pending)
+// since they describe the whole cycle, not just what is left.
+func l3PlanHangover(runs []store.PrefetchRun, l1Count int) (string, bool) {
+	postCount := 0
+	chunks := make([]int, 0, len(runs))
+	for _, r := range runs {
+		var meta struct {
+			Chunk     int `json:"chunk"`
+			PostCount int `json:"post_count"`
+		}
+		_ = json.Unmarshal(r.Payload, &meta)
+		if meta.PostCount > postCount {
+			postCount = meta.PostCount
+		}
+		chunks = append(chunks, meta.Chunk)
+	}
+	if reason, bad := l3CycleChunksInvalid(chunks, postCount); bad {
+		return reason, true
+	}
+	if l1Count > 0 && postCount > l1Count {
+		return fmt.Sprintf("post_count %d overshoots L1 round %d", postCount, l1Count), true
+	}
+	return "", false
+}
+
+// splitL3 partitions postCount across `waves` bins that fluctuate around the
+// average (postCount/waves ≈ l3WaveTarget) yet sum to *exactly* postCount, with
+// every bin clamped to [0, cap]. splitNonUniform (L2's partitioner) only fully
+// covers postCount when the residual fits one bin — fine for L2's fixed 5 waves
+// but it silently drops units across L3's many bins. Here an exact even split is
+// the floor and a series of sum-preserving, bound-respecting pairwise transfers
+// adds the non-uniform jitter, so no candidate is ever dropped within the
+// unsaturated range. When postCount > waves*cap the even split saturates at cap
+// and the surplus is intentionally left for the next cycle ("fetch later").
+func splitL3(postCount, waves, cap int) []int {
 	out := make([]int, waves)
 	if waves <= 0 || postCount <= 0 {
 		return out
+	}
+	if cap < 1 {
+		cap = 1
+	}
+	base := postCount / waves
+	rem := postCount % waves
+	if base > cap {
+		// Saturated: every bin pinned at cap, the rest rolls to the next cycle.
+		base, rem = cap, 0
+	}
+	for i := range out {
+		out[i] = base
+	}
+	// Hand out the remainder one unit at a time to random bins (capped), so the
+	// "+1" slots aren't always the same indices.
+	for k, i := range rand.Perm(waves) {
+		if k >= rem {
+			break
+		}
+		if out[i] < cap {
+			out[i]++
+		}
+	}
+	// Jitter: sum-preserving 1-unit transfers between in-bounds bins.
+	for t := 0; t < waves*2; t++ {
+		a, b := rand.Intn(waves), rand.Intn(waves)
+		if a != b && out[a] > 0 && out[b] < cap {
+			out[a]--
+			out[b]++
+		}
+	}
+	return out
+}
+
+// planL3WaveOffsets disperses `waves` non-uniform offsets across `period`,
+// scaling the inter-wave floor to the wave count so however many waves there
+// are they all land before the period ends — i.e. before the next L1 round.
+// planWaveOffsets reserves a fixed waveMinGapFrac of the period per gap, which
+// only works for L2's fixed 5 waves; with a variable L3 count that scheme would
+// either bunch (many waves) or overrun the period (the reserved sum exceeding
+// it). Here the floor is half of an even per-wave slice of the usable span, and
+// a small tail (last 5% of the period) is left free so the final wave completes
+// comfortably before the next L1 cycle starts.
+func planL3WaveOffsets(period time.Duration, waves int) []time.Duration {
+	if waves <= 0 {
+		return nil
+	}
+	offsets := make([]time.Duration, waves)
+	usable := time.Duration(float64(period) * 0.95)
+	if usable <= 0 {
+		return offsets
+	}
+	slice := usable / time.Duration(waves)
+	minGap := slice / 2
+	reserved := time.Duration(waves-1) * minGap
+	randomSpan := usable - reserved
+	if randomSpan < 0 {
+		randomSpan = 0
+	}
+	for i := range offsets {
+		offsets[i] = time.Duration(rand.Float64() * float64(randomSpan))
+	}
+	sort.Slice(offsets, func(i, j int) bool { return offsets[i] < offsets[j] })
+	for i := range offsets {
+		offsets[i] += time.Duration(i) * minGap
+	}
+	return offsets
+}
+
+// splitNonUniform partitions postCount across `waves` bins with a non-uniform
+// random distribution, clamping each bin at `cap`. iid uniform weights (floored
+// at 0.1 so a near-zero draw can't crush its wave) are normalized; each wave
+// gets at least 1 post when postCount ≥ waves, the rest is divided
+// proportionally, and the result is shuffled so the residual slot isn't always
+// the same wave index. With postCount ≤ waves, postCount waves get 1 each (still
+// shuffled) and the remainder gets 0. When postCount exceeds waves*cap the bins
+// saturate at cap and their sum is intentionally below postCount — the caller
+// (L3) treats the overflow as "fetch later", not "fetch now".
+func splitNonUniform(postCount, waves, maxPerWave int) []int {
+	out := make([]int, waves)
+	if waves <= 0 || postCount <= 0 {
+		return out
+	}
+	if maxPerWave < 1 {
+		maxPerWave = 1
 	}
 	if postCount <= waves {
 		for i := 0; i < postCount; i++ {
@@ -1590,8 +2144,8 @@ func splitNonUniform(postCount, waves int) []int {
 	for i := 0; i < waves-1; i++ {
 		share := int(weights[i] / sum * float64(remaining))
 		out[i] = 1 + share
-		if out[i] > l2WaveCap {
-			out[i] = l2WaveCap
+		if out[i] > maxPerWave {
+			out[i] = maxPerWave
 		}
 		assigned += out[i]
 	}
@@ -1599,8 +2153,8 @@ func splitNonUniform(postCount, waves int) []int {
 	if last < 1 {
 		last = 1
 	}
-	if last > l2WaveCap {
-		last = l2WaveCap
+	if last > maxPerWave {
+		last = maxPerWave
 	}
 	out[waves-1] = last
 	rand.Shuffle(waves, func(i, j int) { out[i], out[j] = out[j], out[i] })
@@ -1609,6 +2163,19 @@ func splitNonUniform(postCount, waves int) []int {
 
 // waveRunner is the per-wave fetch primitive both L2 and L3 implement.
 type waveRunner func(ctx context.Context, tf, sub string, chunk int, cycleID string, subInterval int) error
+
+// driveOutcome reports why driveWaves stopped, so the caller can decide whether
+// to clear the live cycle snapshot. Only driveDisabled keeps it: an operator who
+// just turned the layer off may turn it back on, and the persisted pending wave
+// rows + retained snapshot let reconcileLayers resume the same plan.
+type driveOutcome int
+
+const (
+	driveDone       driveOutcome = iota // all waves fired
+	driveCtx                            // ctx cancelled (shutdown / coordinator teardown)
+	driveDisabled                       // depth no longer covers this layer (paused, plan kept)
+	driveSuperseded                     // a newer cycle demoted this one's wave rows
+)
 
 // driveWaves schedules and fires the wave plan for one cycle. Shared by L2
 // and L3 — extracted so standalone L3 doesn't duplicate L2's
@@ -1627,7 +2194,9 @@ func (s *Scheduler) driveWaves(
 	payloadExtras map[string]any,
 	onBegin func(wave int),
 	runWave waveRunner,
-) {
+) driveOutcome {
+	s.driverEnter(layer, tf, sub)
+	defer s.driverExit(layer, tf, sub)
 	runIDs := make([]int64, len(offsets))
 	for i, off := range offsets {
 		if s.runStore != nil {
@@ -1653,18 +2222,28 @@ func (s *Scheduler) driveWaves(
 		target := cycleStart.Add(off)
 		if w := time.Until(target); w > 0 {
 			if err := sleep(ctx, w); err != nil {
-				return
+				return driveCtx
 			}
 		}
 		if err := ctx.Err(); err != nil {
-			return
+			return driveCtx
+		}
+		// Aggressive live disable: re-check depth right before firing each wave so
+		// switching the layer off mid-cycle stops further requests at once (rather
+		// than waiting out the cycle). The remaining wave rows stay 'pending' and
+		// the live snapshot is kept (caller skips the drop) so re-enabling resumes
+		// this exact plan via reconcileLayers.
+		if !depthCoversLayer(layer, s.resolveSubDepth(sub)) {
+			s.Events.Addf(LevelInfo, layer, "r/%s: %s disabled mid-cycle — paused at wave %d/%d, %d wave(s) left pending",
+				sub, layer, i+1, len(offsets), len(offsets)-i)
+			return driveDisabled
 		}
 		if runIDs[i] != 0 && s.runStore != nil {
 			ok, _ := s.runStore.TryMarkRunning(runIDs[i])
 			if !ok {
 				s.Events.Addf(LevelInfo, layer, "r/%s wave %d/%d: superseded by newer cycle — skipped",
 					sub, i+1, len(offsets))
-				return
+				return driveSuperseded
 			}
 		}
 		if onBegin != nil {
@@ -1679,32 +2258,80 @@ func (s *Scheduler) driveWaves(
 			}
 		}
 		if err != nil {
-			return
+			return driveDone
 		}
 	}
+	return driveDone
 }
 
-// runL2Cycle schedules and drives one L1-cycle's worth of L2 waves via the
-// shared driveWaves driver. The wave plan (offsets + per-wave chunks) is
-// non-uniform on both axes so neither tempo nor request volume looks like a
-// fixed quintile slice; see planWaves.
+// runL2Cycle is the per-L1-fetch fan-out: it kicks off this sub's two
+// downstream layers and lets each run on its own terms. L3 (comments) and L2
+// (media) are fully independent here — neither blocks or gates the other, and
+// they no longer share a cycle key in the ledger.
 //
-// postCount == 0 still emits a single skipped record so the unified ledger
-// reflects "L1 found nothing" rather than going silent.
+//   - L3 is the precious layer for a forum archive: comments cost an OAuth
+//     request and are what readers actually come back for. Whenever the sub's
+//     depth covers comments, an independent L3 cycle is spawned with its own
+//     cycle id; it walks recent posts via ListL3Candidates and is blind to
+//     whether L2 has downloaded any media.
+//   - L2 is pure CDN cache acceleration. The CDN is effectively unmetered, so
+//     media carries no OAuth budget and exists only to pre-warm local storage.
+//
+// postCount == 0 still emits a single skipped L2 record (when the sub runs L2)
+// so the unified ledger reflects "L1 found nothing" rather than going silent.
 func (s *Scheduler) runL2Cycle(ctx context.Context, tf, sub string, postCount int, period time.Duration, cycleID string) {
-	if s.postStore == nil || s.media == nil {
-		return
-	}
 	depth := s.resolveSubDepth(sub)
-	if depth == "none" {
-		if s.runStore != nil {
+
+	// L3 stands on its own: spawn a full standalone comment cycle in parallel
+	// with L2, with its own ledger lineage. Guarded only by postStore (the
+	// candidate query needs it) — a media-less deployment still archives
+	// comments.
+	if depthHasL3(depth) {
+		go s.runL3Cycle(ctx, tf, sub, postCount, period)
+	} else {
+		// L3 is off for this sub. L2's leftover pending waves are swept by the
+		// unconditional L1→L2 SupersedePending in bucketLoop, but nothing retires
+		// L3's once runL3Cycle stops being spawned — they would linger 'pending'
+		// in the ledger and the /debug L3 cycle snapshot would persist as a
+		// phantom ("L3 off" yet "wave 5/16") until the next container restart.
+		// Sweep them here so a sub flipped away from L3 self-heals on the next L1
+		// fetch, mirroring L2.
+		s.retireStandaloneL3(tf, sub)
+	}
+	s.driveL2Cycle(ctx, tf, sub, postCount, period, cycleID, depth)
+}
+
+// retireStandaloneL3 discards any leftover pending L3 wave rows and the live
+// /debug cycle snapshot for (tf, sub) once L3 stops running for the sub. Called
+// from the L1 fan-out (runL2Cycle) on every cycle where the sub's depth does not
+// cover L3, so an L3 plan paused by a mid-cycle disable does not outlive the
+// disable. keepCycleID="" demotes every pending L3 wave row for the sub — none
+// is kept, since no L3 cycle should be running. Safe to call when nothing is
+// pending (the UPDATE simply affects zero rows) and when L3 was never enabled.
+func (s *Scheduler) retireStandaloneL3(tf, sub string) {
+	if s.runStore != nil {
+		if n, err := s.runStore.SupersedePending("L3", tf, sub, "", "L3 disabled — retiring orphaned waves"); err == nil && n > 0 {
+			s.Events.Addf(LevelInfo, "L3", "r/%s: L3 off — retired %d orphaned pending wave(s)", sub, n)
+		}
+	}
+	s.dropL3CycleAny(tf, sub)
+}
+
+// driveL2Cycle is the L2-only half of runL2Cycle: plan + drive this sub's media
+// waves for the given depth. Split out so reconcileLoop can regenerate just the
+// L2 layer on re-enable without re-spawning an L3 cycle (runL2Cycle's L3 fan-out
+// is L1-only).
+func (s *Scheduler) driveL2Cycle(ctx context.Context, tf, sub string, postCount int, period time.Duration, cycleID, depth string) {
+	if !depthHasL2(depth) {
+		// depth=none → record the skip so /debug shows L1 fired but nothing
+		// downstream ran. depth=l3 (comments only) emits no L2 row.
+		if s.runStore != nil && depth == "none" {
 			payload, _ := json.Marshal(map[string]any{"post_count": postCount, "reason": "depth=none"})
 			_ = s.runStore.Record("L2", tf, sub, "", cycleID, "skipped", "", payload)
 		}
 		return
 	}
-	if depth == "l3" {
-		s.runL3Cycle(ctx, tf, sub, postCount, period, cycleID)
+	if s.postStore == nil || s.media == nil {
 		return
 	}
 	if postCount <= 0 {
@@ -1718,10 +2345,14 @@ func (s *Scheduler) runL2Cycle(ctx context.Context, tf, sub string, postCount in
 	chunks, offsets := planWaves(postCount, period)
 	cycleStart := time.Now()
 	s.recordL2CycleStart(tf, sub, postCount, chunks, depthHasL3(depth), cycleStart, period, offsets, cycleID)
-	defer s.dropL2Cycle(tf, sub, cycleID)
-	s.driveWaves(ctx, "L2", tf, sub, cycleID, chunks, offsets, cycleStart, period, postCount, nil,
+	outcome := s.driveWaves(ctx, "L2", tf, sub, cycleID, chunks, offsets, cycleStart, period, postCount, nil,
 		func(wave int) { s.advanceL2Wave(tf, sub, cycleID, wave) },
 		s.runL2Wave)
+	// Keep the snapshot + pending rows on a disable-pause so flipping L2 back on
+	// resumes this plan; drop it on every other terminal outcome.
+	if outcome != driveDisabled {
+		s.dropL2Cycle(tf, sub, cycleID)
+	}
 }
 
 // listNeedingMedia returns the next batch of posts whose media is not yet
@@ -1743,94 +2374,35 @@ func (s *Scheduler) markMediaDone(urlPath string) {
 	}
 }
 
-// listL3Ruminate returns the bind-mode rumination batch: posts whose comment
-// count has grown since their last L3 fetch. The seam lets tests drive the
-// sweep without a DB; production uses the PostStore query.
-func (s *Scheduler) listL3Ruminate(sub, cycleID string, limit, minComments int) ([]store.L3RuminateCandidate, error) {
-	if s.l3RuminateFn != nil {
-		return s.l3RuminateFn(sub, cycleID, limit, minComments)
+// listL3Candidates returns the next batch of L3-eligible posts for sub under
+// the cycle-freeze + min-comments rules. The l3CandidatesFn seam lets tests
+// drive runL3Wave without a live DB; production uses the PostStore query.
+func (s *Scheduler) listL3Candidates(sub, cycleID, prevCycleID string, limit, minComments int) ([]*store.StoredPost, error) {
+	if s.l3CandidatesFn != nil {
+		return s.l3CandidatesFn(sub, cycleID, prevCycleID, limit, minComments)
 	}
 	if s.postStore == nil {
 		return nil, nil
 	}
-	return s.postStore.ListL3Ruminate(sub, cycleID, limit, minComments)
-}
-
-// shouldRuminate is the single source of truth for the "re-fetch this post's
-// comments because new replies arrived" decision, applied as a defensive gate
-// over whatever listL3Ruminate returns (the SQL implements the same rule as a
-// prefilter; this keeps the verdict unit-testable without a DB).
-//
-//   - last < 0      → no recorded L3 baseline; rumination needs a prior fetch
-//     to measure growth against, so never ruminate.
-//   - current<=last → the thread did not grow (or shrank, e.g. deleted
-//     comments); nothing new to archive.
-//   - below min     → the min-comments waterline still applies even to growth;
-//     a thread crawling 2→3 under a threshold of 5 stays out.
-//   - otherwise     → grew past the baseline and clears the waterline: ruminate.
-func shouldRuminate(current, last, minComments int) bool {
-	if last < 0 {
-		return false
-	}
-	if current <= last {
-		return false
-	}
-	if minComments > 0 && current < minComments {
-		return false
-	}
-	return true
-}
-
-// ruminateL3 is the bind-mode recovery sweep: after a wave drains the pending-
-// media queue, re-fetch comments for any post whose thread has grown since its
-// last L3 archive. Without this, a post archived once at media-done time and
-// never re-surfaced by L2 (media stays done) would freeze its comment snapshot
-// forever even as a hot thread keeps gaining replies. Best-effort: a query
-// error is logged and swallowed so it never aborts the surrounding wave.
-func (s *Scheduler) ruminateL3(ctx context.Context, tf, sub string, limit int, cycleID string) {
-	minComments := s.resolveL3MinComments()
-	cands, err := s.listL3Ruminate(sub, cycleID, limit, minComments)
-	if err != nil {
-		s.Events.Addf(LevelWarn, "L3", "r/%s: rumination query failed: %v", sub, err)
-		return
-	}
-	for _, c := range cands {
-		if err := ctx.Err(); err != nil {
-			return
-		}
-		if c.Post == nil {
-			continue
-		}
-		// Re-check the SQL prefilter's verdict in Go so the rule lives in one
-		// place and a borderline row can't slip through.
-		if !shouldRuminate(c.CurrentComments, c.LastComments, minComments) {
-			continue
-		}
-		s.Events.Addf(LevelInfo, "L3", "r/%s post %s: rumination — comments %d→%d since last archive, re-fetching",
-			sub, c.Post.PostID, c.LastComments, c.CurrentComments)
-		s.fetchL3Bound(ctx, tf, sub, c.Post.PostID, c.Post.URLPath, cycleID, c.CurrentComments)
-	}
+	return s.postStore.ListL3Candidates(sub, cycleID, prevCycleID, limit, minComments)
 }
 
 // runL2Wave drains up to `limit` pending-media posts for sub through the NP
-// dispatcher, downloading every media URL each post needs. When depth is
-// "l2+l3" (bind mode) every successfully-mediafied post immediately spawns a
-// budget-gated L3 comment fetch so the outbound traffic pattern resembles a
-// real human reading one post end-to-end before moving on instead of a
-// media-only crawler. Standalone L3 (depth="l3") is handled by runL3Cycle and
-// never reaches this function. Returns the first ctx error if any.
+// dispatcher, downloading every media URL each post needs. L2 is pure CDN
+// cache: it touches media only and never fetches comments — L3 is a separate,
+// self-standing layer driven by runL3Cycle/runL3Wave. Returns the first ctx
+// error if any.
 func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cycleID string, subInterval int) error {
 	if s.media == nil || (s.postStore == nil && s.pendingMediaFn == nil) {
 		return nil
 	}
 	depth := s.resolveSubDepth(sub)
 	if !depthHasL2(depth) {
-		// Reachable only on a mid-cycle settings flip away from L2; standalone
-		// L3 and "none" are routed away in runL2Cycle.
+		// Reachable only on a mid-cycle settings flip away from L2; comments-only
+		// and "none" are routed away in runL2Cycle.
 		s.setL2Status("idle", "", 0)
 		return nil
 	}
-	bindMode := depth == "l2+l3"
 
 	pending, err := s.listNeedingMedia(sub, limit)
 	if err != nil {
@@ -1839,19 +2411,13 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 	}
 
 	if len(pending) == 0 {
-		// No media work this wave, but a bind-mode sub may still have threads
-		// that grew since their last L3 archive — the steady state once a sub's
-		// backlog is fully media-done. Ruminate before idling out.
-		if bindMode {
-			s.ruminateL3(ctx, tf, sub, limit, cycleID)
-		}
 		s.setL2Status("idle", sub, 0)
 		return nil
 	}
 
 	s.setL2Status("downloading", sub, len(pending))
-	s.Events.Addf(LevelInfo, "L2", "r/%s wave %d/%d: %d posts need media (bind_l3=%v) -- submitting to NP queue",
-		sub, subInterval, l2WavesPerCycle, len(pending), bindMode)
+	s.Events.Addf(LevelInfo, "L2", "r/%s wave %d/%d: %d posts need media -- submitting to NP queue",
+		sub, subInterval, l2WavesPerCycle, len(pending))
 
 	completed := 0
 	var frozen []frozenPost
@@ -1870,17 +2436,9 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 		mediaItems := ExtractMediaItems(&p)
 		if len(mediaItems) == 0 {
 			// Text/link posts carry no media, so the L2 download path is a
-			// no-op and the post is marked done immediately. In bind mode the
-			// visit is still "visit-like": a human reading a self post reads
-			// its comments too. Without this, depth=l2+l3 would archive
-			// comments only for media posts and silently skip every text post
-			// (the majority on discussion subs like r/selfhosted) — see L3
-			// gating bug. Fire the bound L3 fetch here so no-media posts get
-			// the same comment archival a media post would.
+			// no-op and the post is marked done immediately. Comments (if the
+			// sub runs L3) are handled by the independent L3 cycle, not here.
 			s.markMediaDone(sp.URLPath)
-			if bindMode && s.l3MeetsThreshold(numCommentsOf(&p), sub, sp.PostID) {
-				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOf(&p))
-			}
 			continue
 		}
 
@@ -1910,11 +2468,10 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 		switch {
 		case len(frozenItems) > 0:
 			frozen = append(frozen, frozenPost{
-				urlPath:     sp.URLPath,
-				postID:      sp.PostID,
-				items:       frozenItems,
-				okSoFar:     allOK,
-				numComments: numCommentsOf(&p),
+				urlPath: sp.URLPath,
+				postID:  sp.PostID,
+				items:   frozenItems,
+				okSoFar: allOK,
 			})
 		case allOK:
 			s.markMediaDone(sp.URLPath)
@@ -1922,9 +2479,6 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 			s.Events.Addf(LevelOK, "L2", "r/%s post %s: %d media done (%s)",
 				sub, sp.PostID, len(mediaItems), mediaKindSummary(mediaItems))
 			s.recordL2Post(tf, sub, sp.PostID, cycleID, subInterval, len(mediaItems), "ok", "")
-			if bindMode && s.l3MeetsThreshold(numCommentsOf(&p), sub, sp.PostID) {
-				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOf(&p))
-			}
 		}
 	}
 
@@ -1961,9 +2515,6 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 				s.markMediaDone(fp.urlPath)
 				completed++
 				s.recordL2Post(tf, sub, fp.postID, cycleID, subInterval, len(fp.items), "ok", "")
-				if bindMode && s.l3MeetsThreshold(fp.numComments, sub, fp.postID) {
-					s.fetchL3Bound(ctx, tf, sub, fp.postID, fp.urlPath, cycleID, fp.numComments)
-				}
 			}
 		}
 	}
@@ -1972,84 +2523,107 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 		s.Events.Addf(LevelOK, "L2", "r/%s: media complete for %d/%d posts", sub, completed, len(pending))
 	}
 
-	// Bind-mode rumination: the pending-media loop above only ever touches posts
-	// whose media is not yet done, so a post archived on an earlier cycle is
-	// invisible to it no matter how many new replies a fresh L1 scan reports.
-	// Sweep those grown threads back into the L3 batch here, after the wave's
-	// media work, so they ride the same budget gate as a bound fetch.
-	if bindMode {
-		s.ruminateL3(ctx, tf, sub, limit, cycleID)
-	}
-
 	s.setL2Status("idle", "", 0)
 	return nil
 }
 
-// runL3Cycle is the standalone L3 path (depth="l3"): comments only, no media,
-// no bind. Reuses the L2 wave planner + driver instead of duplicating the
-// schedule/sleep/dispatch loop — only the per-wave fetch primitive differs.
+// runL3Cycle is the self-standing comment layer, spawned once per L1 fetch for
+// any sub whose depth covers comments (both depth="l3" and depth="l2+l3"). It
+// is fully decoupled from L1 and L2 in the ledger: it mints its OWN cycle id
+// (L3:<tf>:<sub>:<unix>), supersedes its own prior pending waves against it,
+// and chooses work via ListL3Candidates rather than L2's media-done queue.
+// Comments are the scarce, OAuth-budgeted resource, so L3 shares the dispatcher
+// + budget gate with L1 directly and never waits on a CDN media download.
 //
-// Because L3-only never marks posts media-done, the pending queue does not
-// drain; each wave re-walks the same recent slice and skips posts whose
-// comments are already archived. That is the documented tradeoff for
-// comments-only mode — flip to l2+l3 to also drain the queue via bind.
-func (s *Scheduler) runL3Cycle(ctx context.Context, tf, sub string, postCount int, period time.Duration, cycleID string) {
-	if s.postStore == nil {
+// L3 deliberately does not drain a queue: each wave re-walks the recent slice;
+// ListL3Candidates skips posts already fetched this/last L3 cycle and re-admits
+// any whose comment count grew since. Flip a sub to depth=l2 to turn it off.
+func (s *Scheduler) runL3Cycle(ctx context.Context, tf, sub string, postCount int, period time.Duration) {
+	if s.postStore == nil && s.l3CandidatesFn == nil {
 		return
 	}
+	l3CycleID := fmt.Sprintf("L3:%s:%s:%d", tf, sub, time.Now().Unix())
+
+	// Supersede this sub's own stale pending L3 waves — a previous L3 cycle
+	// whose goroutine is still mid-flight or was revived after a restart.
+	// Decoupled from L1: only L3 rows carrying a different L3 cycle id are
+	// demoted, so an L1 (or L2) cycle boundary never disturbs L3's lineage.
+	if s.runStore != nil {
+		if n, err := s.runStore.SupersedePending("L3", tf, sub, l3CycleID, "superseded by newer L3 cycle"); err == nil && n > 0 {
+			s.Events.Addf(LevelInfo, "L3", "r/%s: discarded %d stale wave(s) from previous L3 cycle", sub, n)
+		}
+	}
+
 	if postCount <= 0 {
 		if s.runStore != nil {
 			payload, _ := json.Marshal(map[string]any{"post_count": 0})
-			_ = s.runStore.Record("L3", tf, sub, "", cycleID, "skipped", "", payload)
+			_ = s.runStore.Record("L3", tf, sub, "", l3CycleID, "skipped", "", payload)
 		}
 		return
 	}
-	chunks, offsets := planWaves(postCount, period)
+	chunks, offsets := planL3Waves(postCount, period)
 	cycleStart := time.Now()
-	s.driveWaves(ctx, "L3", tf, sub, cycleID, chunks, offsets, cycleStart, period, postCount,
-		map[string]any{"standalone": true}, nil, s.runL3Wave)
+	s.recordL3CycleStart(tf, sub, postCount, chunks, cycleStart, period, offsets, l3CycleID)
+	outcome := s.driveWaves(ctx, "L3", tf, sub, l3CycleID, chunks, offsets, cycleStart, period, postCount,
+		map[string]any{"standalone": true},
+		func(wave int) { s.advanceL3Wave(tf, sub, l3CycleID, wave) },
+		s.runL3Wave)
+	// Keep the snapshot + pending rows on a disable-pause so flipping L3 back on
+	// resumes this plan; drop it on every other terminal outcome.
+	if outcome != driveDisabled {
+		s.dropL3Cycle(tf, sub, l3CycleID)
+	}
 }
 
 // runL3Wave fetches comments for up to `limit` posts of sub via the same NP
-// dispatcher + budget gate L1 uses. Standalone — no bind, no media path.
+// dispatcher + budget gate L1 uses — the two API-budget layers jointly pace
+// their requests through the single dispatch queue.
 //
-// Dedup is cycle-id based, not time-based: ListL3Candidates excludes any post
-// whose most recent successful L3 fetch landed in the current L1 cycle or in
-// the L1 cycle just before it. The result is a fixed 1-cycle freeze: a post
-// archived during cycle N stays out of cycle N+1's candidate set, and
-// reappears at cycle N+2 (only if L1 surfaces it again — L3 remains a slave of
-// L1). The min-comments waterline is applied at the same SQL layer; posts
-// below threshold are filtered out and never enter the dispatch queue.
+// Dedup is cycle-id based on L3's OWN lineage, not L1's: ListL3Candidates
+// excludes any post whose most recent successful L3 fetch landed in the current
+// L3 cycle or the L3 cycle just before it (PreviousL3CycleID). The result is a
+// fixed 1-cycle freeze measured in L3 cycles: a post archived during L3 cycle N
+// stays out of N+1 and reappears at N+2. A post whose comment count grew since
+// is re-admitted immediately via the candidate query's growth override. The
+// min-comments waterline is applied both at the SQL layer and re-checked here.
 func (s *Scheduler) runL3Wave(ctx context.Context, tf, sub string, limit int, cycleID string, subInterval int) error {
-	if s.postStore == nil {
+	if s.postStore == nil && s.l3CandidatesFn == nil {
 		return nil
 	}
+	waveTotal := s.cycleWaveCount("L3", tf, sub, cycleID)
 	prevCycle := ""
 	if s.runStore != nil {
 		var err error
-		prevCycle, err = s.runStore.PreviousL1CycleID(sub, cycleID)
+		prevCycle, err = s.runStore.PreviousL3CycleID(sub, cycleID)
 		if err != nil {
-			s.Events.Addf(LevelWarn, "L3", "r/%s: prev L1 cycle lookup: %v", sub, err)
+			s.Events.Addf(LevelWarn, "L3", "r/%s: prev L3 cycle lookup: %v", sub, err)
 		}
 	}
 	minComments := s.resolveL3MinComments()
-	pending, err := s.postStore.ListL3Candidates(sub, cycleID, prevCycle, limit, minComments)
+	pending, err := s.listL3Candidates(sub, cycleID, prevCycle, limit, minComments)
 	if err != nil {
 		s.Events.Addf(LevelError, "L3", "r/%s: query candidates: %v", sub, err)
 		return nil
 	}
 	if len(pending) == 0 {
-		s.Events.Addf(LevelInfo, "L3", "r/%s wave %d/%d: 0 eligible posts (freeze + min_comments=%d) — skipped",
-			sub, subInterval, l2WavesPerCycle, minComments)
+		s.Events.Addf(LevelInfo, "L3", "r/%s wave %d/%s: 0 eligible posts (freeze + min_comments=%d) — skipped",
+			sub, subInterval, fmtWaveTotal(waveTotal), minComments)
 		return nil
 	}
-	s.Events.Addf(LevelInfo, "L3", "r/%s wave %d/%d: %d posts -- fetching comments (standalone, prev_cycle=%q, min_comments=%d)",
-		sub, subInterval, l2WavesPerCycle, len(pending), prevCycle, minComments)
+	s.Events.Addf(LevelInfo, "L3", "r/%s wave %d/%s: %d posts -- fetching comments (prev_cycle=%q, min_comments=%d)",
+		sub, subInterval, fmtWaveTotal(waveTotal), len(pending), prevCycle, minComments)
 	for _, sp := range pending {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		s.fetchL3Standalone(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOfJSON(sp.JSONData))
+		nc := numCommentsOfJSON(sp.JSONData)
+		// Defensive re-check of the SQL min-comments prefilter so the verdict
+		// lives in one Go-testable place and a borderline row can't slip
+		// through; a miss records a 'skipped' ledger row.
+		if !s.l3MeetsThreshold(nc, sub, sp.PostID) {
+			continue
+		}
+		s.fetchL3Standalone(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, nc)
 	}
 	return nil
 }
@@ -2227,10 +2801,27 @@ func canonDepth(raw string) (string, bool) {
 func depthHasL2(d string) bool { return d == "l2" || d == "l2+l3" }
 func depthHasL3(d string) bool { return d == "l3" || d == "l2+l3" }
 
+// depthCoversLayer reports whether a sub resolved to `depth` still runs the
+// given prefetch layer. Used by the reclaim path so waves of a layer the
+// operator has since switched off — e.g. leftover pending L2 waves after
+// flipping a sub to depth=l3 — are retired instead of revived. Without this a
+// stale L2 wave set would rebuild its /debug cycle snapshot and flip the reclaim
+// status to "L2 recovering" for the whole period until each wave individually
+// skipped itself. Layers other than L2/L3 (none scheduled today) default to
+// covered so an unrecognised value never silently drops a wave.
+func depthCoversLayer(layer, depth string) bool {
+	switch layer {
+	case "L2":
+		return depthHasL2(depth)
+	case "L3":
+		return depthHasL3(depth)
+	}
+	return true
+}
+
 // globalBindDefaultEnabled reports whether the global prefetch_default_depth
-// covers L3 — used only by the /debug status view to label the legacy
-// "bind mode" panel. Per-sub overrides may still flip individual subs in
-// either direction; this is just the user-visible default.
+// covers L3. It only reads the global default and ignores per-sub overrides, so
+// it is the fallback for effectiveL3Enabled when there is no crawl list yet.
 func (s *Scheduler) globalBindDefaultEnabled() bool {
 	if s.settings == nil {
 		return true
@@ -2244,6 +2835,58 @@ func (s *Scheduler) globalBindDefaultEnabled() bool {
 		return true
 	}
 	return depthHasL3(c)
+}
+
+// effectiveL3Enabled reports whether L3 (comment archiving) actually runs for
+// the current crawl list — true if *any* active sub resolves to a depth
+// covering L3 (its per-sub override in prefetch_sub_modes, else the global
+// default). The /debug "bind mode" / "bind L3" badges use this so a per-sub
+// depth that drops L3 (e.g. golang=depth:l2) turns the badge off. The old badge
+// read only prefetch_default_depth and so stayed on for a sub switched to L2 via
+// a per-sub override — the very case the operator was toggling. With no active
+// subs it falls back to the global default so a fresh instance still reflects
+// its configured intent.
+func (s *Scheduler) effectiveL3Enabled() bool {
+	subs := s.activeSubs()
+	if len(subs) == 0 {
+		return s.globalBindDefaultEnabled()
+	}
+	for _, sub := range subs {
+		if depthHasL3(s.resolveSubDepth(sub)) {
+			return true
+		}
+	}
+	return false
+}
+
+// effectiveL2Enabled is the L2 (media) analogue of effectiveL3Enabled: true if
+// any active sub's resolved depth covers L2. Drives the explicit "L2 enabled"
+// status on /debug — previously there was no indicator for L2 at all (the panel
+// only showed an L3-binding badge), so an operator could not tell from the page
+// whether media prefetch was on. With no crawl list it falls back to the global
+// default depth's L2 coverage.
+func (s *Scheduler) effectiveL2Enabled() bool {
+	subs := s.activeSubs()
+	if len(subs) == 0 {
+		if s.settings == nil {
+			return true
+		}
+		v := strings.TrimSpace(s.settings.Get("prefetch_default_depth"))
+		if v == "" {
+			return true
+		}
+		c, ok := canonDepth(v)
+		if !ok {
+			return true
+		}
+		return depthHasL2(c)
+	}
+	for _, sub := range subs {
+		if depthHasL2(s.resolveSubDepth(sub)) {
+			return true
+		}
+	}
+	return false
 }
 
 // recordL2Post writes one prefetch_runs row per L2 post completion so the
@@ -2263,34 +2906,25 @@ func (s *Scheduler) recordL2Post(tf, sub, postID, cycleID string, subInterval, m
 	_ = s.runStore.Record("L2", tf, sub, postID, cycleID, status, errStr, payload)
 }
 
-// fetchL3Bound is the single-post L3 fetch primitive used by both the bind
-// pipeline (depth="l2+l3", invoked from runL2Wave after each successful media
-// download) and the standalone L3 cycle (depth="l3", invoked directly from
-// runL3Wave). It synchronously fetches a post's comments through the NP
-// dispatcher using the same budget gate L1 uses (`needsBudget=true`). This
-// keeps combined traffic from exceeding the 10-minute OAuth window —
-// waitForBudget pauses the dispatch loop the moment remaining quota crosses
-// the reserved threshold, so a busy cycle naturally stretches across
-// multiple windows instead of burning the entire budget in one burst.
+// fetchL3Standalone is the single-post L3 fetch primitive used by the L3 cycle
+// (invoked from runL3Wave). It synchronously fetches a post's comments through
+// the NP dispatcher using the same budget gate L1 uses (`needsBudget=true`).
+// This keeps combined L1+L3 traffic from exceeding the 10-minute OAuth window —
+// waitForBudget pauses the dispatch loop the moment remaining quota crosses the
+// reserved threshold, so a busy cycle naturally stretches across multiple
+// windows instead of burning the entire budget in one burst.
 //
 // Failures are logged but never propagated: an L3 miss must not block the
 // surrounding wave's remaining posts.
-func (s *Scheduler) fetchL3Bound(ctx context.Context, tf, sub, postID, urlPath, cycleID string, numComments int) {
-	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, true, numComments)
-}
-
-// fetchL3Standalone is the depth="l3" entry — same primitive as bind, but the
-// ledger row records bind=false so the L3 cycle stays distinguishable from
-// L2-driven bind fetches in the unified prefetch_runs view.
 func (s *Scheduler) fetchL3Standalone(ctx context.Context, tf, sub, postID, urlPath, cycleID string, numComments int) {
 	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, false, numComments)
 }
 
 // fetchL3Single fetches and archives one post's comments. numComments is the
 // upstream-reported comment count L1 last stored for the post (Comments[1]); it
-// is persisted into the ok-run payload as "num_comments" so a later cycle can
-// tell whether the thread has since grown (rumination — see ListL3Ruminate and
-// the ListL3Candidates freeze override). Pass 0 when the count is unknown.
+// is persisted into the ok-run payload as "num_comments" so a later L3 cycle
+// can tell whether the thread has since grown (the ListL3Candidates freeze
+// override re-admits grown threads). Pass 0 when the count is unknown.
 func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath, cycleID string, bound bool, numComments int) {
 	if s.cli == nil && s.l3FetchFn == nil {
 		return
@@ -2605,11 +3239,14 @@ type PrefetchStatus struct {
 	L1NextCycleAbs string
 	// L1Buckets is the per-bucket schedule snapshot for the debug page. One
 	// entry per active bucket, ordered finest-to-coarsest (hour → all).
-	L1Buckets      []PrefetchBucketStatus
-	L2Phase        string
-	L2Sub          string
-	L2Pending      int
-	L2BindMode     bool
+	L1Buckets []PrefetchBucketStatus
+	L2Phase   string
+	L2Sub     string
+	L2Pending int
+	// L2Enabled / L3Enabled report whether the layer actually runs for the
+	// current crawl list (effective per-sub depth, not just the global default).
+	// They drive the explicit on/off status shown per layer on /debug.
+	L2Enabled      bool
 	L2Cycles       []PrefetchL2Cycle
 	L5Phase        string
 	L5Current      string
@@ -2619,8 +3256,9 @@ type PrefetchStatus struct {
 	L3LastAt       string
 	L3LastAtAbs    string
 	L3Count        int
-	L3BindMode     bool
+	L3Enabled      bool
 	L3Recent       []PrefetchL3Bind
+	L3Cycles       []PrefetchL2Cycle
 	L4Phase        string
 	L4Current      string
 	L4QueueLen     int
@@ -2798,7 +3436,7 @@ func (s *Scheduler) Status() PrefetchStatus {
 		L2Phase:        s.l2Phase,
 		L2Sub:          s.l2Sub,
 		L2Pending:      s.l2Pending,
-		L2BindMode:     s.globalBindDefaultEnabled(),
+		L2Enabled:      s.effectiveL2Enabled(),
 		L2Cycles:       s.snapshotL2Cycles(),
 		L5Phase:        s.l5Phase,
 		L5Current:      s.l5Current,
@@ -2808,8 +3446,9 @@ func (s *Scheduler) Status() PrefetchStatus {
 		L3LastAt:       l3LastAt,
 		L3LastAtAbs:    l3LastAtAbs,
 		L3Count:        s.l3Count,
-		L3BindMode:     s.globalBindDefaultEnabled(),
+		L3Enabled:      s.effectiveL3Enabled(),
 		L3Recent:       s.snapshotL3Recent(),
+		L3Cycles:       s.snapshotL3Cycles(),
 		L4Phase:        s.l4Phase,
 		L4Current:      s.l4Current,
 		L4QueueLen:     s.l4QueueLen,
@@ -2941,20 +3580,109 @@ func (s *Scheduler) dropL2Cycle(tf, sub, cycleID string) {
 
 func l2CycleKey(tf, sub string) string { return tf + "|" + sub }
 
-// snapshotL2Cycles materializes the live L2 cycle map into a stable, sorted
-// slice for the /debug panel. Caller already holds statusMu (RLock or Lock).
-func (s *Scheduler) snapshotL2Cycles() []PrefetchL2Cycle {
-	if len(s.l2Cycles) == 0 {
+// recordL3CycleStart / advanceL3Wave / dropL3Cycle are the L3 analogues of the
+// L2 cycle-snapshot helpers, operating on s.l3Cycles so the standalone comment
+// layer gets the same live /debug wave view. bindMode is always false for L3
+// (it is no longer bound to L2); the field is retained only for view symmetry.
+func (s *Scheduler) recordL3CycleStart(tf, sub string, postCount int, chunks []int, cycleStart time.Time, period time.Duration, offsets []time.Duration, cycleID string) {
+	off := append([]time.Duration(nil), offsets...)
+	ch := append([]int(nil), chunks...)
+	s.statusMu.Lock()
+	if s.l3Cycles == nil {
+		s.l3Cycles = make(map[string]*l2CycleSnap)
+	}
+	s.l3Cycles[l2CycleKey(tf, sub)] = &l2CycleSnap{
+		tf:          tf,
+		sub:         sub,
+		postCount:   postCount,
+		waveChunks:  ch,
+		cycleStart:  cycleStart,
+		period:      period,
+		waveOffsets: off,
+		currentWave: 0,
+		cycleID:     cycleID,
+	}
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) advanceL3Wave(tf, sub, cycleID string, wave int) {
+	s.statusMu.Lock()
+	if c, ok := s.l3Cycles[l2CycleKey(tf, sub)]; ok && c.cycleID == cycleID {
+		c.currentWave = wave
+	}
+	s.statusMu.Unlock()
+}
+
+func (s *Scheduler) dropL3Cycle(tf, sub, cycleID string) {
+	s.statusMu.Lock()
+	if c, ok := s.l3Cycles[l2CycleKey(tf, sub)]; ok && c.cycleID == cycleID {
+		delete(s.l3Cycles, l2CycleKey(tf, sub))
+	}
+	s.statusMu.Unlock()
+}
+
+// dropL3CycleAny removes the live L3 cycle snapshot for (tf, sub) regardless of
+// cycle id. Unlike dropL3Cycle (cycle-id guarded so a stale deferred drop can't
+// delete a newer cycle), this is used by retireStandaloneL3 when L3 is switched
+// off for the sub: there is no successor cycle to protect, and the phantom
+// snapshot left behind by a disable-pause must be cleared unconditionally.
+func (s *Scheduler) dropL3CycleAny(tf, sub string) {
+	s.statusMu.Lock()
+	delete(s.l3Cycles, l2CycleKey(tf, sub))
+	s.statusMu.Unlock()
+}
+
+// cycleWaveCount returns the total number of waves planned for a (layer, cycle).
+// L2 is always l2WavesPerCycle; L3's count is variable, so it is read from the
+// live snapshot. Used only to label "wave i/N" event-log lines accurately —
+// callers fall back to l2WavesPerCycle when no snapshot is present.
+func (s *Scheduler) cycleWaveCount(layer, tf, sub, cycleID string) int {
+	if layer != "L3" {
+		return l2WavesPerCycle
+	}
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	if c, ok := s.l3Cycles[l2CycleKey(tf, sub)]; ok && c != nil && c.cycleID == cycleID && len(c.waveOffsets) > 0 {
+		return len(c.waveOffsets)
+	}
+	// L3's wave count is variable and only known from the live snapshot; with no
+	// snapshot we genuinely don't know it. Return 0 (rendered as "?" by
+	// fmtWaveTotal) rather than L2's fixed l2WavesPerCycle, which would mislabel
+	// an L3 cycle as "wave i/5".
+	return 0
+}
+
+// fmtWaveTotal renders a wave-count total for event-log "wave i/N" labels,
+// substituting "?" when the total is unknown (0 — see cycleWaveCount's L3
+// no-snapshot fallback) so a log line never claims a wrong fixed count.
+func fmtWaveTotal(total int) string {
+	if total <= 0 {
+		return "?"
+	}
+	return strconv.Itoa(total)
+}
+
+// snapshotL2Cycles / snapshotL3Cycles materialize the live L2 / L3 cycle maps
+// into a stable, sorted slice for the /debug panels. Caller already holds
+// statusMu (RLock or Lock).
+func (s *Scheduler) snapshotL2Cycles() []PrefetchL2Cycle { return snapshotCycles(s.l2Cycles) }
+func (s *Scheduler) snapshotL3Cycles() []PrefetchL2Cycle { return snapshotCycles(s.l3Cycles) }
+
+// snapshotCycles is the shared formatter behind both layer snapshots — the
+// PrefetchL2Cycle view shape (offsets, per-wave intervals+chunks, current wave)
+// is identical for L2 media waves and L3 comment waves.
+func snapshotCycles(m map[string]*l2CycleSnap) []PrefetchL2Cycle {
+	if len(m) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(s.l2Cycles))
-	for k := range s.l2Cycles {
+	keys := make([]string, 0, len(m))
+	for k := range m {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	out := make([]PrefetchL2Cycle, 0, len(keys))
 	for _, k := range keys {
-		c := s.l2Cycles[k]
+		c := m[k]
 		offsets := make([]string, len(c.waveOffsets))
 		intervals := make([]string, len(c.waveOffsets))
 		var prev time.Duration

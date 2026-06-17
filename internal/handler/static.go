@@ -592,6 +592,23 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 				Status:   r.Status,
 			})
 		}
+		l3Cycles := make([]render.PrefetchL2CycleView, 0, len(ps.L3Cycles))
+		for _, c := range ps.L3Cycles {
+			l3Cycles = append(l3Cycles, render.PrefetchL2CycleView{
+				TF:            c.TF,
+				Sub:           c.Sub,
+				PostCount:     c.PostCount,
+				WaveCount:     c.WaveCount,
+				CurrentWave:   c.CurrentWave,
+				BindMode:      c.BindMode,
+				StartedAgo:    c.StartedAgo,
+				StartedAtAbs:  c.StartedAtAbs,
+				Period:        c.Period,
+				WaveOffsets:   append([]string(nil), c.WaveOffsets...),
+				WaveIntervals: append([]string(nil), c.WaveIntervals...),
+				CycleID:       c.CycleID,
+			})
+		}
 		prefetchStatus = render.PrefetchStatusView{
 			Enabled:        ps.Enabled,
 			ActiveSubs:     strings.Join(ps.ActiveSubs, ", "),
@@ -605,7 +622,7 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L2Phase:        ps.L2Phase,
 			L2Sub:          ps.L2Sub,
 			L2Pending:      ps.L2Pending,
-			L2BindMode:     ps.L2BindMode,
+			L2Enabled:      ps.L2Enabled,
 			L2Cycles:       l2Cycles,
 			L5Phase:        ps.L5Phase,
 			L5Current:      ps.L5Current,
@@ -615,8 +632,9 @@ func (h *Handler) handleDebug(w http.ResponseWriter, r *http.Request) {
 			L3LastAt:       ps.L3LastAt,
 			L3LastAtAbs:    ps.L3LastAtAbs,
 			L3Count:        ps.L3Count,
-			L3BindMode:     ps.L3BindMode,
+			L3Enabled:      ps.L3Enabled,
 			L3Recent:       l3Recent,
+			L3Cycles:       l3Cycles,
 			L4Phase:        ps.L4Phase,
 			L4Current:      ps.L4Current,
 			L4QueueLen:     ps.L4QueueLen,

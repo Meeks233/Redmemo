@@ -870,9 +870,10 @@ func (s *PostStore) ListNeedingMedia(sub string, limit int) ([]*StoredPost, erro
 // under the cycle-freeze + min-comments rules:
 //
 //   - Cycle freeze: a post whose most recent successful L3 fetch was during the
-//     *current* L1 cycle (currentCycleID) or the *previous* one (prevCycleID for
-//     this sub) is skipped — so a post archived in cycle N stays frozen during
-//     cycle N+1 and naturally unfreezes at cycle N+2 if L1 re-surfaces it.
+//     *current* L3 cycle (currentCycleID) or the *previous* one (prevCycleID for
+//     this sub) is skipped — so a post archived in L3 cycle N stays frozen during
+//     N+1 and naturally unfreezes at N+2. The cycle ids are now L3's own lineage
+//     (L3:<tf>:<sub>:<unix>), decoupled from L1/L2.
 //   - Min comments: a post whose stored num_comments is < minComments is
 //     skipped at the SQL layer; the count is parsed from the archived
 //     reddit.Post JSON (Comments[1] is the raw numeric string). 0 disables the
@@ -917,81 +918,6 @@ func (s *PostStore) ListL3Candidates(sub, currentCycleID, prevCycleID string, li
 	}
 	defer rows.Close()
 	return scanPosts(rows)
-}
-
-// ListL3Ruminate returns posts whose upstream-reported comment count has grown
-// since their most recent successful L3 fetch — the bind-mode (depth="l2+l3")
-// counterpart to the cycle-freeze override baked into ListL3Candidates.
-//
-// In bind mode a post's comments are archived exactly once, at the instant L2
-// marks its media done; thereafter the post leaves ListNeedingMedia forever and
-// never re-enters the L2 wave, so a later L1 re-scan that shows new replies
-// would otherwise be silently dropped. This query is the recovery path: it
-// re-admits any post (media-done or not) whose Comments[1] now exceeds the
-// num_comments recorded in its latest ok L3 run.
-//
-// Selection rules:
-//   - Baseline required: only posts already L3-fetched at least once with a
-//     recorded num_comments (INNER JOIN + last_nc >= 0). A post never fetched
-//     has no "grew since" reference and is left to the normal media-transition
-//     bind path.
-//   - Growth required: current Comments[1] strictly greater than last_nc.
-//   - Min-comments waterline applied (minComments = 0 disables it).
-//   - Same-cycle freeze: a post already L3-fetched during currentCycleID is
-//     excluded so multiple waves in one cycle don't re-fetch the same growth.
-//
-// Ordered by largest growth first so a limited batch spends quota on the posts
-// that gained the most replies.
-func (s *PostStore) ListL3Ruminate(sub, currentCycleID string, limit, minComments int) ([]L3RuminateCandidate, error) {
-	rows, err := s.db.Query(`
-		WITH last_l3 AS (
-			SELECT DISTINCT ON (post_id) post_id, cycle_id,
-			       COALESCE(NULLIF(payload->>'num_comments', '')::int, -1) AS last_nc
-			FROM prefetch_runs
-			WHERE layer = 'L3'
-			  AND post_id IS NOT NULL
-			  AND status = 'ok'
-			  AND LOWER(subreddit) = LOWER($1)
-			ORDER BY post_id, scheduled_at DESC
-		)
-		SELECT p.url_path, p.subreddit, p.post_id, p.title, p.json_data, p.rendered_html,
-		       p.author, p.score, p.created_utc, p.first_seen, p.last_updated, p.source, p.media_done,
-		       COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) AS current_nc,
-		       ll.last_nc
-		FROM posts p
-		JOIN last_l3 ll ON ll.post_id = p.post_id
-		WHERE LOWER(p.subreddit) = LOWER($1)
-		  AND ll.last_nc >= 0
-		  AND COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) > ll.last_nc
-		  AND ($4 = 0
-		       OR COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) >= $4)
-		  -- Same-cycle freeze: skip a post already L3-fetched this cycle so
-		  -- multiple waves don't re-chase the same growth. An empty cycle id
-		  -- ($2='') disables the freeze (NULLIF → NULL → first term true).
-		  AND (NULLIF($2, '') IS NULL OR ll.cycle_id IS NULL OR ll.cycle_id <> $2)
-		ORDER BY (COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) - ll.last_nc) DESC,
-		         p.created_utc DESC
-		LIMIT $3`, sub, currentCycleID, limit, minComments,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list L3 ruminate: %w", err)
-	}
-	defer rows.Close()
-
-	var out []L3RuminateCandidate
-	for rows.Next() {
-		p := &StoredPost{}
-		var current, last int
-		if err := rows.Scan(
-			&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
-			&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
-			&current, &last,
-		); err != nil {
-			return nil, fmt.Errorf("scan L3 ruminate candidate: %w", err)
-		}
-		out = append(out, L3RuminateCandidate{Post: p, CurrentComments: current, LastComments: last})
-	}
-	return out, rows.Err()
 }
 
 func (s *PostStore) SaveHTML(urlPath string, html []byte) error {

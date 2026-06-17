@@ -66,7 +66,7 @@ All overridable, all auto-translated from `REDLIB_DEFAULT_*`.
 | `REDMEMO_DEFAULT_ENABLE_DEBUG` | `on`, `off` | `off` | Expose `/debug` to all visitors of this instance. |
 | `REDMEMO_DEFAULT_PREFETCH_SUBS` | unified search grammar | (empty) | NP crawl list, e.g. `sub:golang+rust`. A non-empty list enables the background prefetch loops; empty leaves them idle (no separate toggle). |
 | `REDMEMO_DEFAULT_PREFETCH_THRESHOLD` | `1..99` | `50` | Per-sub freshness threshold (%). |
-| `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` | `0..100000` | `0` (compose presets ship `50`) | L3 noise floor — posts with fewer comments are frozen out of bind + standalone L3. Invalid value aborts startup. |
+| `REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS` | `0..100000` | `0` (compose presets ship `50`) | L3 noise floor — posts with fewer comments are frozen out of L3. Invalid value aborts startup. |
 | `REDMEMO_DEFAULT_ARCHIVE_CONTROL` | `+`/`-` sub list | (empty) | Archive whitelist/blacklist, e.g. `cats+dogs` (only those) or `-spam-meta` (everything except). Any `+` discards all `-` entries; duplicate names are dropped entirely. Empty = archive everything. Full grammar: [Archive Control](Archive-Control.md). |
 | `REDMEMO_DEFAULT_SHOW_LOCAL_NSFW_SUBS` | `on`, `off` | `off` | Show NSFW subs in the local archive navigation. |
 | `REDMEMO_DEFAULT_FETCH_SUB_ABOUT` | `on`, `off` | `off` | Allow background `/r/<sub>/about.json` refresh. |

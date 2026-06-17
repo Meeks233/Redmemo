@@ -207,21 +207,31 @@ func (s *PrefetchRunStore) SupersedePending(layer, bucket, subreddit, keepCycleI
 	return n, nil
 }
 
-// PreviousL1CycleID returns the cycle_id of the L1 fetch for `subreddit` whose
+// PreviousL3CycleID returns the cycle_id of the L3 cycle for `subreddit` whose
 // scheduled_at is the most recent strictly earlier than currentCycleID's. Used
-// by L3 cycle-freeze dedup: a post archived in the *previous* L1 cycle stays
-// frozen for the current one (and unfreezes automatically two cycles later
-// when this query rolls forward). Returns "" with no error when no prior cycle
-// exists yet — callers treat that as "no freeze prior to current".
-func (s *PrefetchRunStore) PreviousL1CycleID(subreddit, currentCycleID string) (string, error) {
+// by L3 cycle-freeze dedup, now keyed on L3's OWN lineage rather than L1's: a
+// post archived in the *previous* L3 cycle stays frozen for the current one
+// (and unfreezes automatically two L3 cycles later when this query rolls
+// forward). Returns "" with no error when no prior L3 cycle exists yet —
+// callers treat that as "no freeze prior to current".
+//
+// Only cycles that actually ran count as "previous": 'skipped' (superseded /
+// orphaned) and still-'pending' wave rows are excluded. This matters because a
+// superseded cycle's wave rows keep their original (possibly future)
+// scheduled_at, so without the filter such a no-op cycle could outrank the real
+// previous cycle by MAX(scheduled_at) and silently disable the freeze (no post
+// ever carries a skipped cycle's id, so freezing on it is a no-op → redundant
+// comment re-fetches).
+func (s *PrefetchRunStore) PreviousL3CycleID(subreddit, currentCycleID string) (string, error) {
 	var prev sql.NullString
 	err := s.db.QueryRow(`
 		SELECT cycle_id
 		  FROM prefetch_runs
-		 WHERE layer = 'L1'
+		 WHERE layer = 'L3'
 		   AND LOWER(subreddit) = LOWER($1)
 		   AND cycle_id IS NOT NULL
 		   AND cycle_id <> $2
+		   AND status NOT IN ('skipped', 'pending')
 		 GROUP BY cycle_id
 		 ORDER BY MAX(scheduled_at) DESC
 		 LIMIT 1`, subreddit, currentCycleID,
@@ -230,12 +240,44 @@ func (s *PrefetchRunStore) PreviousL1CycleID(subreddit, currentCycleID string) (
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("previous L1 cycle id: %w", err)
+		return "", fmt.Errorf("previous L3 cycle id: %w", err)
 	}
 	if !prev.Valid {
 		return "", nil
 	}
 	return prev.String, nil
+}
+
+// LastCyclePostCount returns the post_count of the most recent L1-lineage cycle
+// for (bucket, subreddit) — i.e. how many posts the last L1 listing round
+// surfaced. reconcileLoop uses it to size a regenerated L2/L3 cycle the same way
+// a real L1 round would, instead of over-counting the full archive backlog.
+//
+// It deliberately excludes standalone L3 cycles (cycle_id 'L3:%'): their
+// post_count is itself derived from an L1 round, so reading it back to size the
+// next regenerated L3 cycle would be circular (and would perpetuate a bad value
+// once one slipped in). Only the L1/L2-lineage cycle_ids ('<tf>:<sub>:<unix>')
+// carry the authoritative round size. Returns 0 (no error) when none exists yet.
+func (s *PrefetchRunStore) LastCyclePostCount(bucket, subreddit string) (int, error) {
+	var pc sql.NullInt64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(NULLIF(payload->>'post_count', '')::int, 0)
+		  FROM prefetch_runs
+		 WHERE LOWER(subreddit) = LOWER($2)
+		   AND (bucket = $1 OR $1 = '')
+		   AND (cycle_id IS NULL OR cycle_id NOT LIKE 'L3:%')
+		   AND payload ? 'post_count'
+		   AND COALESCE(NULLIF(payload->>'post_count', '')::int, 0) > 0
+		 ORDER BY id DESC
+		 LIMIT 1`, bucket, subreddit,
+	).Scan(&pc)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("last cycle post_count: %w", err)
+	}
+	return int(pc.Int64), nil
 }
 
 // FailStaleRunning terminates rows left in 'running' state by a dead process.

@@ -9,20 +9,29 @@ NP is a producer/consumer pipeline that quietly fills the archive without burst 
 | Layer | Trigger | Cost / round | Behaviour |
 |-------|---------|--------------|-----------|
 | **L1** Shallow archive | One cycle per sub-timeframe bucket; cycle period = bucket base ± jitter; one fetch per sub per cycle, randomly spaced within the cycle | 1 Reddit API request per sub per cycle | Walks the sub's resolved listing (`/r/{sub}/{sort}.json?t=`) with `after` cursor. UPSERTs into `posts`, preserves `media_done`. Identifies new posts and hands them to L2. |
-| **L2** Media archive | Runs immediately after each L1 fetch | 0 Reddit API requests | Sorts new posts newest-first, downloads image/video/gallery via CDN, marks `media_done = true`. Verifies files still exist on disk and re-downloads if evicted. |
-| **L3** Deep archive | Passive — user visits a post page | 1 Reddit API request on demand | Comments are only ever fetched when a human asks for them. |
+| **L2** Media archive | Runs immediately after each L1 fetch | 0 Reddit API requests (CDN only) | Pure cache acceleration. Sorts new posts newest-first, downloads image/video/gallery via CDN, marks `media_done = true`. Verifies files still exist on disk and re-downloads if evicted. The CDN is effectively unmetered, so L2 never spends OAuth budget and never gates L3. |
+| **L3** Deep archive | Scheduled — one independent L3 cycle per L1 fetch for any sub whose depth covers comments (plus the on-demand post-handler path) | 1 Reddit API request per comment fetch | Self-standing comment layer. Decoupled from L1/L2 in the ledger: mints its **own** cycle id (`L3:<tf>:<sub>:<unix>`), supersedes its own lineage, and chooses work via `ListL3Candidates` (recent posts, freeze + min-comments + growth override) rather than L2's `media_done` queue. Shares the NP dispatcher + OAuth budget gate with L1 — the two API-budget layers jointly pace their requests. |
 | **L4** Icon cache | Startup + every 1 h + on `/archive` view | 1 Reddit API request per sub when stale | Keeps `sub_icons` fresh (default TTL 30 days). Icon image itself is a CDN download. |
 
 ## Depth (which layers run per sub)
 
 NP exposes a **depth** dimension on top of the L1 / L2 / L3 layer split: it controls whether each crawled sub also runs media downloads and/or comment fetches. Resolved per sub, override > global:
 
-| Value | L1 (listings) | L2 (media) | L3 (comments) |
-|-------|---------------|------------|---------------|
+| Value | L1 (listings) | L2 (media cache) | L3 (comments) |
+|-------|---------------|------------------|---------------|
 | `none` | yes | no | no |
 | `l2`   | yes | yes | no |
-| `l3`   | yes | no  | yes (each post in the wave) |
-| `l2+l3` | yes | yes | yes (visit-like, default) |
+| `l3`   | yes | no  | yes (independent L3 cycle) |
+| `l2+l3` | yes | yes | yes (independent L3 cycle, in parallel with L2; default) |
+
+L2 and L3 are independent: when a sub's depth covers both, the per-L1-fetch fan-out spawns an L2 media wave **and** a separate L3 comment cycle that run concurrently and never share a cycle key. L3 no longer rides L2's media-done queue, so text posts (the majority on discussion subs) get their comments archived just like media posts. Setting `depth:l2` turns comments off; `depth:l3` archives comments without touching the CDN.
+
+### L3 wave dispersion (per-wave API cap)
+
+Both layers chop their cycle period into 5 non-uniform waves with randomized offsets (`planWaveOffsets` — same stealth tempo for L2 and L3). They differ on per-wave *volume*:
+
+- **L2** waves are sized against `l2WaveCap` (100). CDN downloads are effectively unmetered, so a wave may drain a large media chunk.
+- **L3** waves are sized against `l3WaveCap` (**10**). Every L3 fetch spends one real OAuth API request, so `planL3Waves` caps each wave at ~10 fetches via `splitNonUniform(postCount, 5, l3WaveCap)`. A full 100-post L1 round therefore disperses into at most ~5×10 = 50 comment fetches this cycle, spread across the 5 random offsets; the overflow is simply picked up on a later cycle (L3 re-walks recent posts each cycle, it never has to drain everything at once). The count is hard-capped; only the firing *offsets* are allowed to spread to the full period.
 
 - Global default: `prefetch_default_depth` (storage key) / `REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH` (env). The settings page renders it as the **Default depth** select on the NP fieldset.
 - Per-sub override: append `depth:<value>` inside a prefetch override clause, e.g. `golang=depth:l2+l3&sort:top` or `rust=depth:none`. Override wins per-sub. Unknown values are dropped.
@@ -127,12 +136,18 @@ The per-sub gap is floored at `minBucketGap` (30 s) so unlucky jitter can't sque
                                ▼
                         Reddit API + CDN
 
-   L3 (comments): on-demand only, fired from the post handler,
-                  never scheduled here.
+   L3 (comments): self-standing scheduled layer — one independent L3
+                  cycle spawned per L1 fetch (own cycle id, own ledger
+                  lineage), plus the on-demand post-handler path. Shares
+                  this dispatcher + OAuth budget gate with L1.
    L4 (icons):    independent hourly loop, sharing the dispatcher.
    L5 (audio):    drains once per L1 bucket cycle, after L2.
 ```
 
 All bucket loops feed work items into the single NP dispatch queue, so the total outbound rate is still bounded by the dispatcher's per-call cooldown and the HR budget — no matter how many buckets are active at once.
+
+### Reclaim respects the current depth
+
+At startup the scheduler revives pending L2/L3 waves from `prefetch_runs` (the ledger survives container death; in-memory goroutines do not). The reclaim path is **depth-gated**: before reviving a group it checks `depthCoversLayer(layer, resolveSubDepth(sub))`. If the operator changed a sub's depth since those waves were scheduled — e.g. flipped it to `l3` (L2 off) — the leftover pending L2 rows are marked `skipped` ("depth no longer covers L2") and are **not** revived, their `/debug` cycle snapshot is not rebuilt, and the reclaim status is never set. Without this, an L3-only sub would show a phantom **"L2 recovering"** on `/debug` for the whole period, because each orphaned wave only skipped itself late (after sleeping to its `scheduled_at`). The same guard sits at the top of `driveReclaimedCycle` as a backstop.
 
 Cursors persist per-bucket (`_prefetch_bucket_state_<tf>`) and per `(sub, sort, t)` key. They advance through a sub's listing across cycles; when a cursor exhausts within a cycle, the bucket clears the per-cycle exhaustion map and re-walks from the head on the next cycle so new "hot" / "top" content is still captured.
