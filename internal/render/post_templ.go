@@ -303,10 +303,16 @@ func postContent(d PostPageData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			if d.HasLocalComments {
+				templ_7745c5c3_Err = cloudCheckSVG().Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(d.Post.Comments[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 92, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 96, Col: 26}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -319,7 +325,7 @@ func postContent(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(commentsWord(d.Post.Comments[1]))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 92, Col: 84}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 96, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -332,7 +338,7 @@ func postContent(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.sorted_by"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 92, Col: 138}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 96, Col: 117}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -345,7 +351,7 @@ func postContent(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "comments.sort_title"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 93, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 98, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {
@@ -363,7 +369,7 @@ func postContent(d PostPageData) templ.Component {
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(s)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 95, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 100, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 				if templ_7745c5c3_Err != nil {
@@ -386,7 +392,7 @@ func postContent(d PostPageData) templ.Component {
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "sort."+s))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 95, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 100, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -412,7 +418,7 @@ func postContent(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.CommentQuery)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 101, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 106, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -425,7 +431,7 @@ func postContent(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "comments.search_placeholder"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 101, Col: 156}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 106, Col: 156}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -439,7 +445,7 @@ func postContent(d PostPageData) templ.Component {
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.containing", d.CommentQuery))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 107, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 112, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -452,7 +458,7 @@ func postContent(d PostPageData) templ.Component {
 				var templ_7745c5c3_Var24 templ.SafeURL
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(d.URLWithoutQuery))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 107, Col: 130}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 112, Col: 130}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -465,7 +471,7 @@ func postContent(d PostPageData) templ.Component {
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.all"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 107, Col: 157}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 112, Col: 157}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
@@ -493,7 +499,7 @@ func postContent(d PostPageData) templ.Component {
 					var templ_7745c5c3_Var26 templ.SafeURL
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(d.Post.Permalink))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 114, Col: 70}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 119, Col: 70}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -506,7 +512,7 @@ func postContent(d PostPageData) templ.Component {
 					var templ_7745c5c3_Var27 string
 					templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.view_all"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 114, Col: 102}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 119, Col: 102}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 					if templ_7745c5c3_Err != nil {
@@ -524,7 +530,7 @@ func postContent(d PostPageData) templ.Component {
 						var templ_7745c5c3_Var28 string
 						templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.show_parent"))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 116, Col: 86}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 121, Col: 86}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 						if templ_7745c5c3_Err != nil {
@@ -592,7 +598,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.exhausted"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 137, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 142, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
@@ -605,7 +611,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.upstream_disabled"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 150, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 155, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -623,7 +629,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 			var templ_7745c5c3_Var32 templ.SafeURL
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + post.Permalink))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 153, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 158, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -636,7 +642,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.access_directly"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 155, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 160, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -654,7 +660,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 			var templ_7745c5c3_Var34 templ.SafeURL
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + post.Permalink))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 158, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 163, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -667,7 +673,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "fr.access_directly"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 158, Col: 213}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 163, Col: 213}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -680,7 +686,7 @@ func upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) templ.Co
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "fr.access_directly"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 160, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 165, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -729,7 +735,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "modal.leave_title"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 174, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 179, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
@@ -742,7 +748,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "modal.leave_body"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 175, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 180, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 		if templ_7745c5c3_Err != nil {
@@ -755,7 +761,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var40 string
 		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs("https://www.reddit.com" + permalink)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 176, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 181, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 		if templ_7745c5c3_Err != nil {
@@ -768,7 +774,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var41 string
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "modal.leave_cancel"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 178, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 183, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 		if templ_7745c5c3_Err != nil {
@@ -781,7 +787,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var42 templ.SafeURL
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + permalink))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 179, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 184, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 		if templ_7745c5c3_Err != nil {
@@ -794,7 +800,7 @@ func visitRedditConfirmation(permalink string) templ.Component {
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "modal.leave_confirm"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 179, Col: 189}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 184, Col: 189}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
@@ -839,7 +845,7 @@ func timeMachineInline() templ.Component {
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.time_machine_title"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 189, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 194, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 		if templ_7745c5c3_Err != nil {
@@ -852,7 +858,7 @@ func timeMachineInline() templ.Component {
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.time_machine"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 191, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 196, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
@@ -913,7 +919,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var50 templ.SafeURL
 		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/r/" + post.Community))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 200, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 205, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 		if templ_7745c5c3_Err != nil {
@@ -926,7 +932,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var51 string
 		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(post.Community)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 200, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 205, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 		if templ_7745c5c3_Err != nil {
@@ -961,7 +967,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var54 templ.SafeURL
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/user/" + post.Author.Name))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 202, Col: 107}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 207, Col: 107}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 		if templ_7745c5c3_Err != nil {
@@ -974,7 +980,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(post.Author.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 202, Col: 130}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 207, Col: 130}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 		if templ_7745c5c3_Err != nil {
@@ -1005,7 +1011,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Created)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 207, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 212, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
@@ -1018,7 +1024,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(post.RelTime)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 207, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 212, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 		if templ_7745c5c3_Err != nil {
@@ -1034,9 +1040,9 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var58 string
-			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.ArchivedTime)
+			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.archived", post.ArchivedTime))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 210, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 215, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 			if templ_7745c5c3_Err != nil {
@@ -1046,10 +1052,14 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var59 string
-			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archived", post.ArchivedRelTime))
+			templ_7745c5c3_Err = cloudCheckSVG().Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 210, Col: 103}
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var59 string
+			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(" " + post.ArchivedRelTime)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 217, Col: 34}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 			if templ_7745c5c3_Err != nil {
@@ -1073,7 +1083,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var60 string
 				templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 216, Col: 42}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 224, Col: 42}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 				if templ_7745c5c3_Err != nil {
@@ -1086,7 +1096,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var61 string
 				templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 217, Col: 26}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 225, Col: 26}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 				if templ_7745c5c3_Err != nil {
@@ -1099,7 +1109,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var62 string
 				templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.ResolveAttributeValue(aw.IconURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 217, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 225, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var62)
 				if templ_7745c5c3_Err != nil {
@@ -1112,7 +1122,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var63 string
 				templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(i64(aw.Count))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 218, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 				if templ_7745c5c3_Err != nil {
@@ -1140,7 +1150,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var64 string
 			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.refetch_title"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 234, Col: 91}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var64)
 			if templ_7745c5c3_Err != nil {
@@ -1153,7 +1163,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var65 string
 			templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Community)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 127}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 234, Col: 127}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 			if templ_7745c5c3_Err != nil {
@@ -1166,7 +1176,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var66 string
 			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 155}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 234, Col: 155}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 			if templ_7745c5c3_Err != nil {
@@ -1179,7 +1189,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var67 string
 			templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.refresh_failed"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 205}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 234, Col: 205}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 			if templ_7745c5c3_Err != nil {
@@ -1192,7 +1202,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var68 string
 			templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.network_error"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 226, Col: 257}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 234, Col: 257}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 			if templ_7745c5c3_Err != nil {
@@ -1205,7 +1215,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var69 string
 			templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.refresh"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 228, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 236, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 			if templ_7745c5c3_Err != nil {
@@ -1223,7 +1233,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var70 string
 			templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.no_tokens_title"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 231, Col: 102}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 239, Col: 102}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 			if templ_7745c5c3_Err != nil {
@@ -1236,7 +1246,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var71 string
 			templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.no_tokens_alert"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 231, Col: 152}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 239, Col: 152}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 			if templ_7745c5c3_Err != nil {
@@ -1249,7 +1259,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var72 string
 			templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.refresh"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 233, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 241, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 			if templ_7745c5c3_Err != nil {
@@ -1268,7 +1278,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var73 string
 			templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.goto_reddit"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 237, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 245, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 			if templ_7745c5c3_Err != nil {
@@ -1281,7 +1291,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var74 templ.SafeURL
 			templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + post.Permalink))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 237, Col: 132}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 245, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 			if templ_7745c5c3_Err != nil {
@@ -1294,7 +1304,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.reddit"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 239, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 247, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 			if templ_7745c5c3_Err != nil {
@@ -1312,7 +1322,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var76 string
 			templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "post.goto_reddit"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 242, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 250, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 			if templ_7745c5c3_Err != nil {
@@ -1325,7 +1335,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var77 templ.SafeURL
 			templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://www.reddit.com" + post.Permalink))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 242, Col: 132}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 250, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 			if templ_7745c5c3_Err != nil {
@@ -1338,7 +1348,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.reddit"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 244, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 252, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 			if templ_7745c5c3_Err != nil {
@@ -1365,7 +1375,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var79 templ.SafeURL
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(flairSearchHref(post.Flair.Text, post.Community)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 252, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 260, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 			if templ_7745c5c3_Err != nil {
@@ -1378,7 +1388,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(flairBoxStyle(post.Flair.ForegroundColor, post.Flair.BackgroundColor))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 252, Col: 176}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 260, Col: 176}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1400,7 +1410,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var81 string
 		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(post.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 254, Col: 15}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 262, Col: 15}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 		if templ_7745c5c3_Err != nil {
@@ -1414,7 +1424,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 256, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 264, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 			if templ_7745c5c3_Err != nil {
@@ -1429,7 +1439,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var83 string
 			templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 259, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 267, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 			if templ_7745c5c3_Err != nil {
@@ -1442,7 +1452,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var84 string
 			templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "flag.nsfw"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 259, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 267, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 			if templ_7745c5c3_Err != nil {
@@ -1457,7 +1467,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var85 string
 			templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(" ")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 262, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 270, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 			if templ_7745c5c3_Err != nil {
@@ -1470,7 +1480,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var86 string
 			templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "flag.spoiler"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 262, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 270, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 			if templ_7745c5c3_Err != nil {
@@ -1493,7 +1503,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var87 templ.SafeURL
 			templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 267, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 275, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 			if templ_7745c5c3_Err != nil {
@@ -1511,7 +1521,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var88 string
 				templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.post_image"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 269, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 277, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 				if templ_7745c5c3_Err != nil {
@@ -1524,7 +1534,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var89 string
 				templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 269, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 277, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 				if templ_7745c5c3_Err != nil {
@@ -1542,7 +1552,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var90 string
 				templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Width) + "px")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 271, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 279, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
 				if templ_7745c5c3_Err != nil {
@@ -1555,7 +1565,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var91 string
 				templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(i64(post.Media.Height) + "px")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 271, Col: 88}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 279, Col: 88}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 				if templ_7745c5c3_Err != nil {
@@ -1568,7 +1578,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var92 string
 				templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(post.Media.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 272, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 280, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 				if templ_7745c5c3_Err != nil {
@@ -1581,7 +1591,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var93 string
 				templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.post_image"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 273, Col: 63}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 281, Col: 63}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 				if templ_7745c5c3_Err != nil {
@@ -1594,7 +1604,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var94 string
 				templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Media.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 273, Col: 86}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 281, Col: 86}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 				if templ_7745c5c3_Err != nil {
@@ -1622,7 +1632,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var95 string
 				templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithLongMark(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 283, Col: 115}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 291, Col: 115}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 				if templ_7745c5c3_Err != nil {
@@ -1640,7 +1650,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var96 string
 				templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 286, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 294, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 				if templ_7745c5c3_Err != nil {
@@ -1674,7 +1684,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var97 templ.SafeURL
 			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(post.Media.URL, post.Title)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 296, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 304, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 			if templ_7745c5c3_Err != nil {
@@ -1687,7 +1697,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var98 string
 			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "media.video"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 296, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 304, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 			if templ_7745c5c3_Err != nil {
@@ -1710,7 +1720,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var99 templ.SafeURL
 				templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(g.URL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 302, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 310, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 				if templ_7745c5c3_Err != nil {
@@ -1723,7 +1733,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var100 string
 				templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "alt.gallery_image"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 302, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 310, Col: 92}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 				if templ_7745c5c3_Err != nil {
@@ -1736,7 +1746,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var101 string
 				templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.ResolveAttributeValue(g.URL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 302, Col: 106}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 310, Col: 106}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 				if templ_7745c5c3_Err != nil {
@@ -1749,7 +1759,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 				var templ_7745c5c3_Var102 string
 				templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinStringErrs(g.Caption)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 304, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 312, Col: 21}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
 				if templ_7745c5c3_Err != nil {
@@ -1767,7 +1777,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 					var templ_7745c5c3_Var103 templ.SafeURL
 					templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(g.OutboundURL))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 306, Col: 66}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 314, Col: 66}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var103))
 					if templ_7745c5c3_Err != nil {
@@ -1780,7 +1790,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 					var templ_7745c5c3_Var104 string
 					templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(g.OutboundURL)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 306, Col: 99}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 314, Col: 99}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
 					if templ_7745c5c3_Err != nil {
@@ -1808,7 +1818,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var105 templ.SafeURL
 			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 313, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 321, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 			if templ_7745c5c3_Err != nil {
@@ -1821,7 +1831,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var106 string
 			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.JoinStringErrs(post.Media.URL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 313, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 321, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var106))
 			if templ_7745c5c3_Err != nil {
@@ -1851,7 +1861,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var107 string
 		templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(post.Score[1])
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 319, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 327, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
@@ -1865,7 +1875,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var108 string
 			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(post.Score[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 321, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
 			if templ_7745c5c3_Err != nil {
@@ -1888,7 +1898,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var109 string
 		templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvotes"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 325, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 333, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 		if templ_7745c5c3_Err != nil {
@@ -1901,7 +1911,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var110 templ.SafeURL
 		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(post.Permalink))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 337, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 		if templ_7745c5c3_Err != nil {
@@ -1914,7 +1924,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 103}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 337, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 		if templ_7745c5c3_Err != nil {
@@ -1927,7 +1937,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var112 string
 		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.permalink_short"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 329, Col: 170}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 337, Col: 170}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 		if templ_7745c5c3_Err != nil {
@@ -1945,7 +1955,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var113 templ.SafeURL
 			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/r/" + post.Community + "/duplicates/" + post.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 331, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 339, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 			if templ_7745c5c3_Err != nil {
@@ -1958,7 +1968,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var114 string
 			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 331, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 339, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
 			if templ_7745c5c3_Err != nil {
@@ -1971,7 +1981,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var115 string
 			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.duplicates_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 331, Col: 208}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 339, Col: 208}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
@@ -1990,7 +2000,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var116 templ.SafeURL
 			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 334, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 342, Col: 116}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 			if templ_7745c5c3_Err != nil {
@@ -2003,7 +2013,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var117 string
 			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archiveis"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 334, Col: 145}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 342, Col: 145}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 			if templ_7745c5c3_Err != nil {
@@ -2016,7 +2026,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var118 templ.SafeURL
 			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("https://archive.is/latest/" + post.Media.URL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 335, Col: 115}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 343, Col: 115}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 			if templ_7745c5c3_Err != nil {
@@ -2029,7 +2039,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var119 string
 			templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.archive_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 335, Col: 148}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 343, Col: 148}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 			if templ_7745c5c3_Err != nil {
@@ -2048,7 +2058,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var120 templ.SafeURL
 			templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(WithDownloadTitle(reddit.VideoQualityURL(post.Media.URL, prefs.VideoQuality), post.Title)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 339, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 347, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 			if templ_7745c5c3_Err != nil {
@@ -2061,7 +2071,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var121 string
 			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download_short"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 340, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 348, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 			if templ_7745c5c3_Err != nil {
@@ -2074,7 +2084,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 			var templ_7745c5c3_Var122 string
 			templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "post.download"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 341, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 349, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
 			if templ_7745c5c3_Err != nil {
@@ -2092,7 +2102,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var123 string
 		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(i64(post.UpvoteRatio))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 346, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 354, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 		if templ_7745c5c3_Err != nil {
@@ -2105,7 +2115,7 @@ func postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) templ
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(" " + T(ctx, "post.upvoted"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 346, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 354, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 		if templ_7745c5c3_Err != nil {
@@ -2191,7 +2201,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var127 string
 			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.Community)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 455, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 463, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 			if templ_7745c5c3_Err != nil {
@@ -2204,7 +2214,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Post.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 456, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 464, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
@@ -2217,7 +2227,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var129 string
 			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.ResolveAttributeValue(d.Sort)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 457, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 465, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var129)
 			if templ_7745c5c3_Err != nil {
@@ -2230,7 +2240,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var130 string
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(len(d.Comments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 458, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 466, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var130)
 			if templ_7745c5c3_Err != nil {
@@ -2243,7 +2253,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(loadMoreStep(d.MoreComments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 459, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 467, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
@@ -2256,7 +2266,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var132 string
 			templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(d.MoreComments))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 460, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 468, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var132)
 			if templ_7745c5c3_Err != nil {
@@ -2269,7 +2279,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var133 string
 			templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.ResolveAttributeValue(T(ctx, "comments.load_more", "{n}"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 461, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 469, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 			if templ_7745c5c3_Err != nil {
@@ -2282,7 +2292,7 @@ func loadMoreComments(d PostPageData) templ.Component {
 			var templ_7745c5c3_Var134 string
 			templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.JoinStringErrs(T(ctx, "comments.load_more", loadMoreStep(d.MoreComments)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 462, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/render/post.templ`, Line: 470, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var134))
 			if templ_7745c5c3_Err != nil {

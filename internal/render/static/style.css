@@ -2237,6 +2237,21 @@ video.lazy-media:not([src]) {
     font-style: italic;
 }
 
+/* cloud-check "cached locally" glyph — sized to the surrounding text and
+   baseline-nudged so it sits centred against the run of text it precedes
+   (the archived-time badge and the comment-count line). */
+.cloud-check {
+    width: 1.05em;
+    height: 1.05em;
+    vertical-align: -0.18em;
+    flex: none;
+}
+
+#comment_count > .cloud-check {
+    margin-right: 0.3em;
+    opacity: 0.85;
+}
+
 /* Time Machine pill — theme-aware capsule rendered next to the post/comment
    author so removed posts read as "archived from upstream" without claiming a
    full banner row. Border/background tint trail the active accent so the badge

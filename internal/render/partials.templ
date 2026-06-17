@@ -115,6 +115,17 @@ templ renderFlair(parts []reddit.FlairPart) {
 	}
 }
 
+// cloudCheckSVG is the "cached locally" indicator — a lucide cloud-check drawn
+// at text size. It stands in for the word "archived" in the archived-time badge
+// and sits to the left of the comment count when we hold a local copy of the
+// thread's comments. One icon, one meaning: this content lives in our archive.
+templ cloudCheckSVG() {
+	<svg class="cloud-check" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label={ T(ctx, "post.cached_locally") }>
+		<path d="m17 15-5.5 5.5L9 18"></path>
+		<path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327"></path>
+	</svg>
+}
+
 // submitSVG is the search/sort submit arrow.
 templ submitSVG() {
 	<svg width="15" viewBox="0 0 110 100" fill="none" stroke-width="10" stroke-linecap="round">
@@ -225,7 +236,10 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 			<span class="created" title={ post.Created }>{ post.RelTime }</span>
 			if post.ArchivedRelTime != "" {
 				<span class="dot">&bull;</span>
-				<span class="archived" title={ post.ArchivedTime }>{ T(ctx, "post.archived", post.ArchivedRelTime) }</span>
+				<span class="archived" title={ T(ctx, "post.archived", post.ArchivedTime) }>
+					@cloudCheckSVG()
+					{ " " + post.ArchivedRelTime }
+				</span>
 			}
 			if len(post.Awards) > 0 && prefs.HideAwards != "on" {
 				for _, aw := range post.Awards {

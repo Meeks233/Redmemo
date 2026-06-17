@@ -78,6 +78,7 @@
   "media.long_video_hint": "Video %d min — click to start download",
 
   "post.archived": "archived %s",
+  "post.cached_locally": "Stored in local archive",
   "post.repost_badge": "+%d reposts",
   "post.repost_badge_title": "Same content surfaced more times — variants listed below",
   "post.repost_variants_summary": "%d variants of this content (click to expand / collapse)",

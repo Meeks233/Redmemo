@@ -523,11 +523,13 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	// about the first `initialCommentLimit` top-level threads; merging the
 	// archive in means a returning viewer doesn't have to re-click "More
 	// replies" to see subtrees they already loaded last visit.
+	hasLocalComments := false
 	if h.commentStore != nil {
 		if prior, _ := h.commentStore.GetLatest(post.Permalink); prior != nil && len(prior.JSONData) > 0 {
 			var priorTree []reddit.Comment
-			if json.Unmarshal(prior.JSONData, &priorTree) == nil {
+			if json.Unmarshal(prior.JSONData, &priorTree) == nil && len(priorTree) > 0 {
 				comments = archive.ExpandMoreFromArchive(comments, archive.IndexCommentsByID(priorTree))
+				hasLocalComments = true
 			}
 		}
 	}
@@ -541,12 +543,13 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 			BrandName: h.cfg.Render.BrandName,
 			Version:   render.Version,
 		},
-		Post:            post,
-		Comments:        realComments,
-		Sort:            commentSort,
-		URLWithoutQuery: r.URL.Path,
-		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
-		MoreComments:    moreCount,
+		Post:             post,
+		Comments:         realComments,
+		Sort:             commentSort,
+		URLWithoutQuery:  r.URL.Path,
+		HasOAuth:         h.oauthHolder.HasAvailableTokens(),
+		HasLocalComments: hasLocalComments,
+		MoreComments:     moreCount,
 	}
 
 	var buf bytes.Buffer
@@ -619,6 +622,8 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if stored != nil {
 		json.Unmarshal(stored.JSONData, &comments)
 	}
+	// Archive render: any comments here are by definition local copies.
+	hasLocalComments := len(comments) > 0
 	// Inline-expand any "more" stub whose children are already archived in this
 	// same tree (a result of prior partial /api/morechildren writes being merged
 	// into the snapshot). The viewer sees the resolved replies directly and
@@ -637,13 +642,14 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 			Version:        render.Version,
 			DegradedReason: degradedReason,
 		},
-		Post:            post,
-		Comments:        realComments,
-		Sort:            commentSort,
-		URLWithoutQuery: r.URL.Path,
-		HasOAuth:        h.oauthHolder.HasAvailableTokens(),
-		IsOffline:       offline,
-		MoreComments:    moreCount,
+		Post:             post,
+		Comments:         realComments,
+		Sort:             commentSort,
+		URLWithoutQuery:  r.URL.Path,
+		HasOAuth:         h.oauthHolder.HasAvailableTokens(),
+		IsOffline:        offline,
+		HasLocalComments: hasLocalComments,
+		MoreComments:     moreCount,
 	}
 
 	var buf bytes.Buffer

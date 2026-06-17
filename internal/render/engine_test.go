@@ -170,6 +170,76 @@ func TestRenderPost(t *testing.T) {
 	}
 }
 
+// TestRenderPostCloudCheckHint pins the cached-locally cloud-check behaviour:
+//   - the SVG appears next to the comment count only when HasLocalComments is
+//     set (a local copy of the thread exists);
+//   - the archived-time badge renders the same cloud-check in place of the
+//     literal word "archived", keeping the relative time but dropping the text.
+func TestRenderPostCloudCheckHint(t *testing.T) {
+	e := newTestEngine(t)
+	build := func(local bool) PostPageData {
+		return PostPageData{
+			BasePage: BasePage{URL: "/r/golang/comments/abc/test", BrandName: "TestBrand", Version: "0.1.0"},
+			Post: reddit.Post{
+				ID: "abc", Title: "A Test Post", Community: "golang", PostType: "self",
+				Score: [2]string{"100", "100"}, Comments: [2]string{"10", "10"},
+				Author:          reddit.Author{Name: "poster"},
+				RelTime:         "1h ago",
+				ArchivedRelTime: "2h ago",
+				ArchivedTime:    "2026-06-17 17:00 UTC",
+			},
+			Comments:         []reddit.Comment{{ID: "c1", Kind: "t1", Body: "Hi", Author: reddit.Author{Name: "u"}, Score: [2]string{"1", "1"}}},
+			Sort:             "confidence",
+			HasLocalComments: local,
+		}
+	}
+
+	render := func(t *testing.T, d PostPageData) string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := e.RenderPost(&buf, d); err != nil {
+			t.Fatalf("RenderPost() error: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("archived badge swaps word for icon", func(t *testing.T) {
+		body := render(t, build(false))
+		// The archived-time badge keeps the relative time but no longer prints
+		// the literal word "archived" as visible text — it's the cloud-check now.
+		if !strings.Contains(body, `class="cloud-check"`) {
+			t.Error("archived badge should render the cloud-check SVG")
+		}
+		if !strings.Contains(body, "2h ago") {
+			t.Error("archived badge should still show the relative time")
+		}
+		idx := strings.Index(body, `class="archived"`)
+		if idx < 0 {
+			t.Fatal("archived span missing")
+		}
+		span := body[idx:min(idx+400, len(body))]
+		if strings.Contains(span, ">archived ") {
+			t.Error("archived badge should not print the literal word 'archived' as visible text")
+		}
+	})
+
+	t.Run("comment count icon gated on HasLocalComments", func(t *testing.T) {
+		with := render(t, build(true))
+		without := render(t, build(false))
+		ci := strings.Index(with, `id="comment_count"`)
+		if ci < 0 {
+			t.Fatal("comment_count missing")
+		}
+		if !strings.Contains(with[ci:min(ci+300, len(with))], "cloud-check") {
+			t.Error("comment_count should carry the cloud-check when HasLocalComments=true")
+		}
+		ci2 := strings.Index(without, `id="comment_count"`)
+		if strings.Contains(without[ci2:min(ci2+300, len(without))], "cloud-check") {
+			t.Error("comment_count must NOT carry the cloud-check when HasLocalComments=false")
+		}
+	})
+}
+
 func TestRenderPostTimeMachineBadge(t *testing.T) {
 	build := func(removed bool, lang string, comments []reddit.Comment) PostPageData {
 		return PostPageData{

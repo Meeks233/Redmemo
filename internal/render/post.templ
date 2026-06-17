@@ -89,7 +89,12 @@ templ postContent(d PostPageData) {
 		} else {
 			<div id="commentQueryForms">
 				<form id="sort">
-					<p id="comment_count">{ d.Post.Comments[0] } { commentsWord(d.Post.Comments[1]) } <span id="sorted_by">{ T(ctx, "comments.sorted_by") }</span></p>
+					<p id="comment_count">
+						if d.HasLocalComments {
+							@cloudCheckSVG()
+						}
+						{ d.Post.Comments[0] } { commentsWord(d.Post.Comments[1]) } <span id="sorted_by">{ T(ctx, "comments.sorted_by") }</span>
+					</p>
 					<select name="sort" title={ T(ctx, "comments.sort_title") } id="commentSortSelect">
 						for _, s := range commentSorts {
 							<option value={ s } if s == d.Sort { selected }>{ T(ctx, "sort."+s) }</option>
@@ -207,7 +212,10 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 				<span class="created" title={ post.Created }>{ post.RelTime }</span>
 				if post.ArchivedRelTime != "" {
 					<span class="dot">&bull;</span>
-					<span class="archived" title={ post.ArchivedTime }>{ T(ctx, "post.archived", post.ArchivedRelTime) }</span>
+					<span class="archived" title={ T(ctx, "post.archived", post.ArchivedTime) }>
+						@cloudCheckSVG()
+						{ " " + post.ArchivedRelTime }
+					</span>
 				}
 				if len(post.Awards) > 0 && prefs.HideAwards != "on" {
 					<span class="dot">&bull;</span>

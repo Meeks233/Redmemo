@@ -78,6 +78,7 @@
   "media.long_video_hint": "视频时长 %d 分钟 — 点击开始下载",
 
   "post.archived": "存档于 %s",
+  "post.cached_locally": "已存入本地存档",
   "post.repost_badge": "+%d 条同款",
   "post.repost_badge_title": "同一内容多次出现 — 各变体列在下方",
   "post.repost_variants_summary": "%d 个同款变体（点击展开/收起）",

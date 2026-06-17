@@ -215,6 +215,10 @@ type PostPageData struct {
 	URLWithoutQuery string
 	HasOAuth        bool
 	IsOffline       bool
+	// HasLocalComments is true when the rendered comment thread came (at least
+	// partly) from our archive — i.e. we hold a local copy of this post's
+	// comments. Drives the cloud-check cached-locally hint next to the count.
+	HasLocalComments bool
 	// MoreComments is the count of top-level comments still available upstream
 	// past the slice already in Comments. Zero suppresses the "Load more"
 	// button; a positive value drives data-step (capped at 5) and label.
