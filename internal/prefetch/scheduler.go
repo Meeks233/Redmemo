@@ -177,6 +177,18 @@ type Scheduler struct {
 	// site (initial and post-token-recovery retry).
 	fetchFunc func(ctx context.Context, sub, sort, tf, after string, limit int) ([]reddit.Post, string, string, error)
 
+	// pendingMediaFn, when non-nil, replaces s.postStore.ListNeedingMedia so
+	// runL2Wave's media/bind-L3 branching can be exercised without a DB.
+	// Tests feed a fixed slice of pending posts (mix of media + text) to
+	// assert which posts trigger a bound L3 fetch.
+	pendingMediaFn func(sub string, limit int) ([]*store.StoredPost, error)
+
+	// l3FetchFn, when non-nil, replaces the cli.FetchPost + archiver.ArchiveComments
+	// network+persist step inside fetchL3Single. It returns the archived comment
+	// count. Tests record (sub, postID) to assert exactly which posts the L3
+	// pipeline fetched — independent of whether the post carried media.
+	l3FetchFn func(ctx context.Context, sub, postID, urlPath string) (int, error)
+
 	// bucketGap and bucketBaseOverride let tests shrink the cadence so a
 	// full bucket cycle completes in milliseconds instead of hours.
 	// bucketGap is the per-sub floor; bucketBaseOverride, when non-zero,
@@ -1706,6 +1718,25 @@ func (s *Scheduler) runL2Cycle(ctx context.Context, tf, sub string, postCount in
 		s.runL2Wave)
 }
 
+// listNeedingMedia returns the next batch of posts whose media is not yet
+// archived. The pendingMediaFn seam lets tests drive runL2Wave's bind/media
+// branching without a live DB; production uses the PostStore query.
+func (s *Scheduler) listNeedingMedia(sub string, limit int) ([]*store.StoredPost, error) {
+	if s.pendingMediaFn != nil {
+		return s.pendingMediaFn(sub, limit)
+	}
+	return s.postStore.ListNeedingMedia(sub, limit)
+}
+
+// markMediaDone flags a post's media as fully archived. Nil-guarded so a
+// test driving runL2Wave purely through pendingMediaFn (postStore == nil)
+// does not panic on the bookkeeping write.
+func (s *Scheduler) markMediaDone(urlPath string) {
+	if s.postStore != nil {
+		s.postStore.SetMediaDone(urlPath)
+	}
+}
+
 // runL2Wave drains up to `limit` pending-media posts for sub through the NP
 // dispatcher, downloading every media URL each post needs. When depth is
 // "l2+l3" (bind mode) every successfully-mediafied post immediately spawns a
@@ -1714,7 +1745,7 @@ func (s *Scheduler) runL2Cycle(ctx context.Context, tf, sub string, postCount in
 // media-only crawler. Standalone L3 (depth="l3") is handled by runL3Cycle and
 // never reaches this function. Returns the first ctx error if any.
 func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cycleID string, subInterval int) error {
-	if s.postStore == nil || s.media == nil {
+	if s.media == nil || (s.postStore == nil && s.pendingMediaFn == nil) {
 		return nil
 	}
 	depth := s.resolveSubDepth(sub)
@@ -1726,7 +1757,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 	}
 	bindMode := depth == "l2+l3"
 
-	pending, err := s.postStore.ListNeedingMedia(sub, limit)
+	pending, err := s.listNeedingMedia(sub, limit)
 	if err != nil {
 		s.Events.Addf(LevelError, "L2", "r/%s: query pending media: %v", sub, err)
 		return nil
@@ -1757,7 +1788,18 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 
 		mediaItems := ExtractMediaItems(&p)
 		if len(mediaItems) == 0 {
-			s.postStore.SetMediaDone(sp.URLPath)
+			// Text/link posts carry no media, so the L2 download path is a
+			// no-op and the post is marked done immediately. In bind mode the
+			// visit is still "visit-like": a human reading a self post reads
+			// its comments too. Without this, depth=l2+l3 would archive
+			// comments only for media posts and silently skip every text post
+			// (the majority on discussion subs like r/selfhosted) — see L3
+			// gating bug. Fire the bound L3 fetch here so no-media posts get
+			// the same comment archival a media post would.
+			s.markMediaDone(sp.URLPath)
+			if bindMode && s.l3MeetsThreshold(numCommentsOf(&p), sub, sp.PostID) {
+				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID)
+			}
 			continue
 		}
 
@@ -1794,7 +1836,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 				numComments: numCommentsOf(&p),
 			})
 		case allOK:
-			s.postStore.SetMediaDone(sp.URLPath)
+			s.markMediaDone(sp.URLPath)
 			completed++
 			s.Events.Addf(LevelOK, "L2", "r/%s post %s: %d media done (%s)",
 				sub, sp.PostID, len(mediaItems), mediaKindSummary(mediaItems))
@@ -1835,7 +1877,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 				}
 			}
 			if allOK {
-				s.postStore.SetMediaDone(fp.urlPath)
+				s.markMediaDone(fp.urlPath)
 				completed++
 				s.recordL2Post(tf, sub, fp.postID, cycleID, subInterval, len(fp.items), "ok", "")
 				if bindMode && s.l3MeetsThreshold(fp.numComments, sub, fp.postID) {
@@ -2139,7 +2181,7 @@ func (s *Scheduler) fetchL3Standalone(ctx context.Context, tf, sub, postID, urlP
 }
 
 func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath, cycleID string, bound bool) {
-	if s.cli == nil {
+	if s.cli == nil && s.l3FetchFn == nil {
 		return
 	}
 	commentSort := "confidence"
@@ -2157,6 +2199,21 @@ func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath,
 	var fetchErr error
 	label := fmt.Sprintf("L3 %s r/%s post %s", mode, sub, postID)
 	if err := s.submit(ctx, label, true, func(ctx context.Context) {
+		// l3FetchFn seam: tests record which posts reached the L3 pipeline and
+		// short-circuit the live Reddit fetch + archive write. Still runs inside
+		// submit() so the dispatcher cooldown + budget gate path is exercised.
+		if s.l3FetchFn != nil {
+			n, err := s.l3FetchFn(ctx, sub, postID, urlPath)
+			s.recordUpstream(ctx)
+			if err != nil {
+				fetchErr = err
+				s.Events.Addf(LevelWarn, "L3", "%s r/%s post %s: fetch failed: %v", mode, sub, postID, err)
+				return
+			}
+			fetched = n
+			s.Events.Addf(LevelOK, "L3", "%s r/%s post %s: archived %d comments", mode, sub, postID, fetched)
+			return
+		}
 		_, comments, err := s.cli.FetchPost(ctx, sub, postID, commentSort)
 		s.recordUpstream(ctx)
 		if err != nil {
@@ -2313,7 +2370,15 @@ type mediaItem struct {
 func ExtractMediaItems(p *reddit.Post) []mediaItem {
 	var items []mediaItem
 
-	if p.Media.URL != "" {
+	// For a link post, parseMedia sets Media.URL to the *external destination*
+	// (the url field) — a blog/GitHub/etc. page, not a Reddit-CDN asset. It is
+	// never downloadable media: the media proxy's host allow-list rejects any
+	// non-redd.it host, and fetching the page yields HTML the cache discards as
+	// a poisoned error page. Emitting it here made every link post (the bulk of
+	// link-heavy subs like r/golang) fail its media wave, never reach
+	// media_done, and re-fail on every subsequent wave — a flood of L2 warns.
+	// Link posts cache only their thumbnail (handled below).
+	if p.Media.URL != "" && p.PostType != "link" {
 		kind := "image"
 		switch p.PostType {
 		case "video":

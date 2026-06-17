@@ -159,9 +159,33 @@ func TestExtractMediaItems_LinkPostKeepsThumbnail(t *testing.T) {
 		if it.Kind == "thumbnail" {
 			gotThumb = true
 		}
+		// The external destination (Media.URL) must NEVER be emitted as a
+		// downloadable item — it is not Reddit-CDN media and every attempt to
+		// fetch it fails, leaving the post stuck out of media_done and flooding
+		// the L2 warn log on every wave.
+		if it.URL == "https://example.com/article" {
+			t.Errorf("link post emitted its external URL as media item %+v; only the thumbnail should be cached", it)
+		}
 	}
 	if !gotThumb {
 		t.Errorf("link post should keep thumbnail, got %+v", items)
+	}
+	if len(items) != 1 {
+		t.Errorf("link post should yield exactly 1 item (thumbnail), got %d: %+v", len(items), items)
+	}
+}
+
+// TestExtractMediaItems_LinkPostNoThumbnailYieldsNothing pins that a link post
+// with no thumbnail produces zero media items — so runL2Wave marks it
+// media_done immediately instead of looping forever on a doomed external fetch.
+func TestExtractMediaItems_LinkPostNoThumbnailYieldsNothing(t *testing.T) {
+	p := &reddit.Post{
+		ID:       "l2",
+		PostType: "link",
+		Media:    reddit.Media{URL: "https://blog.golang.org/some-article"},
+	}
+	if items := ExtractMediaItems(p); len(items) != 0 {
+		t.Errorf("thumbnail-less link post should yield 0 items, got %d: %+v", len(items), items)
 	}
 }
 
