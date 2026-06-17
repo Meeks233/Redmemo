@@ -122,7 +122,7 @@ func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, ht
 	h.archiver.ArchivePost(&post, sub, "background")
 	h.archiver.ArchiveComments(post.Permalink, comments)
 	if h.prefetcher != nil {
-		h.prefetcher.RecordL3Fetch(sub, id, len(comments))
+		h.prefetcher.RecordL3Fetch(sub, id, len(comments), reportedNumComments(&post))
 	}
 
 	if len(htmlSnapshot) > 0 {
@@ -179,7 +179,7 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	if h.prefetcher != nil {
-		h.prefetcher.RecordL3Fetch(sub, id, len(comments))
+		h.prefetcher.RecordL3Fetch(sub, id, len(comments), reportedNumComments(&post))
 	}
 
 	// HTML cache keys now embed a prefs fingerprint; drop every variant under
@@ -398,6 +398,22 @@ func splitChildrenIDs(raw string) []string {
 		}
 	}
 	return out
+}
+
+// reportedNumComments parses a post's upstream-reported comment count from
+// Comments[1] (the raw numeric string; Comments[0] is the human-formatted one).
+// It is the rumination baseline persisted alongside an on-demand L3 fetch, so
+// the prefetch scheduler can later tell whether the thread gained replies.
+// Returns 0 on a missing/garbled value.
+func reportedNumComments(post *reddit.Post) int {
+	if post == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(post.Comments[1]))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func isBase36ID(s string) bool {

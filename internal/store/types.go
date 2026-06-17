@@ -34,6 +34,19 @@ type StoredComments struct {
 	FetchedAt    time.Time
 }
 
+// L3RuminateCandidate is one post whose upstream-reported comment count has
+// grown since the last successful L3 fetch — the "someone replied since we
+// last archived" signal that re-admits an otherwise media-done / cycle-frozen
+// post into the L3 batch (rumination). CurrentComments is the count L1's most
+// recent scan stored in posts.json_data (Comments[1]); LastComments is the
+// count recorded in the post's most recent ok L3 prefetch_runs payload. By
+// construction CurrentComments > LastComments for every row the query returns.
+type L3RuminateCandidate struct {
+	Post            *StoredPost
+	CurrentComments int
+	LastComments    int
+}
+
 type MediaMeta struct {
 	OriginalURL  string
 	Hash         string
@@ -109,9 +122,9 @@ type SubIcon struct {
 	HasIcon bool
 	// About cache (separate expiry from icon). All nullable: zero values
 	// mean "about has never been fetched".
-	AboutJSON       []byte
-	AboutFetchedAt  *time.Time
-	AboutExpiresAt  *time.Time
+	AboutJSON      []byte
+	AboutFetchedAt *time.Time
+	AboutExpiresAt *time.Time
 }
 
 type StoredPrefetchConfig struct {

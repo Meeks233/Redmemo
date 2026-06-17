@@ -1,0 +1,32 @@
+# Normalize line endings to LF (the repo's native convention).
+# Existing files are not rewritten on disk; git normalizes them as they are
+# next added/checked out. Run `git add --renormalize .` for a one-shot sweep.
+* text=auto eol=lf
+
+# Source / text explicitly LF (protects against autocrlf on Windows clients).
+*.go    text eol=lf
+*.templ text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.md    text eol=lf
+*.html  text eol=lf
+*.xml   text eol=lf
+*.svg   text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.toml  text eol=lf
+*.conf  text eol=lf
+*.sum   text eol=lf
+*.mod   text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+
+# Binaries: never touch line endings.
+*.png   binary
+*.ico   binary
+*.woff2 binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary

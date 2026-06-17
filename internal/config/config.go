@@ -313,14 +313,14 @@ func translateLegacyEnvVars() {
 // already available.
 func applyEnvOverrides(cfg *Config) {
 	envMap := map[string]*string{
-		"REDMEMO_SERVER_LISTEN":     &cfg.Server.Listen,
-		"REDMEMO_POSTGRES_DSN":      &cfg.Postgres.DSN,
-		"REDMEMO_REDIS_ADDR":        &cfg.Redis.Addr,
-		"REDMEMO_REDIS_PASSWORD":    &cfg.Redis.Password,
-		"REDMEMO_MEDIA_ROOT_PATH":   &cfg.Media.RootPath,
-		"REDMEMO_RENDER_BRAND_NAME": &cfg.Render.BrandName,
-		"REDMEMO_LEGACY_INSTANCE":   &cfg.Legacy.Instance,
-		"REDMEMO_SERVER_SECRET":     &cfg.Auth.ServerSecret,
+		"REDMEMO_SERVER_LISTEN":      &cfg.Server.Listen,
+		"REDMEMO_POSTGRES_DSN":       &cfg.Postgres.DSN,
+		"REDMEMO_REDIS_ADDR":         &cfg.Redis.Addr,
+		"REDMEMO_REDIS_PASSWORD":     &cfg.Redis.Password,
+		"REDMEMO_MEDIA_ROOT_PATH":    &cfg.Media.RootPath,
+		"REDMEMO_RENDER_BRAND_NAME":  &cfg.Render.BrandName,
+		"REDMEMO_LEGACY_INSTANCE":    &cfg.Legacy.Instance,
+		"REDMEMO_SERVER_SECRET":      &cfg.Auth.ServerSecret,
 		"REDMEMO_SEO_CANONICAL_HOST": &cfg.SEO.CanonicalHost,
 	}
 

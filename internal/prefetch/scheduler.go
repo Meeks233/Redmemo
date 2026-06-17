@@ -148,14 +148,14 @@ type Scheduler struct {
 	settings    SettingsProvider
 	cli         *reddit.Client
 	publicCli   *reddit.PublicClient
-	archiver  *archive.Service
-	media     MediaDownloader
-	subStatus SubStatusChecker
-	postStore *store.PostStore
-	runStore  *store.PrefetchRunStore
-	iconStore SubIconProvider
-	hr        HRRecorder
-	Events    *EventLog
+	archiver    *archive.Service
+	media       MediaDownloader
+	subStatus   SubStatusChecker
+	postStore   *store.PostStore
+	runStore    *store.PrefetchRunStore
+	iconStore   SubIconProvider
+	hr          HRRecorder
+	Events      *EventLog
 
 	queue       chan *workItem
 	lastUserReq atomic.Int64
@@ -189,6 +189,12 @@ type Scheduler struct {
 	// pipeline fetched — independent of whether the post carried media.
 	l3FetchFn func(ctx context.Context, sub, postID, urlPath string) (int, error)
 
+	// l3RuminateFn, when non-nil, replaces s.postStore.ListL3Ruminate so the
+	// bind-mode rumination sweep in runL2Wave can be exercised without a DB.
+	// Tests feed crafted (current, last) comment-count candidates to assert
+	// which grown posts get re-fetched and which are correctly left frozen.
+	l3RuminateFn func(sub, cycleID string, limit, minComments int) ([]store.L3RuminateCandidate, error)
+
 	// bucketGap and bucketBaseOverride let tests shrink the cadence so a
 	// full bucket cycle completes in milliseconds instead of hours.
 	// bucketGap is the per-sub floor; bucketBaseOverride, when non-zero,
@@ -219,22 +225,22 @@ type Scheduler struct {
 	// buckets and the union of all cursors so the debug page reflects the
 	// "next thing about to happen" rather than any one bucket in isolation.
 	l1Buckets map[string]*bucketStatus
-	l2Phase     string
-	l2Sub       string
-	l2Pending   int
+	l2Phase   string
+	l2Sub     string
+	l2Pending int
 	// l2Cycles is the live wave-schedule view per active L2 cycle, keyed
 	// by "tf|sub". Populated when runL2Cycle starts a fresh cycle for an
 	// L1 fetch, advanced as each wave fires, and cleared on completion.
-	l2Cycles map[string]*l2CycleSnap
-	l5Phase     string
-	l5Current   string
-	l5Pending   int
+	l2Cycles  map[string]*l2CycleSnap
+	l5Phase   string
+	l5Current string
+	l5Pending int
 	// L3 — deep archive (comments). Handler-initiated, on-demand only; the
 	// scheduler tracks it for /debug visibility but never schedules it itself.
-	l3Phase    string
-	l3Current  string
-	l3LastAt   time.Time
-	l3Count    int
+	l3Phase   string
+	l3Current string
+	l3LastAt  time.Time
+	l3Count   int
 	// l3BindRecent is a small FIFO of the most recent bind-mode L3 fetches
 	// (newest first). Surfaced on /debug so the operator can see exactly
 	// which posts the binding pipeline has just archived.
@@ -242,12 +248,12 @@ type Scheduler struct {
 	// L4 — icon cache loop. Updated by iconLoop/runIconBatch so /debug shows
 	// the live round queue, current sub, and next tick eta even between
 	// hourly batches.
-	l4Phase       string
-	l4Current     string
-	l4QueueLen    int
-	l4NextTickAt  time.Time
-	npPhase     string
-	npCurrent   string
+	l4Phase      string
+	l4Current    string
+	l4QueueLen   int
+	l4NextTickAt time.Time
+	npPhase      string
+	npCurrent    string
 	// Reclaim status: visible on /debug while driveReclaimedCycle is active.
 	reclaimL2Phase string
 	reclaimL2Info  string
@@ -330,15 +336,15 @@ func New(
 		settings:    settings,
 		cli:         redditCli,
 		publicCli:   publicCli,
-		archiver:  archiver,
-		media:     media,
-		subStatus: subStatus,
-		postStore: postStore,
-		runStore:  runStore,
-		iconStore: iconStore,
-		hr:        hr,
-		Events:    NewEventLog(200),
-		queue:     make(chan *workItem, 1),
+		archiver:    archiver,
+		media:       media,
+		subStatus:   subStatus,
+		postStore:   postStore,
+		runStore:    runStore,
+		iconStore:   iconStore,
+		hr:          hr,
+		Events:      NewEventLog(200),
+		queue:       make(chan *workItem, 1),
 	}
 }
 
@@ -393,10 +399,10 @@ func (s *Scheduler) reclaimPendingRuns(ctx context.Context) {
 	// cycle snapshot (only a recent-bind ring), so its pending rows just need
 	// goroutines without snapshot work.
 	type group struct {
-		layer    string
-		tf, sub  string
-		cycleID  string
-		runs     []store.PrefetchRun
+		layer   string
+		tf, sub string
+		cycleID string
+		runs    []store.PrefetchRun
 	}
 	groups := map[string]*group{}
 	order := []string{}
@@ -1737,6 +1743,75 @@ func (s *Scheduler) markMediaDone(urlPath string) {
 	}
 }
 
+// listL3Ruminate returns the bind-mode rumination batch: posts whose comment
+// count has grown since their last L3 fetch. The seam lets tests drive the
+// sweep without a DB; production uses the PostStore query.
+func (s *Scheduler) listL3Ruminate(sub, cycleID string, limit, minComments int) ([]store.L3RuminateCandidate, error) {
+	if s.l3RuminateFn != nil {
+		return s.l3RuminateFn(sub, cycleID, limit, minComments)
+	}
+	if s.postStore == nil {
+		return nil, nil
+	}
+	return s.postStore.ListL3Ruminate(sub, cycleID, limit, minComments)
+}
+
+// shouldRuminate is the single source of truth for the "re-fetch this post's
+// comments because new replies arrived" decision, applied as a defensive gate
+// over whatever listL3Ruminate returns (the SQL implements the same rule as a
+// prefilter; this keeps the verdict unit-testable without a DB).
+//
+//   - last < 0      → no recorded L3 baseline; rumination needs a prior fetch
+//     to measure growth against, so never ruminate.
+//   - current<=last → the thread did not grow (or shrank, e.g. deleted
+//     comments); nothing new to archive.
+//   - below min     → the min-comments waterline still applies even to growth;
+//     a thread crawling 2→3 under a threshold of 5 stays out.
+//   - otherwise     → grew past the baseline and clears the waterline: ruminate.
+func shouldRuminate(current, last, minComments int) bool {
+	if last < 0 {
+		return false
+	}
+	if current <= last {
+		return false
+	}
+	if minComments > 0 && current < minComments {
+		return false
+	}
+	return true
+}
+
+// ruminateL3 is the bind-mode recovery sweep: after a wave drains the pending-
+// media queue, re-fetch comments for any post whose thread has grown since its
+// last L3 archive. Without this, a post archived once at media-done time and
+// never re-surfaced by L2 (media stays done) would freeze its comment snapshot
+// forever even as a hot thread keeps gaining replies. Best-effort: a query
+// error is logged and swallowed so it never aborts the surrounding wave.
+func (s *Scheduler) ruminateL3(ctx context.Context, tf, sub string, limit int, cycleID string) {
+	minComments := s.resolveL3MinComments()
+	cands, err := s.listL3Ruminate(sub, cycleID, limit, minComments)
+	if err != nil {
+		s.Events.Addf(LevelWarn, "L3", "r/%s: rumination query failed: %v", sub, err)
+		return
+	}
+	for _, c := range cands {
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		if c.Post == nil {
+			continue
+		}
+		// Re-check the SQL prefilter's verdict in Go so the rule lives in one
+		// place and a borderline row can't slip through.
+		if !shouldRuminate(c.CurrentComments, c.LastComments, minComments) {
+			continue
+		}
+		s.Events.Addf(LevelInfo, "L3", "r/%s post %s: rumination — comments %d→%d since last archive, re-fetching",
+			sub, c.Post.PostID, c.LastComments, c.CurrentComments)
+		s.fetchL3Bound(ctx, tf, sub, c.Post.PostID, c.Post.URLPath, cycleID, c.CurrentComments)
+	}
+}
+
 // runL2Wave drains up to `limit` pending-media posts for sub through the NP
 // dispatcher, downloading every media URL each post needs. When depth is
 // "l2+l3" (bind mode) every successfully-mediafied post immediately spawns a
@@ -1764,6 +1839,12 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 	}
 
 	if len(pending) == 0 {
+		// No media work this wave, but a bind-mode sub may still have threads
+		// that grew since their last L3 archive — the steady state once a sub's
+		// backlog is fully media-done. Ruminate before idling out.
+		if bindMode {
+			s.ruminateL3(ctx, tf, sub, limit, cycleID)
+		}
 		s.setL2Status("idle", sub, 0)
 		return nil
 	}
@@ -1798,7 +1879,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 			// the same comment archival a media post would.
 			s.markMediaDone(sp.URLPath)
 			if bindMode && s.l3MeetsThreshold(numCommentsOf(&p), sub, sp.PostID) {
-				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID)
+				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOf(&p))
 			}
 			continue
 		}
@@ -1842,7 +1923,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 				sub, sp.PostID, len(mediaItems), mediaKindSummary(mediaItems))
 			s.recordL2Post(tf, sub, sp.PostID, cycleID, subInterval, len(mediaItems), "ok", "")
 			if bindMode && s.l3MeetsThreshold(numCommentsOf(&p), sub, sp.PostID) {
-				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID)
+				s.fetchL3Bound(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOf(&p))
 			}
 		}
 	}
@@ -1881,7 +1962,7 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 				completed++
 				s.recordL2Post(tf, sub, fp.postID, cycleID, subInterval, len(fp.items), "ok", "")
 				if bindMode && s.l3MeetsThreshold(fp.numComments, sub, fp.postID) {
-					s.fetchL3Bound(ctx, tf, sub, fp.postID, fp.urlPath, cycleID)
+					s.fetchL3Bound(ctx, tf, sub, fp.postID, fp.urlPath, cycleID, fp.numComments)
 				}
 			}
 		}
@@ -1890,6 +1971,16 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 	if completed > 0 {
 		s.Events.Addf(LevelOK, "L2", "r/%s: media complete for %d/%d posts", sub, completed, len(pending))
 	}
+
+	// Bind-mode rumination: the pending-media loop above only ever touches posts
+	// whose media is not yet done, so a post archived on an earlier cycle is
+	// invisible to it no matter how many new replies a fresh L1 scan reports.
+	// Sweep those grown threads back into the L3 batch here, after the wave's
+	// media work, so they ride the same budget gate as a bound fetch.
+	if bindMode {
+		s.ruminateL3(ctx, tf, sub, limit, cycleID)
+	}
+
 	s.setL2Status("idle", "", 0)
 	return nil
 }
@@ -1958,9 +2049,24 @@ func (s *Scheduler) runL3Wave(ctx context.Context, tf, sub string, limit int, cy
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		s.fetchL3Standalone(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID)
+		s.fetchL3Standalone(ctx, tf, sub, sp.PostID, sp.URLPath, cycleID, numCommentsOfJSON(sp.JSONData))
 	}
 	return nil
+}
+
+// numCommentsOfJSON parses the upstream-reported comment count (Comments[1])
+// straight out of a stored post's JSON, without a full reddit.Post decode. Used
+// where the wave already holds the raw JSONData and only needs the count for
+// the rumination baseline. Returns 0 on any decode/parse miss.
+func numCommentsOfJSON(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	var p reddit.Post
+	if err := json.Unmarshal(data, &p); err != nil {
+		return 0
+	}
+	return numCommentsOf(&p)
 }
 
 // l3MeetsThreshold returns true when numComments clears the L3 min-comments
@@ -2169,18 +2275,23 @@ func (s *Scheduler) recordL2Post(tf, sub, postID, cycleID string, subInterval, m
 //
 // Failures are logged but never propagated: an L3 miss must not block the
 // surrounding wave's remaining posts.
-func (s *Scheduler) fetchL3Bound(ctx context.Context, tf, sub, postID, urlPath, cycleID string) {
-	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, true)
+func (s *Scheduler) fetchL3Bound(ctx context.Context, tf, sub, postID, urlPath, cycleID string, numComments int) {
+	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, true, numComments)
 }
 
 // fetchL3Standalone is the depth="l3" entry — same primitive as bind, but the
 // ledger row records bind=false so the L3 cycle stays distinguishable from
 // L2-driven bind fetches in the unified prefetch_runs view.
-func (s *Scheduler) fetchL3Standalone(ctx context.Context, tf, sub, postID, urlPath, cycleID string) {
-	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, false)
+func (s *Scheduler) fetchL3Standalone(ctx context.Context, tf, sub, postID, urlPath, cycleID string, numComments int) {
+	s.fetchL3Single(ctx, tf, sub, postID, urlPath, cycleID, false, numComments)
 }
 
-func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath, cycleID string, bound bool) {
+// fetchL3Single fetches and archives one post's comments. numComments is the
+// upstream-reported comment count L1 last stored for the post (Comments[1]); it
+// is persisted into the ok-run payload as "num_comments" so a later cycle can
+// tell whether the thread has since grown (rumination — see ListL3Ruminate and
+// the ListL3Candidates freeze override). Pass 0 when the count is unknown.
+func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath, cycleID string, bound bool, numComments int) {
 	if s.cli == nil && s.l3FetchFn == nil {
 		return
 	}
@@ -2240,6 +2351,11 @@ func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath,
 		payload, _ := json.Marshal(map[string]any{
 			"bind":     bound,
 			"comments": fetched,
+			// num_comments is the upstream-reported thread size at fetch time —
+			// the rumination baseline a later cycle compares the fresh L1 count
+			// against to decide "new replies since, re-fetch". Distinct from
+			// "comments" (how many we actually archived this round).
+			"num_comments": numComments,
 		})
 		_ = s.runStore.Record("L3", tf, sub, postID, cycleID, status, errStr, payload)
 	}
@@ -2480,41 +2596,41 @@ func absTimeIfLarge(t time.Time, delta time.Duration) string {
 // ---------------------------------------------------------------------------
 
 type PrefetchStatus struct {
-	L1Phase     string
-	L1Round     int
-	L1MaxRounds int
-	L1Subs      []string
-	L1Cursors   map[string]string
+	L1Phase        string
+	L1Round        int
+	L1MaxRounds    int
+	L1Subs         []string
+	L1Cursors      map[string]string
 	L1NextCycle    string
 	L1NextCycleAbs string
 	// L1Buckets is the per-bucket schedule snapshot for the debug page. One
 	// entry per active bucket, ordered finest-to-coarsest (hour → all).
-	L1Buckets    []PrefetchBucketStatus
-	L2Phase      string
-	L2Sub        string
-	L2Pending    int
-	L2BindMode   bool
-	L2Cycles     []PrefetchL2Cycle
-	L5Phase      string
-	L5Current    string
-	L5Pending    int
-	L3Phase      string
-	L3Current    string
-	L3LastAt     string
-	L3LastAtAbs  string
-	L3Count      int
-	L3BindMode   bool
-	L3Recent     []PrefetchL3Bind
-	L4Phase      string
-	L4Current    string
-	L4QueueLen   int
-	L4NextTick   string
-	L4NextTickAbs string
-	NPPhase     string
-	NPCurrent   string
-	QueueLen    int
-	Enabled     bool
-	ActiveSubs  []string
+	L1Buckets      []PrefetchBucketStatus
+	L2Phase        string
+	L2Sub          string
+	L2Pending      int
+	L2BindMode     bool
+	L2Cycles       []PrefetchL2Cycle
+	L5Phase        string
+	L5Current      string
+	L5Pending      int
+	L3Phase        string
+	L3Current      string
+	L3LastAt       string
+	L3LastAtAbs    string
+	L3Count        int
+	L3BindMode     bool
+	L3Recent       []PrefetchL3Bind
+	L4Phase        string
+	L4Current      string
+	L4QueueLen     int
+	L4NextTick     string
+	L4NextTickAbs  string
+	NPPhase        string
+	NPCurrent      string
+	QueueLen       int
+	Enabled        bool
+	ActiveSubs     []string
 	ReclaimL2Phase string
 	ReclaimL2Info  string
 	ReclaimL3Phase string
@@ -2671,39 +2787,39 @@ func (s *Scheduler) Status() PrefetchStatus {
 	}
 
 	return PrefetchStatus{
-		L1Phase:     s.l1Phase,
-		L1Round:     s.l1Round,
-		L1MaxRounds: s.l1MaxRounds,
-		L1Subs:      subs,
-		L1Cursors:   cursors,
+		L1Phase:        s.l1Phase,
+		L1Round:        s.l1Round,
+		L1MaxRounds:    s.l1MaxRounds,
+		L1Subs:         subs,
+		L1Cursors:      cursors,
 		L1NextCycle:    nextCycle,
 		L1NextCycleAbs: nextCycleAbs,
 		L1Buckets:      buckets,
-		L2Phase:     s.l2Phase,
-		L2Sub:       s.l2Sub,
-		L2Pending:   s.l2Pending,
-		L2BindMode:  s.globalBindDefaultEnabled(),
-		L2Cycles:    s.snapshotL2Cycles(),
-		L5Phase:     s.l5Phase,
-		L5Current:   s.l5Current,
-		L5Pending:   s.l5Pending,
-		L3Phase:     s.l3Phase,
-		L3Current:   s.l3Current,
-		L3LastAt:    l3LastAt,
-		L3LastAtAbs: l3LastAtAbs,
-		L3Count:     s.l3Count,
-		L3BindMode:  s.globalBindDefaultEnabled(),
-		L3Recent:    s.snapshotL3Recent(),
-		L4Phase:     s.l4Phase,
-		L4Current:   s.l4Current,
-		L4QueueLen:  s.l4QueueLen,
-		L4NextTick:    l4NextTick,
-		L4NextTickAbs: l4NextTickAbs,
-		NPPhase:     s.npPhase,
-		NPCurrent:   s.npCurrent,
-		QueueLen:    len(s.queue),
-		Enabled:     s.isEnabled(),
-		ActiveSubs:  s.activeSubs(),
+		L2Phase:        s.l2Phase,
+		L2Sub:          s.l2Sub,
+		L2Pending:      s.l2Pending,
+		L2BindMode:     s.globalBindDefaultEnabled(),
+		L2Cycles:       s.snapshotL2Cycles(),
+		L5Phase:        s.l5Phase,
+		L5Current:      s.l5Current,
+		L5Pending:      s.l5Pending,
+		L3Phase:        s.l3Phase,
+		L3Current:      s.l3Current,
+		L3LastAt:       l3LastAt,
+		L3LastAtAbs:    l3LastAtAbs,
+		L3Count:        s.l3Count,
+		L3BindMode:     s.globalBindDefaultEnabled(),
+		L3Recent:       s.snapshotL3Recent(),
+		L4Phase:        s.l4Phase,
+		L4Current:      s.l4Current,
+		L4QueueLen:     s.l4QueueLen,
+		L4NextTick:     l4NextTick,
+		L4NextTickAbs:  l4NextTickAbs,
+		NPPhase:        s.npPhase,
+		NPCurrent:      s.npCurrent,
+		QueueLen:       len(s.queue),
+		Enabled:        s.isEnabled(),
+		ActiveSubs:     s.activeSubs(),
 		ReclaimL2Phase: s.reclaimL2Phase,
 		ReclaimL2Info:  s.reclaimL2Info,
 		ReclaimL3Phase: s.reclaimL3Phase,
@@ -2936,7 +3052,7 @@ func (s *Scheduler) setL5Status(phase, current string, pending int) {
 // regardless of whether it was an initial post view, a manual refresh, or a
 // "load more" expansion. The scheduler never initiates L3 itself — this is
 // pure passive bookkeeping for visibility.
-func (s *Scheduler) RecordL3Fetch(sub, postID string, commentCount int) {
+func (s *Scheduler) RecordL3Fetch(sub, postID string, commentCount, numComments int) {
 	target := fmt.Sprintf("r/%s/%s (%d cmts)", sub, postID, commentCount)
 	s.statusMu.Lock()
 	s.l3Phase = "active"
@@ -2951,6 +3067,11 @@ func (s *Scheduler) RecordL3Fetch(sub, postID string, commentCount int) {
 		payload, _ := json.Marshal(map[string]any{
 			"bind":     false,
 			"comments": commentCount,
+			// Record the upstream-reported thread size so an on-demand view sets
+			// the same rumination baseline a prefetch fetch would — otherwise the
+			// most-recent-run lookup would see a baseline-less row and mask the
+			// prefetch baseline, stalling rumination for user-viewed posts.
+			"num_comments": numComments,
 		})
 		_ = s.runStore.Record("L3", "", sub, postID, "", "ok", "", payload)
 	}

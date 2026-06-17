@@ -78,7 +78,13 @@ templ postContent(d PostPageData) {
 			})();
 		</script>
 		@postDetail(d.Post, d.Prefs, d.HasOAuth)
-		if d.DegradedReason == "upstream_disabled" {
+		if d.DegradedReason == "upstream_disabled" && len(d.Comments) == 0 {
+			// Cache-only mode AND nothing archived for this thread: there is
+			// genuinely nothing to show, so the "exhausted" notice stands in for
+			// the comment section. When we DO have archived comments (L3), fall
+			// through and render them — the top degradedBanner already tells the
+			// visitor live data is disabled, so swapping the whole thread out
+			// would needlessly hide content we actually have.
 			@upstreamDisabledNotice(d.Post, d.Prefs)
 		} else {
 			<div id="commentQueryForms">
@@ -443,7 +449,7 @@ templ deeperRepliesScript() {
 // appends just the newly-revealed comments to #commentList (no full-page
 // reload). Suppressed entirely when no top-level comments remain upstream.
 templ loadMoreComments(d PostPageData) {
-	if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline && d.MoreComments > 0 {
+	if !d.SingleThread && d.CommentQuery == "" && !d.IsOffline && d.DegradedReason != "upstream_disabled" && d.MoreComments > 0 {
 		<div id="loadMoreCommentsWrap" style="text-align:center;margin:20px 0;">
 			<button id="loadMoreCommentsBtn"
 				data-sub={ d.Post.Community }
