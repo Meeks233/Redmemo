@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +28,8 @@ type fakeDeviceRow struct {
 	id        int64
 	hash      string
 	prefix    string
-	ip        string
+	ip        string // primary (mint-time) binding
+	ipAlt     string // complementary-family binding, lazily learned (see Check)
 	createdAt time.Time
 	lastUsed  *time.Time
 	expiresAt time.Time
@@ -56,22 +58,30 @@ func (f *fakeDeviceStore) Create(hash, prefix, ip string, expiresAt time.Time) e
 	return nil
 }
 
-// Check mirrors store.Check: a live row whose ip matches clientIP is touched and
-// reported TrustValid; an expired row is deleted on the spot (IP-agnostic, pure
-// hygiene) and reported TrustExpired; a missing row — or a live row presented
-// from a different IP — is TrustAbsent.
+// Check mirrors store.Check, including the dual-stack OR binding: a live row
+// whose ip OR ip_alt matches clientIP is touched and reported TrustValid; a live
+// row whose ip_alt slot is still empty learns clientIP into it IFF clientIP is of
+// the OTHER family than ip (then validates); an expired row is deleted on the
+// spot (IP-agnostic, pure hygiene) and reported TrustExpired; a missing row — or
+// a live row presented from an unbound, non-learnable IP — is TrustAbsent.
 func (f *fakeDeviceStore) Check(hash, clientIP string, newExpiry time.Time) (store.TrustVerdict, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	clientIsV6 := strings.Contains(clientIP, ":")
 	for i, r := range f.rows {
 		if r.hash != hash {
 			continue
 		}
 		if r.expiresAt.After(time.Now()) {
-			// IP binding: a live row only validates from the IP it was minted for,
-			// mirroring the `AND ip = $2` constraint in the store CTE.
-			if r.ip != clientIP {
+			matches := r.ip == clientIP || (r.ipAlt != "" && r.ipAlt == clientIP)
+			// Learn only into an empty alt slot, and only the complementary family
+			// (mirrors `(position(':' in ip) > 0) <> $4` in the store CTE).
+			canLearn := r.ipAlt == "" && r.ip != "" && (strings.Contains(r.ip, ":") != clientIsV6)
+			if !matches && !canLearn {
 				return store.TrustAbsent, nil
+			}
+			if !matches {
+				r.ipAlt = clientIP
 			}
 			now := time.Now()
 			r.lastUsed = &now
@@ -150,6 +160,20 @@ func (f *fakeDeviceStore) len() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.rows)
+}
+
+// altIPOf returns the learned complementary-family binding for the row carrying
+// hash (or "" if there is none / no such row) — lets the dual-stack tests assert
+// exactly which sibling address got learned.
+func (f *fakeDeviceStore) altIPOf(hash string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.rows {
+		if r.hash == hash {
+			return r.ipAlt
+		}
+	}
+	return ""
 }
 
 func newTestAuthWithDevices(f *fakeDeviceStore) *AuthManager {
@@ -701,5 +725,231 @@ func TestTrustedSweeperRunsCleanup(t *testing.T) {
 	}
 	if f.len() != 1 {
 		t.Fatalf("want 1 live row after the sweep, got %d", f.len())
+	}
+}
+
+// boundV4 / boundV6 are the IPv4 and IPv6 addresses of one notional dual-stack
+// client used by the OR-binding tests. boundV4 == boundIP so the existing
+// single-stack tests keep their meaning.
+const (
+	boundV4 = boundIP        // "192.0.2.5"
+	boundV6 = "2001:db8::5"  // same physical client, sibling family
+)
+
+// TestTrustedDeviceDualStackOR is the headline fix: a trusted cookie minted on a
+// dual-stack client's IPv4 address must keep validating when the SAME cookie is
+// later presented over the client's IPv6 address (and vice-versa), without ever
+// minting a second trusted-device row. The sibling-family address is learned
+// once into ip_alt, after which BOTH families validate (OR).
+func TestTrustedDeviceDualStackOR(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "0a0a0a0a0b0b0b0b0c0c0c0c0d0d0d0d"
+	// Minted over IPv4 — ip set, ip_alt still empty.
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	// Same family it was minted for: honoured, nothing learned yet.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV4) {
+		t.Fatal("trusted cookie must validate from its mint-time IPv4 address")
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != "" {
+		t.Fatalf("a same-family presentation must not learn an alt IP, got %q", alt)
+	}
+
+	// First IPv6 presentation of the SAME cookie: recognised as the same device,
+	// learns the sibling address rather than rejecting.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV6) {
+		t.Fatal("trusted cookie must validate from the sibling IPv6 address (OR binding)")
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != boundV6 {
+		t.Fatalf("the IPv6 sibling should be learned into ip_alt, got %q", alt)
+	}
+
+	// Both families now validate, and the OR binding never created a second row —
+	// the whole point: one physical device, one slot.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV4) {
+		t.Fatal("IPv4 must still validate after the IPv6 sibling is learned")
+	}
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV6) {
+		t.Fatal("IPv6 must keep validating once learned")
+	}
+	if n := f.len(); n != 1 {
+		t.Fatalf("dual-stack OR binding must use exactly ONE slot, got %d rows", n)
+	}
+}
+
+// TestTrustedDeviceSameFamilyRotationNotLearned proves the learn is family-scoped:
+// a DIFFERENT same-family address (e.g. an IPv6 prefix rotation, or a same-network
+// thief) is NOT absorbed into ip_alt — it is rejected, exactly as before, so the
+// single sibling slot is reserved for the genuine other-family address.
+func TestTrustedDeviceSameFamilyRotationNotLearned(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "1212121234343434565656567878787a"
+	// Minted over IPv6.
+	if err := f.Create(hashToken(tok), tok[:8], boundV6, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	// A different IPv6 (same family) must be refused and must NOT be learned.
+	if a.HasValidTrustedDevice(trustedReq(tok), "2001:db8::99") {
+		t.Fatal("a different same-family address must be rejected, not learned")
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != "" {
+		t.Fatalf("a same-family mismatch must leave ip_alt empty, got %q", alt)
+	}
+	// The genuine IPv4 sibling can still take the (still-empty) alt slot.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV4) {
+		t.Fatal("the IPv4 sibling should still be learnable into the reserved alt slot")
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != boundV4 {
+		t.Fatalf("the IPv4 sibling should occupy ip_alt, got %q", alt)
+	}
+}
+
+// TestTrustedDeviceAltSlotBounded proves the device is bound to at most TWO
+// addresses ever: once ip + ip_alt are both filled (one per family), a third,
+// distinct address — even of a not-yet-bound family pattern — is rejected. This
+// caps the blast radius of the OR relaxation.
+func TestTrustedDeviceAltSlotBounded(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "9898989876767676545454543232321a"
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+	// Fill the alt slot with the IPv6 sibling.
+	if !a.HasValidTrustedDevice(trustedReq(tok), boundV6) {
+		t.Fatal("IPv6 sibling should be learned")
+	}
+	// A THIRD distinct IPv6 address now finds the alt slot occupied → rejected.
+	if a.HasValidTrustedDevice(trustedReq(tok), "2001:db8::dead") {
+		t.Fatal("a third distinct address must be rejected once both slots are bound")
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != boundV6 {
+		t.Fatalf("the alt slot must stay pinned to the first learned sibling, got %q", alt)
+	}
+}
+
+// TestTrustedDeviceConcurrentDualStackSingleLearn is the race-condition test for
+// the OR-binding learn. A burst of concurrent requests for the SAME cookie — a
+// mix of the IPv4 (already bound) and IPv6 (to-be-learned) addresses, exactly
+// what a browser firing parallel requests over a dual-stack link produces — must:
+//   - never panic / corrupt state (run under `go test -race`);
+//   - all succeed (every request is from a bound or learnable address);
+//   - converge on EXACTLY ONE learned sibling (no double-learn), and never spawn
+//     a second device row.
+// The store's single-statement CTE makes the real DB path atomic; the fake mirror
+// is mutex-guarded, so this exercises the AuthManager-level concurrency and pins
+// the invariant.
+func TestTrustedDeviceConcurrentDualStackSingleLearn(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "feedfacefeedfacefeedfacefeedface"
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	const goroutines = 64
+	var wg sync.WaitGroup
+	var okCount int64
+	var okMu sync.Mutex
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		ip := boundV4
+		if i%2 == 0 {
+			ip = boundV6 // half present the sibling family that must be learned
+		}
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			<-start // line everyone up so the presentations actually overlap
+			if a.HasValidTrustedDevice(trustedReq(tok), ip) {
+				okMu.Lock()
+				okCount++
+				okMu.Unlock()
+			}
+		}(ip)
+	}
+	close(start)
+	wg.Wait()
+
+	if okCount != goroutines {
+		t.Fatalf("every concurrent presentation from a bound/learnable address must validate, got %d/%d", okCount, goroutines)
+	}
+	if alt := f.altIPOf(hashToken(tok)); alt != boundV6 {
+		t.Fatalf("concurrent learns must converge on the single sibling, got ip_alt=%q", alt)
+	}
+	if n := f.len(); n != 1 {
+		t.Fatalf("concurrent dual-stack validation must never create a second slot, got %d rows", n)
+	}
+}
+
+// TestTrustedDeviceConcurrentDistinctIPsBounded hardens the bound under a race:
+// many goroutines present the same valid cookie from DISTINCT addresses of the
+// sibling family at once. At most ONE may win the empty alt slot; the device must
+// still be capped at two bindings and one row, and the winner's address must be
+// the one pinned in ip_alt for everyone who then matches it.
+func TestTrustedDeviceConcurrentDistinctIPsBounded(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "0123456789abcdef0123456789abcdef"
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	const goroutines = 48
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		// Each goroutine uses a DISTINCT IPv6 address (the sibling family).
+		ip := "2001:db8::" + strconv.Itoa(100+i)
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			<-start
+			a.HasValidTrustedDevice(trustedReq(tok), ip)
+		}(ip)
+	}
+	close(start)
+	wg.Wait()
+
+	// Whatever raced through, the device is bound to at most two addresses (ip +
+	// one learned alt) and still a single row — the alt slot can never hold more
+	// than one sibling.
+	if alt := f.altIPOf(hashToken(tok)); !strings.HasPrefix(alt, "2001:db8::") {
+		t.Fatalf("exactly one distinct sibling should win the alt slot, got %q", alt)
+	}
+	if n := f.len(); n != 1 {
+		t.Fatalf("racing distinct siblings must not spawn extra rows, got %d", n)
+	}
+	winner := f.altIPOf(hashToken(tok))
+
+	// The ~47 losing distinct-IP presentations are genuine rejections, so they
+	// legitimately tripped the 30-min/3-strike abuse tripwire and sealed trust
+	// instance-wide (correct behaviour — a burst of distinct cookie sources reads
+	// as an attack). Clear that seal so the final binding-cap assertions below
+	// observe the row state, not the ban.
+	a.mu.Lock()
+	a.trustBanUntil = time.Time{}
+	a.trustFailCount = 0
+	a.trustFailWindowStart = time.Time{}
+	a.mu.Unlock()
+
+	// The pinned winner keeps validating; a DIFFERENT sibling is now rejected
+	// (alt slot full) — proving the two-address cap held through the race.
+	if !a.HasValidTrustedDevice(trustedReq(tok), winner) {
+		t.Fatalf("the learned sibling %q must keep validating", winner)
+	}
+	loser := "2001:db8::ffff"
+	if a.HasValidTrustedDevice(trustedReq(tok), loser) {
+		t.Fatal("a non-winning distinct sibling must be rejected once the alt slot is taken")
 	}
 }

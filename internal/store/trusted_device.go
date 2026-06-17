@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -70,30 +71,68 @@ const (
 	TrustExpired
 )
 
-// Check verifies a presented token hash AND that it is being presented from the
-// client IP it was minted for, self-healing in one round-trip:
-//   - a live row whose ip matches clientIP is touched (last_used = NOW) AND its
-//     expiry is slid forward to newExpiry, then reported TrustValid — this is the
-//     sliding window: a token in regular use never lapses, while one left idle
-//     past the window expires;
+// Check verifies a presented token hash AND that it is being presented from an
+// IP the device is bound to, self-healing in one round-trip:
+//   - a live row whose ip OR ip_alt matches clientIP is touched (last_used = NOW)
+//     AND its expiry is slid forward to newExpiry, then reported TrustValid — this
+//     is the sliding window: a token in regular use never lapses, while one left
+//     idle past the window expires;
 //   - an expired row is deleted on the spot and reported TrustExpired (so an
 //     invalid-but-uncleaned token is reaped exactly when it is presented);
-//   - a missing row — OR a live row replayed from a DIFFERENT IP — is reported
-//     TrustAbsent (rejected). IP binding mirrors the ephemeral session token
-//     (sessionToken.ip): a 30-day cookie exfiltrated to another host is useless
-//     because it only authorises the address that passed the TOTP gate.
+//   - a missing row — OR a live row replayed from an unbound IP — is reported
+//     TrustAbsent (rejected).
 //
-// The two writes run inside one CTE so the valid-touch and expired-delete are a
-// single atomic statement — a token is never both touched and deleted. The
-// renewal only fires on the valid branch, so an already-expired token can never
-// be resurrected by a late presentation. The expired-delete is intentionally NOT
-// IP-scoped: reaping a stale row is pure hygiene regardless of who presents it.
+// Dual-stack OR binding. A dual-stack browser reaches us over either its IPv4 or
+// its IPv6 address depending on the OS's per-connection (Happy-Eyeballs) choice,
+// so binding to only the mint-time address would reject the sibling family and
+// burn a second trusted-device slot for one physical device. We instead carry TWO
+// bindings: `ip` (set at mint) and `ip_alt`, the complementary-FAMILY address
+// learned the first time the SAME live cookie is validly presented from the other
+// family. Match is the OR of the two. The learn is deliberately narrow:
+//   - it only fills ip_alt while it is still empty (a device is bound to at most
+//     two addresses, ever — one per family);
+//   - it only accepts an address of the OTHER family than `ip` (a different
+//     SAME-family address — an IPv6 prefix rotation, or a same-network thief — is
+//     NOT learned; it falls through to TrustAbsent, exactly as before).
+//
+// Security note: this relaxes pure IP binding by one address — a stolen cookie
+// presented from a different family BEFORE the owner first uses that family can
+// seat itself in ip_alt. That is the explicit trade for not wasting a slot on
+// dual-stack: the 256-bit token stays the primary secret, same-family theft is
+// still rejected, and the abuse tripwire still counts every genuine rejection.
+//
+// The writes run inside one CTE so the valid-touch (incl. the ip_alt learn) and
+// the expired-delete are a single atomic statement — a token is never both
+// touched and deleted, and two concurrent sibling-family presentations cannot
+// both learn: whichever updates the row first wins under its row lock, and the
+// second then matches via the freshly-written ip_alt (or is rejected if it is a
+// third, distinct address). The renewal only fires on the valid branch, so an
+// already-expired token can never be resurrected by a late presentation. The
+// expired-delete is intentionally NOT IP-scoped: reaping a stale row is pure
+// hygiene regardless of who presents it.
 func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Time) (TrustVerdict, error) {
+	// Textual family test: an IPv6 literal always contains ':', an IPv4 one never
+	// does — cheaper and exception-free versus casting the stored TEXT to inet.
+	clientIsV6 := strings.Contains(clientIP, ":")
 	var validN, expiredN int
 	err := s.db.QueryRow(`
 		WITH valid AS (
-			UPDATE trusted_devices SET last_used = NOW(), expires_at = $3
-			WHERE token_hash = $1 AND ip = $2 AND expires_at > NOW()
+			UPDATE trusted_devices
+			SET last_used = NOW(),
+			    expires_at = $3,
+			    -- Learn the sibling-family address only when we matched via the
+			    -- learn branch (neither slot already held clientIP); an existing
+			    -- match leaves ip_alt untouched.
+			    ip_alt = CASE WHEN ip = $2 OR ip_alt = $2 THEN ip_alt ELSE $2 END
+			WHERE token_hash = $1 AND expires_at > NOW()
+			  AND (
+			        ip = $2 OR ip_alt = $2
+			        OR (
+			             (ip_alt IS NULL OR ip_alt = '')
+			             AND ip IS NOT NULL AND ip <> ''
+			             AND (position(':' in ip) > 0) <> $4
+			           )
+			      )
 			RETURNING 1
 		),
 		expired AS (
@@ -102,7 +141,7 @@ func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Ti
 			RETURNING 1
 		)
 		SELECT (SELECT COUNT(*) FROM valid), (SELECT COUNT(*) FROM expired)`,
-		tokenHash, clientIP, newExpiry,
+		tokenHash, clientIP, newExpiry, clientIsV6,
 	).Scan(&validN, &expiredN)
 	if err != nil {
 		return TrustAbsent, fmt.Errorf("check trusted device: %w", err)

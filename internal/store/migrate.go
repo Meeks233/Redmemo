@@ -674,6 +674,19 @@ var migrations = []string{
 		expires_at   TIMESTAMPTZ NOT NULL
 	 );
 	 CREATE INDEX IF NOT EXISTS idx_trusted_devices_expires ON trusted_devices (expires_at);`,
+
+	// v34: dual-stack OR binding for trusted devices. A trusted cookie minted on a
+	// dual-stack client is then presented from EITHER its IPv4 or its IPv6 address
+	// depending on Happy-Eyeballs / the OS's per-connection choice. Binding only to
+	// the single mint-time address rejects the sibling family, drops that browser
+	// back to the TOTP gate, and (if the operator re-ticks "Trust this device")
+	// mints a SECOND trusted row — burning one of the 3 slots for a single physical
+	// device. `ip` stays the primary (mint-time) binding; `ip_alt` holds the
+	// complementary-family address, learned on its first valid presentation, so
+	// Check matches EITHER (ip OR ip_alt). Nullable, no backfill: existing rows keep
+	// their single `ip` and lazily gain an `ip_alt` the next time they appear from
+	// the other family.
+	`ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS ip_alt TEXT;`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration
