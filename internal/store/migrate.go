@@ -687,6 +687,13 @@ var migrations = []string{
 	// their single `ip` and lazily gain an `ip_alt` the next time they appear from
 	// the other family.
 	`ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS ip_alt TEXT;`,
+
+	// v35: add 'manual_refresh' source for the post-page Refresh button. Without
+	// it the valid_source CHECK rejected the re-archive write, last_updated never
+	// advanced, and the refresh looked like a no-op despite returning 200.
+	`ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
+	 ALTER TABLE posts ADD CONSTRAINT valid_source
+		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'natural_prefetch', 'search', 'user_listing', 'background', 'manual_refresh'));`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration

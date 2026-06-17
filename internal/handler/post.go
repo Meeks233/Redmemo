@@ -188,10 +188,13 @@ func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {
 		}
 		go h.archiver.ArchiveComments(post.Permalink, comments)
 	} else {
-		go func() {
-			h.archiver.ArchivePost(&post, sub, "manual_refresh")
-			h.archiver.ArchiveComments(post.Permalink, comments)
-		}()
+		// Synchronous, not a goroutine: the client reloads the page the instant
+		// this 200 lands, so the archive write (which bumps last_updated — the
+		// "archived at" time the reloaded page renders) must be committed before
+		// we return. Spawning it in the background races the reload and the
+		// timestamp appears unchanged, which reads as "refresh did nothing".
+		h.archiver.ArchivePost(&post, sub, "manual_refresh")
+		h.archiver.ArchiveComments(post.Permalink, comments)
 	}
 	if h.prefetcher != nil {
 		h.prefetcher.RecordL3Fetch(sub, id, len(comments), reportedNumComments(&post))
@@ -515,7 +518,10 @@ func (h *Handler) renderPostFallback(w http.ResponseWriter, r *http.Request, sub
 	}
 
 	if sp, _ := h.postStore.Get(post.Permalink); sp != nil {
-		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+		// LastUpdated, not FirstSeen: the badge pairs with the Refresh button, so
+		// it must reflect when this copy was last (re-)archived. FirstSeen never
+		// moves on a manual refresh, which made refreshes look like no-ops.
+		post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.LastUpdated.Unix()))
 	}
 
 	// Inline-expand "more" stubs using any deeper-reply children we've
@@ -608,7 +614,9 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 		h.renderer.RenderError(w, prefs.Lang, "存档数据解析失败", http.StatusInternalServerError)
 		return
 	}
-	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.FirstSeen.Unix()))
+	// LastUpdated, not FirstSeen: the post-detail "archived" badge should track
+	// the most recent (re-)archive so a manual Refresh visibly advances it.
+	post.ArchivedRelTime, post.ArchivedTime = reddit.FormatTime(float64(sp.LastUpdated.Unix()))
 	// The sticky upstream_removed verdict on the StoredPost row drives the
 	// Time Machine badge. Old archive JSON that pre-dates the Removed field
 	// keeps Removed=false in the JSON itself; the DB row is the source of

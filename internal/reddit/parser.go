@@ -121,7 +121,7 @@ func buildPost(d map[string]interface{}) Post {
 	if cat := getString(d, "removed_by_category"); cat != "" {
 		p.Removed = true
 		if cat == "moderator" {
-			bodyHTML = fmt.Sprintf(`<p>[Removed by Reddit] — <a href="https://www.unddit.com%s">view on Unddit</a></p>`, p.Permalink)
+			bodyHTML = `<p>[Removed by Reddit]</p>`
 		}
 	} else {
 		selftext := getString(d, "selftext")
@@ -745,12 +745,10 @@ func buildComment(raw json.RawMessage, postLink, postAuthor string) Comment {
 
 	if authorName == "[deleted]" && strings.Contains(bodyHTML, "[removed]") {
 		c.Removed = true
-		bodyHTML = fmt.Sprintf(`<p>[removed] — <a href="https://www.unddit.com%s%s">view on Unddit</a></p>`,
-			postLink, c.ID)
+		bodyHTML = `<p>[removed]</p>`
 	} else if strings.Contains(bodyHTML, "[ Removed by Reddit ]") {
 		c.Removed = true
-		bodyHTML = fmt.Sprintf(`<p>[Removed by Reddit] — <a href="https://www.unddit.com%s%s">view on Unddit</a></p>`,
-			postLink, c.ID)
+		bodyHTML = `<p>[Removed by Reddit]</p>`
 	} else if authorName == "[deleted]" && strings.Contains(bodyHTML, "[deleted]") {
 		c.Removed = true
 	} else {
