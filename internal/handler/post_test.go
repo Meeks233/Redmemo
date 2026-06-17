@@ -22,11 +22,11 @@ import (
 // end-to-end without standing up SQLite / Redis / a Reddit-shaped HTTP server.
 
 type fakePostStore struct {
-	mu                sync.Mutex
-	rows              map[string]*store.StoredPost
-	getCalls          int
-	markRemovedCalls  []string
-	saveHTMLCalls     []string
+	mu               sync.Mutex
+	rows             map[string]*store.StoredPost
+	getCalls         int
+	markRemovedCalls []string
+	saveHTMLCalls    []string
 }
 
 func newFakePostStore() *fakePostStore {
@@ -88,26 +88,26 @@ func (f *fakePostStore) SaveHTML(urlPath string, html []byte) error {
 func (f *fakePostStore) ArchiveSearch(store.ArchiveSearchOpts) ([]*store.StoredPost, int64, error) {
 	return nil, 0, nil
 }
-func (f *fakePostStore) ArchivedSubsByTop(int) ([]store.ArchivedSub, error)        { return nil, nil }
-func (f *fakePostStore) ArchivedSubsAlphabetical() ([]store.ArchivedSub, error)    { return nil, nil }
-func (f *fakePostStore) ArchivedSubsByNew(int) ([]store.ArchivedSub, error)        { return nil, nil }
-func (f *fakePostStore) DetectNSFWForSubs([]string) (map[string]bool, error)       { return nil, nil }
+func (f *fakePostStore) ArchivedSubsByTop(int) ([]store.ArchivedSub, error)     { return nil, nil }
+func (f *fakePostStore) ArchivedSubsAlphabetical() ([]store.ArchivedSub, error) { return nil, nil }
+func (f *fakePostStore) ArchivedSubsByNew(int) ([]store.ArchivedSub, error)     { return nil, nil }
+func (f *fakePostStore) DetectNSFWForSubs([]string) (map[string]bool, error)    { return nil, nil }
 func (f *fakePostStore) ListBySubreddit(string, int, int, bool) ([]*store.StoredPost, error) {
 	return nil, nil
 }
-func (f *fakePostStore) CountBySubreddit(string, bool) (int64, error)              { return 0, nil }
+func (f *fakePostStore) CountBySubreddit(string, bool) (int64, error) { return 0, nil }
 func (f *fakePostStore) ListHomepage(string, store.ArchiveSearchOpts) ([]*store.StoredPost, error) {
 	return nil, nil
 }
 func (f *fakePostStore) RandomWalk(store.ArchiveSearchOpts, bool, float64, float64, int) ([]*store.StoredPost, float64, bool, error) {
 	return nil, 0, false, nil
 }
-func (f *fakePostStore) Reshuffle() error                                            { return nil }
-func (f *fakePostStore) SubredditCounts([]string) (map[string]int, error)            { return nil, nil }
-func (f *fakePostStore) Count() (int64, error)                                       { return 0, nil }
-func (f *fakePostStore) SubredditCount() (int64, error)                              { return 0, nil }
-func (f *fakePostStore) SubredditStats(int, int) ([]store.SubredditStat, error)      { return nil, nil }
-func (f *fakePostStore) DistinctSubreddits() ([]string, error)                       { return nil, nil }
+func (f *fakePostStore) Reshuffle() error                                       { return nil }
+func (f *fakePostStore) SubredditCounts([]string) (map[string]int, error)       { return nil, nil }
+func (f *fakePostStore) Count() (int64, error)                                  { return 0, nil }
+func (f *fakePostStore) SubredditCount() (int64, error)                         { return 0, nil }
+func (f *fakePostStore) SubredditStats(int, int) ([]store.SubredditStat, error) { return nil, nil }
+func (f *fakePostStore) DistinctSubreddits() ([]string, error)                  { return nil, nil }
 
 type fakeCommentStore struct {
 	rows map[string]*store.StoredComments
@@ -125,14 +125,24 @@ func (f *fakeCommentStore) GetLatest(postURLPath string) (*store.StoredComments,
 	return &cp, nil
 }
 
+func (f *fakeCommentStore) HasCommentsForPaths(paths []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		if _, ok := f.rows[p]; ok {
+			out[p] = true
+		}
+	}
+	return out, nil
+}
+
 type fakeCache struct{}
 
-func (fakeCache) GetHTML(context.Context, string) ([]byte, error)               { return nil, nil }
-func (fakeCache) PutHTML(context.Context, string, []byte, time.Duration) error  { return nil }
-func (fakeCache) InvalidateHTMLPrefix(context.Context, string) error            { return nil }
-func (fakeCache) InvalidateAllHTML(context.Context) error                       { return nil }
-func (fakeCache) Get(context.Context, string) (string, error)                   { return "", nil }
-func (fakeCache) Set(context.Context, string, string, time.Duration) error      { return nil }
+func (fakeCache) GetHTML(context.Context, string) ([]byte, error)              { return nil, nil }
+func (fakeCache) PutHTML(context.Context, string, []byte, time.Duration) error { return nil }
+func (fakeCache) InvalidateHTMLPrefix(context.Context, string) error           { return nil }
+func (fakeCache) InvalidateAllHTML(context.Context) error                      { return nil }
+func (fakeCache) Get(context.Context, string) (string, error)                  { return "", nil }
+func (fakeCache) Set(context.Context, string, string, time.Duration) error     { return nil }
 
 type fakeRedditClient struct {
 	mu         sync.Mutex
@@ -172,18 +182,18 @@ func (f *fakeRedditClient) FetchUser(context.Context, string, string, string, st
 
 type fakeTokenSource struct{ available bool }
 
-func (f fakeTokenSource) HasAvailableTokens() bool                  { return f.available }
-func (fakeTokenSource) WaitForUserAgent(context.Context) string     { return "" }
-func (fakeTokenSource) EarliestReset() (int, int)                   { return 0, 0 }
+func (f fakeTokenSource) HasAvailableTokens() bool                   { return f.available }
+func (fakeTokenSource) WaitForUserAgent(context.Context) string      { return "" }
+func (fakeTokenSource) EarliestReset() (int, int)                    { return 0, 0 }
 func (fakeTokenSource) RemainingBudget(context.Context) (int, error) { return 0, nil }
-func (fakeTokenSource) TokenStatuses() []oauth.TokenStatusInfo      { return nil }
-func (fakeTokenSource) WindowInfo() (time.Time, int, int)           { return time.Time{}, 0, 0 }
+func (fakeTokenSource) TokenStatuses() []oauth.TokenStatusInfo       { return nil }
+func (fakeTokenSource) WindowInfo() (time.Time, int, int)            { return time.Time{}, 0, 0 }
 
 type fakeArchiver struct {
-	mu              sync.Mutex
-	done            sync.WaitGroup
-	postCalls       []reddit.Post
-	commentCalls    int
+	mu           sync.Mutex
+	done         sync.WaitGroup
+	postCalls    []reddit.Post
+	commentCalls int
 }
 
 func (f *fakeArchiver) ArchivePost(post *reddit.Post, _, _ string) {
@@ -198,9 +208,9 @@ func (f *fakeArchiver) ArchiveComments(string, []reddit.Comment) {
 	f.mu.Unlock()
 	f.done.Done()
 }
-func (f *fakeArchiver) ArchivePosts([]reddit.Post, string, string)    {}
-func (f *fakeArchiver) ArchiveSubreddit(*reddit.Subreddit)            {}
-func (f *fakeArchiver) SetControlFromString(string)                   {}
+func (f *fakeArchiver) ArchivePosts([]reddit.Post, string, string) {}
+func (f *fakeArchiver) ArchiveSubreddit(*reddit.Subreddit)         {}
+func (f *fakeArchiver) SetControlFromString(string)                {}
 
 func (f *fakeArchiver) postCount() int {
 	f.mu.Lock()

@@ -198,6 +198,7 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 			posts = append(posts, p)
 		}
 	}
+	h.markLocalComments(posts)
 
 	if r.URL.Query().Get("partial") == "1" {
 		interval := 2
@@ -229,6 +230,33 @@ func (h *Handler) handleFrontPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Source", "archive")
 	if err := h.renderer.RenderSubreddit(w, data); err != nil {
 		log.Printf("handler: render homepage: %v", err)
+	}
+}
+
+// markLocalComments flags every post whose comment thread we hold in the
+// archive, so listing cards can show the cloud-check "cached locally" hint to
+// the left of the comment count. One indexed batch query covers the whole page.
+// Best-effort: a nil store or query error just leaves every flag false. Keyed
+// by Permalink, which is exactly the comments table's post_url_path.
+func (h *Handler) markLocalComments(posts []reddit.Post) {
+	if h.commentStore == nil || len(posts) == 0 {
+		return
+	}
+	paths := make([]string, 0, len(posts))
+	for i := range posts {
+		if posts[i].Permalink != "" {
+			paths = append(paths, posts[i].Permalink)
+		}
+	}
+	have, err := h.commentStore.HasCommentsForPaths(paths)
+	if err != nil {
+		log.Printf("handler: mark local comments: %v", err)
+		return
+	}
+	for i := range posts {
+		if have[posts[i].Permalink] {
+			posts[i].HasLocalComments = true
+		}
 	}
 }
 
@@ -415,6 +443,7 @@ func (h *Handler) renderSubredditFromArchive(w http.ResponseWriter, r *http.Requ
 			posts = append(posts, p)
 		}
 	}
+	h.markLocalComments(posts)
 
 	data := render.SubredditPageData{
 		BasePage: render.BasePage{

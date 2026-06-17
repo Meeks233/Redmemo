@@ -2252,6 +2252,10 @@ video.lazy-media:not([src]) {
     opacity: 0.85;
 }
 
+.post_comments > .cloud-check {
+    margin-right: 0.3em;
+}
+
 /* Time Machine pill — theme-aware capsule rendered next to the post/comment
    author so removed posts read as "archived from upstream" without claiming a
    full banner row. Border/background tint trail the active accent so the badge

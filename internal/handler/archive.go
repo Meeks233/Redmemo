@@ -211,6 +211,7 @@ func (h *Handler) handleArchiveHub(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		h.markLocalComments(posts)
 
 		if r.URL.Query().Get("partial") == "1" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -472,6 +473,7 @@ func (h *Handler) handleArchiveSub(w http.ResponseWriter, r *http.Request) {
 			posts = append(posts, p)
 		}
 	}
+	h.markLocalComments(posts)
 
 	if r.URL.Query().Get("partial") == "1" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -529,9 +531,9 @@ func (h *Handler) isArchivableSub(sub string) bool {
 // fetchSubredditAbout returns the /r/<sub>/about data. It ALWAYS prefers the
 // DB cache (60-day TTL via sub_icons.about_*). Upstream is consulted only
 // when:
-//   1. active=true (the request was initiated by a user actively viewing
-//      the subreddit page — never by background prefetch or archive jobs), AND
-//   2. The cache is missing OR expired.
+//  1. active=true (the request was initiated by a user actively viewing
+//     the subreddit page — never by background prefetch or archive jobs), AND
+//  2. The cache is missing OR expired.
 //
 // When active=false and the cache is missing/expired, an empty Subreddit
 // is returned without any upstream call. This enforces the "no auto-fetch

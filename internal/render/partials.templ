@@ -449,7 +449,12 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 		@postPreview(post)
 		@poll(post.Poll)
 		<div class="post_footer">
-			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>{ post.Comments[0] } { commentsWord(post.Comments[1]) }</a>
+			<a href={ templ.SafeURL(post.Permalink) } class="post_comments" title={ post.Comments[1] + " " + commentsWord(post.Comments[1]) }>
+				if post.HasLocalComments {
+					@cloudCheckSVG()
+				}
+				{ post.Comments[0] } { commentsWord(post.Comments[1]) }
+			</a>
 		</div>
 	</div>
 }

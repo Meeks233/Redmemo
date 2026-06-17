@@ -240,6 +240,47 @@ func TestRenderPostCloudCheckHint(t *testing.T) {
 	})
 }
 
+// TestRenderPostListCloudCheck pins the listing-card behaviour: the cloud-check
+// sits inside the post_comments link only when the card's post carries
+// HasLocalComments (an archived comment thread exists for it).
+func TestRenderPostListCloudCheck(t *testing.T) {
+	e := newTestEngine(t)
+	post := func(local bool) reddit.Post {
+		return reddit.Post{
+			ID: "abc", Title: "A Test Post", Community: "golang", PostType: "self",
+			Permalink:        "/r/golang/comments/abc/a_test_post/",
+			Score:            [2]string{"100", "100"},
+			Comments:         [2]string{"27", "27"},
+			Author:           reddit.Author{Name: "poster"},
+			RelTime:          "1h ago",
+			HasLocalComments: local,
+		}
+	}
+	render := func(t *testing.T, p reddit.Post) string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := e.RenderPostList(&buf, []reddit.Post{p}, reddit.Preferences{}); err != nil {
+			t.Fatalf("RenderPostList: %v", err)
+		}
+		return buf.String()
+	}
+
+	with := render(t, post(true))
+	ci := strings.Index(with, `class="post_comments"`)
+	if ci < 0 {
+		t.Fatal("post_comments link missing")
+	}
+	if !strings.Contains(with[ci:min(ci+300, len(with))], "cloud-check") {
+		t.Error("post_comments should carry the cloud-check when HasLocalComments=true")
+	}
+
+	without := render(t, post(false))
+	ci2 := strings.Index(without, `class="post_comments"`)
+	if strings.Contains(without[ci2:min(ci2+300, len(without))], "cloud-check") {
+		t.Error("post_comments must NOT carry the cloud-check when HasLocalComments=false")
+	}
+}
+
 func TestRenderPostTimeMachineBadge(t *testing.T) {
 	build := func(removed bool, lang string, comments []reddit.Comment) PostPageData {
 		return PostPageData{

@@ -52,6 +52,11 @@ type Post struct {
 	// per-row navigation text is duplicated, so no single asset is fetched
 	// more than once when the cluster expands.
 	RepostMembers []RepostMember `json:"-"`
+	// HasLocalComments is true when we hold an archived copy of this post's
+	// comment thread (an L3 fetch landed). Computed at archive-query time, never
+	// parsed from or written to json_data — it drives the cloud-check
+	// "cached-locally" hint to the left of the comment count on listing cards.
+	HasLocalComments bool `json:"-"`
 }
 
 // RepostMember is one navigable variant inside a repost cluster (FoldReposts
@@ -126,12 +131,12 @@ type Flags struct {
 
 // Media holds a media reference (image, video, thumbnail).
 type Media struct {
-	URL          string
-	AltURL       string // HLS URL (video fallback)
-	Width        int64
-	Height       int64
-	Poster       string // video poster image
-	Duration     float64
+	URL      string
+	AltURL   string // HLS URL (video fallback)
+	Width    int64
+	Height   int64
+	Poster   string // video poster image
+	Duration float64
 	// LocalCached is set by the render layer right before a post template runs
 	// when the on-disk media proxy already has a complete copy of this clip.
 	// The long-video gate uses it to bypass the click-to-load placeholder
@@ -202,48 +207,48 @@ type User struct {
 
 // Preferences stores user display preferences read from cookies.
 type Preferences struct {
-	AvailableThemes                []string // derived from embedded CSS filenames
-	Theme                          string
-	AutoThemeDay                   string // theme woken under prefers-color-scheme: light (default "light"); only used when Theme=="auto"
-	AutoThemeNight                 string // theme woken under prefers-color-scheme: dark  (default "black"); only used when Theme=="auto"
-	Lang                           string // UI language code (e.g. "en", "zh")
-	FrontPage                      string
-	FrontPageSubs                  string
-	Layout                         string
-	Wide                           string
-	BlurSpoiler                    string
-	ShowNSFW                       string
-	ShowLocalNSFWSubs              string // default "off" — when "off", NSFW subs are hidden from the archive nav (/archive) listing
-	BlurNSFW                       string
-	HideSidebarAndSummary          string
-	AutoplayVideos                 string
-	FixedNavbar                    string // default "on"
-	DisableVisitRedditConfirmation string
-	CommentSort                    string
-	PostSort                       string
-	Subscriptions                  []string // cookie value split by "+"
-	Filters                        []string // cookie value split by "+"
-	HideAwards                     string
-	HideScore                      string
-	FetchSubAbout                  string
-	EnableDebug                    string
-	PrefetchSubs                   string
-	PrefetchThreshold              string
-	PrefetchSort                   string // global default sort for NP L1: hot|new|top|rising|controversial (default "hot")
-	PrefetchTimeframe              string // global default t for NP L1 (only honored by top/controversial): hour|day|week|month|year|all (empty = none)
-	PrefetchSubModes               string // per-sub overrides, one rule per line: "sub=sort[:timeframe]" (e.g. "golang=new\nrust=top:week")
-	PrefetchDefaultDepth           string // "none" | "l2" | "l3" | "l2+l3" (default "l2+l3"). Global NP depth: "none" leaves only L1 main fetch, "l2" adds media downloads, "l3" adds comment fetches without media, "l2+l3" runs the full visit-like flow. Per-sub overrides (prefetch_sub_modes) may set depth:... to deviate from this global default for a single subreddit.
-	PrefetchL3MinComments          string // integer >= 0 (default "0" = disabled). Posts with num_comments below this value are skipped by both standalone and bound L3 — surface noise filter for archives that should not waste budget on threads of size 1.
-	ScrollInterval                 string
-	LazyMedia                      string // default "on" — defer media requests until the post enters the viewport
-	VideoQuality                   string // preferred max v.redd.it height: "source" (default) | "1080" | "720" | "480" | "360" | "240"
-	MuteAllVideos                  string // default "off" — start every video muted
-	MuteNSFWVideos                 string // default "on"  — start NSFW videos muted (ignored when MuteAllVideos is on)
+	AvailableThemes                 []string // derived from embedded CSS filenames
+	Theme                           string
+	AutoThemeDay                    string // theme woken under prefers-color-scheme: light (default "light"); only used when Theme=="auto"
+	AutoThemeNight                  string // theme woken under prefers-color-scheme: dark  (default "black"); only used when Theme=="auto"
+	Lang                            string // UI language code (e.g. "en", "zh")
+	FrontPage                       string
+	FrontPageSubs                   string
+	Layout                          string
+	Wide                            string
+	BlurSpoiler                     string
+	ShowNSFW                        string
+	ShowLocalNSFWSubs               string // default "off" — when "off", NSFW subs are hidden from the archive nav (/archive) listing
+	BlurNSFW                        string
+	HideSidebarAndSummary           string
+	AutoplayVideos                  string
+	FixedNavbar                     string // default "on"
+	DisableVisitRedditConfirmation  string
+	CommentSort                     string
+	PostSort                        string
+	Subscriptions                   []string // cookie value split by "+"
+	Filters                         []string // cookie value split by "+"
+	HideAwards                      string
+	HideScore                       string
+	FetchSubAbout                   string
+	EnableDebug                     string
+	PrefetchSubs                    string
+	PrefetchThreshold               string
+	PrefetchSort                    string // global default sort for NP L1: hot|new|top|rising|controversial (default "hot")
+	PrefetchTimeframe               string // global default t for NP L1 (only honored by top/controversial): hour|day|week|month|year|all (empty = none)
+	PrefetchSubModes                string // per-sub overrides, one rule per line: "sub=sort[:timeframe]" (e.g. "golang=new\nrust=top:week")
+	PrefetchDefaultDepth            string // "none" | "l2" | "l3" | "l2+l3" (default "l2+l3"). Global NP depth: "none" leaves only L1 main fetch, "l2" adds media downloads, "l3" adds comment fetches without media, "l2+l3" runs the full visit-like flow. Per-sub overrides (prefetch_sub_modes) may set depth:... to deviate from this global default for a single subreddit.
+	PrefetchL3MinComments           string // integer >= 0 (default "0" = disabled). Posts with num_comments below this value are skipped by both standalone and bound L3 — surface noise filter for archives that should not waste budget on threads of size 1.
+	ScrollInterval                  string
+	LazyMedia                       string // default "on" — defer media requests until the post enters the viewport
+	VideoQuality                    string // preferred max v.redd.it height: "source" (default) | "1080" | "720" | "480" | "360" | "240"
+	MuteAllVideos                   string // default "off" — start every video muted
+	MuteNSFWVideos                  string // default "on"  — start NSFW videos muted (ignored when MuteAllVideos is on)
 	DisableInitiativeUpstreamAccess string // default "off" — when "on", user-driven session-token requests never hit Reddit, only the local archive (CDN media still flows, governed by the global limiter)
-	SettingsTokenTTL               string // /settings auth-cookie lifetime in minutes — discrete choices "5","10" (default),"15","30","60"; capped at 60
-	PageLimit                      string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 100], default "50". Reddit's OAuth quota is per-request, so larger pages are strictly cheaper.
-	ShowAllGalleryMedia            string // default "off" — when "on", listing pages render all gallery items inline with left/right navigation instead of only the first image
-	LongVideoThreshold             string // gate threshold in minutes — videos longer than this render a click-to-download placeholder instead of a live <video>; "0" disables the gate entirely; default "5"
+	SettingsTokenTTL                string // /settings auth-cookie lifetime in minutes — discrete choices "5","10" (default),"15","30","60"; capped at 60
+	PageLimit                       string // posts per upstream listing request (/r/{sub} + /search) — integer in [5, 100], default "50". Reddit's OAuth quota is per-request, so larger pages are strictly cheaper.
+	ShowAllGalleryMedia             string // default "off" — when "on", listing pages render all gallery items inline with left/right navigation instead of only the first image
+	LongVideoThreshold              string // gate threshold in minutes — videos longer than this render a click-to-download placeholder instead of a live <video>; "0" disables the gate entirely; default "5"
 }
 
 // Params holds common query parameters for listing endpoints.

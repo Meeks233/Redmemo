@@ -43,6 +43,7 @@ type postStorer interface {
 
 type commentStorer interface {
 	GetLatest(postURLPath string) (*store.StoredComments, error)
+	HasCommentsForPaths(paths []string) (map[string]bool, error)
 }
 
 type htmlCache interface {

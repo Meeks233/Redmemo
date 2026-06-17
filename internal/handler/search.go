@@ -278,6 +278,7 @@ func (h *Handler) serveSearch(w http.ResponseWriter, r *http.Request, sub string
 			seenArchive := h.loadSeenTitles(r.Context(), sessKey)
 			posts = applySessionDedup(posts, seenArchive, "archive:0")
 			h.saveSeenTitles(r.Context(), sessKey, seenArchive)
+			h.markLocalComments(posts)
 
 			data := render.SearchPageData{
 				BasePage: render.BasePage{
@@ -486,6 +487,7 @@ func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Reque
 	seen := h.loadSeenTitles(r.Context(), sessKey)
 	posts = applySessionDedup(posts, seen, fmt.Sprintf("archive:%d", offset))
 	h.saveSeenTitles(r.Context(), sessKey, seen)
+	h.markLocalComments(posts)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Source", "archive")
