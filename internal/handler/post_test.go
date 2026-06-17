@@ -52,6 +52,20 @@ func (f *fakePostStore) Get(urlPath string) (*store.StoredPost, error) {
 	return &cp, nil
 }
 
+// GetByID mirrors the real store: an ID-keyed scan that ignores the permalink
+// slug. Returns the first row whose PostID matches, regardless of its url_path.
+func (f *fakePostStore) GetByID(postID string) (*store.StoredPost, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.rows {
+		if r.PostID == postID {
+			cp := *r
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (f *fakePostStore) MarkUpstreamRemoved(urlPath string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -278,6 +292,55 @@ func TestServePost_RemovedUpstreamWithPriorArchive(t *testing.T) {
 	}
 
 	arc.done.Wait()
+}
+
+// Scenario A2: upstream is operator-disabled (cache-only mode) and the request
+// arrives with a slug that does NOT match the archived permalink's slug — the
+// real-world failure where a share link mangled the title into encoded spaces.
+// The exact-match Get misses, but the post IS archived, so the ID-keyed
+// fallback must re-bind to the stored row and serve it from the archive rather
+// than returning the bogus 404 "All sources exhausted" page. No upstream fetch
+// may fire (upstream is disabled).
+func TestServePost_SlugMismatchUpstreamDisabledServesArchive(t *testing.T) {
+	h, ps, _, rc, _ := newTestHandler(t)
+	h.siteDefaults["disable_initiative_upstream_access"] = "on"
+
+	// Canonical archived permalink carries the real slug.
+	canonical := "/r/selfhosted/comments/1u4wqnj/psa_oracle_is_changing_free_tier_limits_update_by/"
+	ps.put(&store.StoredPost{
+		URLPath:   canonical,
+		Subreddit: "selfhosted",
+		PostID:    "1u4wqnj",
+		Title:     "PSA: Oracle is changing free tier limits",
+		JSONData:  []byte(`{"id":"1u4wqnj","title":"PSA: Oracle is changing free tier limits","permalink":"` + canonical + `","community":"selfhosted","author":{"name":"poster"}}`),
+		FirstSeen: time.Now().Add(-48 * time.Hour),
+	})
+
+	// Request comes in with a DIFFERENT, mangled slug (extra words, no spaces
+	// needed to reproduce — any slug divergence misses the PRIMARY KEY match).
+	req := httptest.NewRequest("GET", "/r/selfhosted/comments/1u4wqnj/psa_oracle_is_changing_______free_tier_limits_update_by", nil)
+	w := httptest.NewRecorder()
+	h.servePost(w, req, "selfhosted", "1u4wqnj")
+
+	resp := w.Result()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 (archive served despite slug mismatch)", resp.StatusCode)
+	}
+	if src := resp.Header.Get("X-Source"); src != "archive" {
+		t.Errorf("X-Source = %q, want archive", src)
+	}
+	if atomic.LoadInt32(&rc.fetchCalls) != 0 {
+		t.Errorf("FetchPost must not be called when upstream disabled; got %d", rc.fetchCalls)
+	}
+	// The archived OP renders above an inline upstream-disabled notice (which
+	// itself reuses the "exhausted"/"upstream_disabled" strings to replace the
+	// comment thread). The proof we serve LOCAL DATA is the OP title in the body
+	// plus the X-Source/200 above — before the ID fallback this path produced a
+	// 404 "not archived locally" page with no post content at all.
+	body := w.Body.String()
+	if !strings.Contains(body, "PSA: Oracle is changing free tier limits") {
+		t.Errorf("body should render the archived post title from local data")
+	}
 }
 
 // Scenario B: upstream fails (HR/network/quota error) and there is no prior

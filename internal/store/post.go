@@ -44,6 +44,38 @@ func (s *PostStore) Get(urlPath string) (*StoredPost, error) {
 	return p, nil
 }
 
+// GetByID resolves an archived post by its Reddit post ID, ignoring the
+// permalink slug. Reddit addresses posts by ID alone — the trailing
+// "/psa_oracle_is_changing.../" slug is cosmetic and Reddit happily serves the
+// post for any slug (or none). A visitor arriving via a share link with a
+// mangled, edited, or truncated slug therefore yields a url_path that never
+// equals the stored permalink, so the exact-match Get misses. This ID-keyed
+// fallback re-binds such requests to the archived row using idx_posts_post_id.
+// Post IDs are globally unique on Reddit, so post_id alone is unambiguous;
+// LIMIT 1 guards against the theoretical case of a duplicate row.
+func (s *PostStore) GetByID(postID string) (*StoredPost, error) {
+	p := &StoredPost{}
+	err := s.db.QueryRow(`
+		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,
+		       author, score, created_utc, first_seen, last_updated, source, media_done,
+		       upstream_removed
+		FROM posts WHERE post_id = $1
+		ORDER BY last_updated DESC
+		LIMIT 1`, postID,
+	).Scan(
+		&p.URLPath, &p.Subreddit, &p.PostID, &p.Title, &p.JSONData, &p.RenderedHTML,
+		&p.Author, &p.Score, &p.CreatedUTC, &p.FirstSeen, &p.LastUpdated, &p.Source, &p.MediaDone,
+		&p.UpstreamRemoved,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get post by id: %w", err)
+	}
+	return p, nil
+}
+
 // MarkUpstreamRemoved flips the sticky upstream_removed verdict for a permalink.
 // It is a no-op when the row is missing — the archive layer calls this only
 // after confirming the row exists, so a row that disappeared between the read

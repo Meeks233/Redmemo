@@ -81,6 +81,21 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 		// fallback (storedPost stays nil) is observable rather than invisible.
 		log.Printf("post: load archived post %q failed: %v", urlPath, err)
 	}
+	// Slug-tolerant fallback. url_path is the full permalink *including* the
+	// cosmetic slug Reddit ignores, so a request whose slug was mangled (encoded
+	// spaces, an edited title, a truncated share link) misses the exact-match
+	// Get above and would otherwise fall straight through to serveDegradeMiss —
+	// a bogus "All sources exhausted" even though the post is archived. Re-bind
+	// to the stored row by post ID and adopt its canonical url_path so every
+	// downstream key (re-read, MarkUpstreamRemoved, comment lookup) lines up.
+	if storedPost == nil {
+		if byID, idErr := h.postStore.GetByID(id); idErr != nil {
+			log.Printf("post: load archived post by id %q failed: %v", id, idErr)
+		} else if byID != nil {
+			storedPost = byID
+			urlPath = byID.URLPath
+		}
+	}
 	if !degrade && (storedPost == nil || !storedPost.UpstreamRemoved) {
 		if h.renderPostFallback(w, r, sub, id, commentSort, prefs, t, cacheKey) {
 			return

@@ -21,6 +21,7 @@ import (
 
 type postStorer interface {
 	Get(urlPath string) (*store.StoredPost, error)
+	GetByID(postID string) (*store.StoredPost, error)
 	MarkUpstreamRemoved(urlPath string) error
 	SaveHTML(urlPath string, html []byte) error
 	ArchiveSearch(opts store.ArchiveSearchOpts) ([]*store.StoredPost, int64, error)
