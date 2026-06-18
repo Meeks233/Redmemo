@@ -1090,6 +1090,84 @@ func TestDriveReclaimedCycle_OrphanedL3NotRecovered(t *testing.T) {
 	}
 }
 
+// TestStatus_SuppressesStaleReclaimForUncoveredLayer is the regression test for
+// the public-demo phantom: after deploying with prefetch_default_depth=l3, a
+// driveReclaimedCycle goroutine left over from the previous depth had already
+// set the "L2 recovering" banner and rebuilt the L2 cycle snapshot, then parked
+// on a *future* wave. Its mid-loop depth re-check only runs at the top of the
+// next wave iteration, so the banner + snapshot lingered on /debug for the rest
+// of the period even though L2 was off. Status() must re-resolve the sub's
+// CURRENT depth and suppress both the banner and the cycle panel for any layer
+// the depth no longer covers.
+func TestStatus_SuppressesStaleReclaimForUncoveredLayer(t *testing.T) {
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"prefetch_subs":          "sub:selfhosted",
+			"prefetch_default_depth": "l3", // L2 off, L3 on
+		}},
+		Events: NewEventLog(10),
+	}
+
+	// Simulate the stale in-flight reclaim state a parked driver leaves behind.
+	s.setReclaimStatus("L2", "selfhosted", 1, 1, 1)
+	s.l2Cycles = map[string]*l2CycleSnap{
+		l2CycleKey("day", "selfhosted"): {
+			tf: "day", sub: "selfhosted", postCount: 85, currentWave: 4,
+			period: 12 * time.Hour, cycleID: "day:selfhosted:1781707822",
+			waveOffsets: []time.Duration{time.Hour, 2 * time.Hour},
+		},
+	}
+
+	ps := s.Status()
+	if ps.ReclaimL2Phase != "" || ps.ReclaimL2Info != "" {
+		t.Errorf("L2 recovering banner not suppressed for depth=l3: phase=%q info=%q",
+			ps.ReclaimL2Phase, ps.ReclaimL2Info)
+	}
+	if len(ps.L2Cycles) != 0 {
+		t.Errorf("L2 cycle snapshot not suppressed for depth=l3: %+v", ps.L2Cycles)
+	}
+}
+
+// TestStatus_KeepsReclaimForCoveredLayer is the positive control: when the
+// sub's depth still covers the layer, Status() must leave the recovering banner
+// and the cycle snapshot intact — the suppression is depth-gated, not blanket.
+func TestStatus_KeepsReclaimForCoveredLayer(t *testing.T) {
+	s := &Scheduler{
+		settings: &mockSettings{data: map[string]string{
+			"prefetch_subs":          "sub:selfhosted",
+			"prefetch_default_depth": "l2+l3", // both layers on
+		}},
+		Events: NewEventLog(10),
+	}
+
+	s.setReclaimStatus("L2", "selfhosted", 1, 3, 2)
+	s.setReclaimStatus("L3", "selfhosted", 1, 2, 1)
+	s.l2Cycles = map[string]*l2CycleSnap{
+		l2CycleKey("day", "selfhosted"): {
+			tf: "day", sub: "selfhosted", postCount: 85, cycleID: "c2",
+			waveOffsets: []time.Duration{time.Hour},
+		},
+	}
+	s.l3Cycles = map[string]*l2CycleSnap{
+		l2CycleKey("day", "selfhosted"): {
+			tf: "day", sub: "selfhosted", postCount: 12, cycleID: "c3",
+			waveOffsets: []time.Duration{time.Hour},
+		},
+	}
+
+	ps := s.Status()
+	if ps.ReclaimL2Phase != "recovering" {
+		t.Errorf("L2 banner wrongly suppressed for depth=l2+l3: phase=%q", ps.ReclaimL2Phase)
+	}
+	if ps.ReclaimL3Phase != "recovering" {
+		t.Errorf("L3 banner wrongly suppressed for depth=l2+l3: phase=%q", ps.ReclaimL3Phase)
+	}
+	if len(ps.L2Cycles) != 1 || len(ps.L3Cycles) != 1 {
+		t.Errorf("cycle snapshots wrongly suppressed for depth=l2+l3: L2=%d L3=%d",
+			len(ps.L2Cycles), len(ps.L3Cycles))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

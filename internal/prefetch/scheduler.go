@@ -261,10 +261,15 @@ type Scheduler struct {
 	npPhase      string
 	npCurrent    string
 	// Reclaim status: visible on /debug while driveReclaimedCycle is active.
+	// reclaimL{2,3}Sub records which sub the banner is for so Status() can
+	// re-check its CURRENT depth at render time and suppress a stale "recovering"
+	// banner if the layer was disabled after the driver parked on a future wave.
 	reclaimL2Phase string
 	reclaimL2Info  string
+	reclaimL2Sub   string
 	reclaimL3Phase string
 	reclaimL3Info  string
+	reclaimL3Sub   string
 
 	// drivers counts the live wave-driving goroutines per "layer|tf|sub" so
 	// reconcileLoop can tell whether a layer is actively firing (a healthy live
@@ -3405,6 +3410,22 @@ func (s *Scheduler) Status() PrefetchStatus {
 	subs := make([]string, len(s.l1Subs))
 	copy(subs, s.l1Subs)
 
+	// Suppress a stale "recovering" banner if the sub's depth no longer covers
+	// the layer. A driveReclaimedCycle goroutine parked on a *future* wave sets
+	// the banner before its long sleep and only re-checks depth at the top of the
+	// next wave iteration — so an operator disabling the layer mid-sleep (e.g.
+	// flipping a sub to depth=l3) would otherwise leave a phantom "L2 recovering"
+	// on /debug for the rest of the period. Re-resolving depth here makes the
+	// banner reflect CURRENT settings regardless of in-flight reclaim state.
+	reclaimL2Phase, reclaimL2Info := s.reclaimL2Phase, s.reclaimL2Info
+	if reclaimL2Phase != "" && s.reclaimL2Sub != "" && !depthCoversLayer("L2", s.resolveSubDepth(s.reclaimL2Sub)) {
+		reclaimL2Phase, reclaimL2Info = "", ""
+	}
+	reclaimL3Phase, reclaimL3Info := s.reclaimL3Phase, s.reclaimL3Info
+	if reclaimL3Phase != "" && s.reclaimL3Sub != "" && !depthCoversLayer("L3", s.resolveSubDepth(s.reclaimL3Sub)) {
+		reclaimL3Phase, reclaimL3Info = "", ""
+	}
+
 	var l3LastAt, l3LastAtAbs string
 	if !s.l3LastAt.IsZero() {
 		d := time.Since(s.l3LastAt)
@@ -3459,10 +3480,10 @@ func (s *Scheduler) Status() PrefetchStatus {
 		QueueLen:       len(s.queue),
 		Enabled:        s.isEnabled(),
 		ActiveSubs:     s.activeSubs(),
-		ReclaimL2Phase: s.reclaimL2Phase,
-		ReclaimL2Info:  s.reclaimL2Info,
-		ReclaimL3Phase: s.reclaimL3Phase,
-		ReclaimL3Info:  s.reclaimL3Info,
+		ReclaimL2Phase: reclaimL2Phase,
+		ReclaimL2Info:  reclaimL2Info,
+		ReclaimL3Phase: reclaimL3Phase,
+		ReclaimL3Info:  reclaimL3Info,
 	}
 }
 
@@ -3665,8 +3686,33 @@ func fmtWaveTotal(total int) string {
 // snapshotL2Cycles / snapshotL3Cycles materialize the live L2 / L3 cycle maps
 // into a stable, sorted slice for the /debug panels. Caller already holds
 // statusMu (RLock or Lock).
-func (s *Scheduler) snapshotL2Cycles() []PrefetchL2Cycle { return snapshotCycles(s.l2Cycles) }
-func (s *Scheduler) snapshotL3Cycles() []PrefetchL2Cycle { return snapshotCycles(s.l3Cycles) }
+func (s *Scheduler) snapshotL2Cycles() []PrefetchL2Cycle {
+	return s.snapshotCoveredCycles("L2", s.l2Cycles)
+}
+func (s *Scheduler) snapshotL3Cycles() []PrefetchL2Cycle {
+	return s.snapshotCoveredCycles("L3", s.l3Cycles)
+}
+
+// snapshotCoveredCycles drops any cycle whose sub's CURRENT resolved depth no
+// longer covers `layer` before formatting. A leftover L2 cycle snapshot rebuilt
+// by reclaim (rebuildL2CycleSnapshot) survives in l2Cycles until its last wave
+// fires; if the operator disables the layer while the reclaim driver is parked
+// on a future wave, that snapshot would otherwise render as a phantom L2/L3
+// cycle panel for a sub that no longer runs the layer. Filtering here keeps the
+// /debug panels in lock-step with current depth — the same contract the
+// reclaim-path depth gates enforce, applied at the presentation boundary.
+func (s *Scheduler) snapshotCoveredCycles(layer string, m map[string]*l2CycleSnap) []PrefetchL2Cycle {
+	if len(m) == 0 {
+		return nil
+	}
+	covered := make(map[string]*l2CycleSnap, len(m))
+	for k, c := range m {
+		if depthCoversLayer(layer, s.resolveSubDepth(c.sub)) {
+			covered[k] = c
+		}
+	}
+	return snapshotCycles(covered)
+}
 
 // snapshotCycles is the shared formatter behind both layer snapshots — the
 // PrefetchL2Cycle view shape (offsets, per-wave intervals+chunks, current wave)
@@ -3843,9 +3889,11 @@ func (s *Scheduler) setReclaimStatus(layer, sub string, current, total, remainin
 	case "L2":
 		s.reclaimL2Phase = "recovering"
 		s.reclaimL2Info = info
+		s.reclaimL2Sub = sub
 	case "L3":
 		s.reclaimL3Phase = "recovering"
 		s.reclaimL3Info = info
+		s.reclaimL3Sub = sub
 	}
 	s.statusMu.Unlock()
 }
@@ -3856,9 +3904,11 @@ func (s *Scheduler) clearReclaimStatus(layer string) {
 	case "L2":
 		s.reclaimL2Phase = ""
 		s.reclaimL2Info = ""
+		s.reclaimL2Sub = ""
 	case "L3":
 		s.reclaimL3Phase = ""
 		s.reclaimL3Info = ""
+		s.reclaimL3Sub = ""
 	}
 	s.statusMu.Unlock()
 }
