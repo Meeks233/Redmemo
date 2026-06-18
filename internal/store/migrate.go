@@ -697,6 +697,22 @@ var migrations = []string{
 	`ALTER TABLE posts DROP CONSTRAINT IF EXISTS valid_source;
 	 ALTER TABLE posts ADD CONSTRAINT valid_source
 		CHECK (source IN ('redlib_proxy', 'oauth_fallback', 'prefetch', 'natural_prefetch', 'search', 'user_listing', 'background', 'manual_refresh'));`,
+
+	// v36: L3 (comment prefetch) ordering by upstream hot-listing position. Until
+	// now L3 walked its candidates by created_utc DESC, which is unrelated to the
+	// order Reddit's hot API returns posts — so a user opening the homepage could
+	// land on top-of-hot posts whose comments had not been fetched yet. Each L1
+	// listing fetch now stamps the post's index in the returned listing
+	// (listing_rank, 0 = first/top) and the snapshot time of that fetch
+	// (listing_seen_at). L3 then drains the *most recent* listing snapshot first
+	// and, within it, top-to-bottom — exactly the order a homepage visitor sees.
+	// Both columns are nullable: on-demand archives (search / user_listing /
+	// background) carry no listing position and sort last (NULLS LAST), which is
+	// correct — they are not part of the hot listing the homepage renders.
+	`ALTER TABLE posts ADD COLUMN IF NOT EXISTS listing_rank    INT;
+	 ALTER TABLE posts ADD COLUMN IF NOT EXISTS listing_seen_at TIMESTAMPTZ;
+	 CREATE INDEX IF NOT EXISTS idx_posts_l3_order
+	    ON posts (LOWER(subreddit), listing_seen_at DESC, listing_rank);`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration

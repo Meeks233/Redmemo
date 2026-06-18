@@ -95,8 +95,8 @@ func (s *PostStore) MarkUpstreamRemoved(urlPath string) error {
 func (s *PostStore) Save(post *StoredPost) error {
 	_, err := s.db.Exec(`
 		INSERT INTO posts (url_path, subreddit, post_id, title, json_data, rendered_html,
-		                   author, score, created_utc, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		                   author, score, created_utc, source, listing_rank, listing_seen_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (url_path) DO UPDATE SET
 			json_data     = EXCLUDED.json_data,
 			rendered_html = EXCLUDED.rendered_html,
@@ -105,10 +105,15 @@ func (s *PostStore) Save(post *StoredPost) error {
 			score         = EXCLUDED.score,
 			created_utc   = EXCLUDED.created_utc,
 			source        = EXCLUDED.source,
+			-- Preserve the prior hot-listing position when this write carries none
+			-- (an on-demand re-archive), so L3 ordering never loses a post's rank.
+			listing_rank    = COALESCE(EXCLUDED.listing_rank, posts.listing_rank),
+			listing_seen_at = COALESCE(EXCLUDED.listing_seen_at, posts.listing_seen_at),
 			last_updated  = NOW()`,
 		post.URLPath, post.Subreddit, post.PostID, post.Title,
 		post.JSONData, post.RenderedHTML,
 		post.Author, post.Score, post.CreatedUTC, post.Source,
+		post.ListingRank, post.ListingSeenAt,
 	)
 	if err != nil {
 		return fmt.Errorf("save post: %w", err)
@@ -910,7 +915,14 @@ func (s *PostStore) ListL3Candidates(sub, currentCycleID, prevCycleID string, li
 		       -- predating num_comments payloads (-1) keep the plain freeze.
 		       OR (ll.last_nc >= 0
 		           AND COALESCE(NULLIF(p.json_data->'Comments'->>1, '')::int, 0) > ll.last_nc))
-		ORDER BY p.created_utc DESC
+		-- Drain in upstream hot-listing order so the posts a homepage visitor sees
+		-- first get their comments first: most recent listing snapshot leads
+		-- (listing_seen_at DESC), and within that snapshot the API's own order
+		-- top-to-bottom (listing_rank ASC, 0 = first). On-demand archives carry no
+		-- listing position (NULLs) and trail; created_utc breaks any remaining tie.
+		ORDER BY p.listing_seen_at DESC NULLS LAST,
+		         p.listing_rank ASC NULLS LAST,
+		         p.created_utc DESC
 		LIMIT $4`, sub, currentCycleID, prevCycleID, limit, minComments,
 	)
 	if err != nil {

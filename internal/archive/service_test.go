@@ -3,6 +3,7 @@ package archive
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/store"
@@ -12,9 +13,9 @@ import (
 // It records every Save call so a test can assert the archive layer *did not*
 // overwrite a previously-good copy when upstream reports a removed verdict.
 type fakePostRepo struct {
-	rows           map[string]*store.StoredPost
-	saves          []*store.StoredPost
-	markedRemoved  []string
+	rows          map[string]*store.StoredPost
+	saves         []*store.StoredPost
+	markedRemoved []string
 }
 
 func newFakePostRepo() *fakePostRepo {
@@ -290,5 +291,47 @@ func TestArchivePost_AlivePayloadSaves(t *testing.T) {
 	}
 	if len(repo.markedRemoved) != 0 {
 		t.Fatalf("MarkUpstreamRemoved called %d times for an alive post", len(repo.markedRemoved))
+	}
+	// On-demand ArchivePost carries no listing position: L3 ordering must not
+	// see a fabricated rank for a post that never appeared in a hot listing.
+	if repo.saves[0].ListingRank != nil || repo.saves[0].ListingSeenAt != nil {
+		t.Fatalf("ArchivePost set a listing position (rank=%v seen=%v), want both nil",
+			repo.saves[0].ListingRank, repo.saves[0].ListingSeenAt)
+	}
+}
+
+// ArchiveListing stamps each post with its 0-based index in the API-returned
+// order and one shared snapshot time, so L3 can drain a hot listing
+// top-to-bottom (listing_rank ASC) within the freshest snapshot.
+func TestArchiveListing_StampsSequentialRanks(t *testing.T) {
+	repo := newFakePostRepo()
+	svc := newServiceWithFake(repo)
+
+	posts := []reddit.Post{
+		{ID: "a", Permalink: "/r/sub/comments/a"},
+		{ID: "b", Permalink: "/r/sub/comments/b"},
+		{ID: "c", Permalink: "/r/sub/comments/c"},
+	}
+	svc.ArchiveListing(posts, "sub", "natural_prefetch")
+
+	if len(repo.saves) != 3 {
+		t.Fatalf("Save was called %d times, want 3", len(repo.saves))
+	}
+	var seen *time.Time
+	for i, sp := range repo.saves {
+		if sp.ListingRank == nil {
+			t.Fatalf("post %d: ListingRank is nil, want %d", i, i)
+		}
+		if *sp.ListingRank != i {
+			t.Fatalf("post %d: ListingRank = %d, want %d (API order, 0=top)", i, *sp.ListingRank, i)
+		}
+		if sp.ListingSeenAt == nil {
+			t.Fatalf("post %d: ListingSeenAt is nil, want a shared snapshot", i)
+		}
+		if seen == nil {
+			seen = sp.ListingSeenAt
+		} else if !sp.ListingSeenAt.Equal(*seen) {
+			t.Fatalf("post %d: ListingSeenAt = %v, want shared %v across the fetch", i, sp.ListingSeenAt, *seen)
+		}
 	}
 }

@@ -25,6 +25,15 @@ type StoredPost struct {
 	// ON repost_key (ArchiveSearch). 0 ⇒ the query didn't fold; 1 ⇒ singleton;
 	// >1 ⇒ N copies were collapsed and the renderer shows a "+N reposts" badge.
 	RepostCount int
+	// ListingRank is this post's 0-based index in the upstream hot listing it was
+	// last seen in (0 = top). ListingSeenAt is the snapshot time of that listing
+	// fetch. Both are set only on the L1 prefetch path (Service.ArchiveListing);
+	// nil on on-demand archives. Save preserves the existing value when the field
+	// is nil, so a non-listing re-archive never clears a post's hot position. L3
+	// candidate ordering reads them to drain the freshest hot snapshot first,
+	// top-to-bottom — see PostStore.ListL3Candidates.
+	ListingRank   *int
+	ListingSeenAt *time.Time
 }
 
 type StoredComments struct {

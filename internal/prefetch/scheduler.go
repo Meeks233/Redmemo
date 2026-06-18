@@ -1229,7 +1229,12 @@ func (s *Scheduler) coordinatorLoop(ctx context.Context) {
 			}
 			s.Events.Addf(LevelInfo, "L1", "coordinator launched %d bucket loop(s) for [%s]",
 				started, strings.Join(subs, ", "))
-			s.setL1Status("running", 0, 0, subs, nil, time.Time{})
+			// Loops were just launched; each one is waiting on its own schedule
+			// and will publish its real phase ("idle" until its next fetch,
+			// "running" while fetching). Don't claim "running" globally here —
+			// that is the phantom that made L1 look busy while every bucket was
+			// actually sleeping until a far-future NextCycleAt.
+			s.setL1Status("idle", 0, 0, subs, nil, time.Time{})
 			lastSig = sig
 			lastSubs = subs
 		}
@@ -1588,8 +1593,13 @@ func (s *Scheduler) bucketLoop(ctx context.Context, tf string, subs []string) {
 		}
 
 		// Wait until the scheduled fetch time. Overdue → fall through
-		// immediately; the user is owed a fetch.
+		// immediately; the user is owed a fetch. While waiting the bucket is
+		// idle, not running: reflect that so /debug does not show a stale
+		// "running" for the whole inter-cycle (and post-restart) sleep — the
+		// same phantom-status class as the L2 recovering fix. "running" is set
+		// only once the cycle actually starts fetching (below).
 		if w := time.Until(nextFetchAt); w > 0 {
+			s.setL1Status(fmt.Sprintf("bucket=%s idle", tf), 0, 0, subs, cursors, nextFetchAt)
 			if err := sleep(ctx, w); err != nil {
 				return
 			}
@@ -1798,7 +1808,10 @@ func (s *Scheduler) runOneSubFetch(ctx context.Context, tf, sub string, cursors 
 			s.subStatus.MarkLive(sub)
 		}
 		if s.archiver != nil {
-			s.archiver.ArchivePosts(posts, sub, "natural_prefetch")
+			// ArchiveListing (not ArchivePosts): record each post's index in the
+			// upstream hot listing so L3 fetches comments top-to-bottom in the
+			// order a homepage visitor sees them.
+			s.archiver.ArchiveListing(posts, sub, "natural_prefetch")
 		}
 	}); err != nil {
 		return 0, cycleID

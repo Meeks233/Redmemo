@@ -97,7 +97,17 @@ func (s *Service) markNSFWIfNeeded(sub string) {
 	}
 }
 
+// ArchivePost archives a single post with no hot-listing position (on-demand
+// path). Re-archiving a post this way preserves any listing rank a prior L1
+// fetch recorded — see PostStore.Save's COALESCE on listing_rank.
 func (s *Service) ArchivePost(post *reddit.Post, subreddit, source string) {
+	s.archivePost(post, subreddit, source, nil, nil)
+}
+
+// archivePost is the shared archive write. listingRank/listingSeenAt are non-nil
+// only on the L1 listing path (ArchiveListing); nil leaves the post's stored hot
+// position untouched.
+func (s *Service) archivePost(post *reddit.Post, subreddit, source string, listingRank *int, listingSeenAt *time.Time) {
 	jsonData, err := json.Marshal(post)
 	if err != nil {
 		return
@@ -143,15 +153,17 @@ func (s *Service) ArchivePost(post *reddit.Post, subreddit, source string) {
 	}
 
 	if err := s.postStore.Save(&store.StoredPost{
-		URLPath:    urlPath,
-		Subreddit:  sub,
-		PostID:     post.ID,
-		Title:      post.Title,
-		JSONData:   jsonData,
-		Author:     post.Author.Name,
-		Score:      parseScore(post.Score),
-		CreatedUTC: time.Unix(int64(post.CreatedTS), 0),
-		Source:     source,
+		URLPath:       urlPath,
+		Subreddit:     sub,
+		PostID:        post.ID,
+		Title:         post.Title,
+		JSONData:      jsonData,
+		Author:        post.Author.Name,
+		Score:         parseScore(post.Score),
+		CreatedUTC:    time.Unix(int64(post.CreatedTS), 0),
+		Source:        source,
+		ListingRank:   listingRank,
+		ListingSeenAt: listingSeenAt,
 	}); err != nil {
 		log.Printf("archive: save post %s: %v", urlPath, err)
 	}
@@ -160,6 +172,20 @@ func (s *Service) ArchivePost(post *reddit.Post, subreddit, source string) {
 func (s *Service) ArchivePosts(posts []reddit.Post, subreddit, source string) {
 	for i := range posts {
 		s.ArchivePost(&posts[i], subreddit, source)
+	}
+}
+
+// ArchiveListing archives a full upstream listing, recording each post's index
+// in the API-returned order (rank 0 = first/top) plus a single shared snapshot
+// time for the whole fetch. L3 comment prefetch drains candidates by that
+// (snapshot, rank) so the posts a homepage visitor lands on first — the top of
+// the hot listing — get their comments fetched first. Use this on the L1
+// prefetch path; on-demand archives keep ArchivePosts (no listing position).
+func (s *Service) ArchiveListing(posts []reddit.Post, subreddit, source string) {
+	seenAt := time.Now()
+	for i := range posts {
+		rank := i
+		s.archivePost(&posts[i], subreddit, source, &rank, &seenAt)
 	}
 }
 

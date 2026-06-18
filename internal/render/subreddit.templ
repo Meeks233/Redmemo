@@ -33,8 +33,8 @@ templ subredditBody(d SubredditPageData) {
 				<form id="sort">
 					<div id="sort_options">
 						if d.HomepageSort != "" {
-							<a if d.HomepageSort == "new" { class="selected" } href="/?sort=new" onclick="return switchSort(this,'new')">{ T(ctx, "sort.new") }</a>
-							<a if d.HomepageSort == "new_archive" { class="selected" } href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">{ T(ctx, "sort.archive") }</a>
+							<a if d.HomepageSort == "new" { class="selected" } href="/?sort=new" onclick="return switchSort(this,'new')">{ T(ctx, "sort.hot") }</a>
+							<a if d.HomepageSort == "new_archive" { class="selected" } href="/?sort=new_archive" onclick="return switchSort(this,'new_archive')">{ T(ctx, "sort.new") }</a>
 							<a if d.HomepageSort == "top" { class="selected" } href="/?sort=top" onclick="return switchSort(this,'top')">{ T(ctx, "sort.top") }</a>
 							<a if d.HomepageSort == "notorious" { class="selected" } href="/?sort=notorious" onclick="return switchSort(this,'notorious')">{ T(ctx, "sort.notorious") }</a>
 						} else {
