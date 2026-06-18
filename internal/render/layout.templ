@@ -100,7 +100,7 @@ templ layout(p BasePage, s pageSlots) {
 			} else {
 				<footer>
 					<div class="footer-buttons">
-						<p><span id="version">v{ p.Version }&emsp;</span><a href="https://github.com/Meeks233/redmemo" title={ T(ctx, "footer.code_title") }>{ T(ctx, "footer.code") }</a></p>
+						<p><span id="version">v{ p.Version }&emsp;</span>@repoLink(T(ctx, "footer.code"))</p>
 					</div>
 				</footer>
 			}

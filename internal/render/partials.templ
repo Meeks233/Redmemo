@@ -12,6 +12,17 @@ import (
 // so the templ template body stays expression-level.
 func itoa(n int) string { return strconv.Itoa(n) }
 
+// repoURL is the canonical RedMemo source location. It lives in exactly one
+// place so the footer and any "host your own" invitation can share it.
+const repoURL = "https://github.com/Meeks233/redmemo"
+
+// repoLink renders an anchor to the project source with the given label.
+// Reused by the footer and the upstream-disabled notice so the URL is never
+// hand-written twice.
+templ repoLink(label string) {
+	<a href={ templ.SafeURL(repoURL) } title={ T(ctx, "footer.code_title") } target="_blank" rel="noopener noreferrer">{ label }</a>
+}
+
 // WarningItem is one row inside a warningBanner. Pre is required; Link/Href/Post
 // are optional and render an inline anchor between Pre and Post when Link != "".
 type WarningItem struct {
