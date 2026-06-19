@@ -16,9 +16,14 @@ type TrustedDevice struct {
 	ID          int64
 	TokenPrefix string
 	IP          string
-	CreatedAt   time.Time
-	LastUsed    *time.Time
-	ExpiresAt   time.Time
+	// UserAgent is the latest User-Agent the device presented (stamped on each
+	// valid Check). Cosmetic only — shown in the management table so the operator
+	// can recognise the browser; never an authentication input. Empty until the
+	// row's cookie has been presented at least once since the column was added.
+	UserAgent string
+	CreatedAt time.Time
+	LastUsed  *time.Time
+	ExpiresAt time.Time
 }
 
 type TrustedDeviceStore struct {
@@ -44,11 +49,11 @@ func (s *TrustedDeviceStore) CountActive() (int, error) {
 
 // Create persists a new trusted device. The caller is responsible for checking
 // CountActive against the cap first; this just inserts.
-func (s *TrustedDeviceStore) Create(tokenHash, prefix, ip string, expiresAt time.Time) error {
+func (s *TrustedDeviceStore) Create(tokenHash, prefix, ip, ua string, expiresAt time.Time) error {
 	_, err := s.db.Exec(`
-		INSERT INTO trusted_devices (token_hash, token_prefix, ip, expires_at)
-		VALUES ($1, $2, $3, $4)`,
-		tokenHash, prefix, ip, expiresAt,
+		INSERT INTO trusted_devices (token_hash, token_prefix, ip, ua, expires_at)
+		VALUES ($1, $2, $3, $4, $5)`,
+		tokenHash, prefix, ip, ua, expiresAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create trusted device: %w", err)
@@ -110,7 +115,7 @@ const (
 // already-expired token can never be resurrected by a late presentation. The
 // expired-delete is intentionally NOT IP-scoped: reaping a stale row is pure
 // hygiene regardless of who presents it.
-func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Time) (TrustVerdict, error) {
+func (s *TrustedDeviceStore) Check(tokenHash, clientIP, ua string, newExpiry time.Time) (TrustVerdict, error) {
 	// Textual family test: an IPv6 literal always contains ':', an IPv4 one never
 	// does — cheaper and exception-free versus casting the stored TEXT to inet.
 	clientIsV6 := strings.Contains(clientIP, ":")
@@ -120,6 +125,10 @@ func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Ti
 			UPDATE trusted_devices
 			SET last_used = NOW(),
 			    expires_at = $3,
+			    -- Cosmetic: stamp the latest UA on every valid presentation so the
+			    -- management table reflects the browser currently using the cookie.
+			    -- Not an auth input — the WHERE below never gates on it.
+			    ua = $5,
 			    -- Learn the sibling-family address only when we matched via the
 			    -- learn branch (neither slot already held clientIP); an existing
 			    -- match leaves ip_alt untouched.
@@ -141,7 +150,7 @@ func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Ti
 			RETURNING 1
 		)
 		SELECT (SELECT COUNT(*) FROM valid), (SELECT COUNT(*) FROM expired)`,
-		tokenHash, clientIP, newExpiry, clientIsV6,
+		tokenHash, clientIP, newExpiry, clientIsV6, ua,
 	).Scan(&validN, &expiredN)
 	if err != nil {
 		return TrustAbsent, fmt.Errorf("check trusted device: %w", err)
@@ -160,7 +169,7 @@ func (s *TrustedDeviceStore) Check(tokenHash, clientIP string, newExpiry time.Ti
 // management table.
 func (s *TrustedDeviceStore) ListActive() ([]TrustedDevice, error) {
 	rows, err := s.db.Query(`
-		SELECT id, token_prefix, COALESCE(ip, ''), created_at, last_used, expires_at
+		SELECT id, token_prefix, COALESCE(ip, ''), COALESCE(ua, ''), created_at, last_used, expires_at
 		FROM trusted_devices
 		WHERE expires_at > NOW()
 		ORDER BY created_at DESC`)
@@ -171,7 +180,7 @@ func (s *TrustedDeviceStore) ListActive() ([]TrustedDevice, error) {
 	var out []TrustedDevice
 	for rows.Next() {
 		var d TrustedDevice
-		if err := rows.Scan(&d.ID, &d.TokenPrefix, &d.IP, &d.CreatedAt, &d.LastUsed, &d.ExpiresAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.TokenPrefix, &d.IP, &d.UserAgent, &d.CreatedAt, &d.LastUsed, &d.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("scan trusted device: %w", err)
 		}
 		out = append(out, d)

@@ -296,6 +296,8 @@
   "settings.trusted_th_created": "Created",
   "settings.trusted_th_last": "Last access",
   "settings.trusted_th_ip": "IP",
+  "settings.trusted_th_ua": "User agent",
+  "settings.trusted_current": "This device",
   "settings.trusted_revoke": "Revoke",
   "settings.th_archived_sub": "Archived Subreddit",
   "settings.th_posts": "Posts",

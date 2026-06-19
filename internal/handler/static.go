@@ -314,7 +314,7 @@ func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstr
 		w.Header().Set("Content-Type", ct)
 	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(s)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(s)))
 	w.WriteHeader(resp.StatusCode)
 	w.Write([]byte(s))
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -243,10 +244,7 @@ func (s *Service) ArchiveSubreddit(sub *reddit.Subreddit) {
 	if err != nil {
 		return
 	}
-	var members int
-	if sub.Members[1] != "" {
-		fmt.Sscanf(sub.Members[1], "%d", &members)
-	}
+	members, _ := strconv.Atoi(sub.Members[1])
 	if err := s.subStore.Save(&store.StoredSubreddit{
 		Name:        sub.Name,
 		Title:       sub.Title,
@@ -337,7 +335,6 @@ func countComments(comments []reddit.Comment) int {
 }
 
 func parseScore(score [2]string) int {
-	var n int
-	fmt.Sscanf(score[1], "%d", &n)
+	n, _ := strconv.Atoi(score[1])
 	return n
 }

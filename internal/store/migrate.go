@@ -713,6 +713,14 @@ var migrations = []string{
 	 ALTER TABLE posts ADD COLUMN IF NOT EXISTS listing_seen_at TIMESTAMPTZ;
 	 CREATE INDEX IF NOT EXISTS idx_posts_l3_order
 	    ON posts (LOWER(subreddit), listing_seen_at DESC, listing_rank);`,
+
+	// v37: record the latest User-Agent each trusted device presents, purely for
+	// the management table so the operator can recognise which physical browser a
+	// row maps to (alongside its IP). This is a COSMETIC reminder only — the UA is
+	// never an authentication input: Check still binds on token hash + IP, and the
+	// UA is freely spoofable. Nullable, no backfill: existing rows show "—" until
+	// their cookie is next presented, at which point Check stamps the current UA.
+	`ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS ua TEXT;`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration

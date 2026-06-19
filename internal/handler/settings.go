@@ -809,13 +809,26 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
 				if d.LastUsed != nil {
 					lastUsed = d.LastUsed.Format("2006-01-02 15:04")
 				}
+				ua := d.UserAgent
+				if ua == "" {
+					ua = "—"
+				}
+				// Flag the row that is THIS browser (its trusted cookie hashes to the
+				// row's stored hash) so the table can show a "this is you" marker.
+				// Hash never reaches the view — only the boolean does.
+				isCurrent := false
+				if hash, herr := h.auth.deviceHashByID(d.ID); herr == nil && hash != "" {
+					isCurrent = h.auth.requestIsTrustedDevice(r, hash)
+				}
 				trustedDevices = append(trustedDevices, render.TrustedDeviceView{
-					ID:       d.ID,
-					Prefix:   d.TokenPrefix,
-					IP:       d.IP,
-					Created:  d.CreatedAt.Format("2006-01-02 15:04"),
-					LastUsed: lastUsed,
-					Expires:  d.ExpiresAt.Format("2006-01-02"),
+					ID:        d.ID,
+					Prefix:    d.TokenPrefix,
+					IP:        d.IP,
+					UA:        ua,
+					IsCurrent: isCurrent,
+					Created:   d.CreatedAt.Format("2006-01-02 15:04"),
+					LastUsed:  lastUsed,
+					Expires:   d.ExpiresAt.Format("2006-01-02"),
 				})
 			}
 		}

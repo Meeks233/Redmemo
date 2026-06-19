@@ -306,12 +306,19 @@ type SettingsPageData struct {
 // TrustedDeviceView is one row of the trusted-device management table. Prefix
 // is the cosmetic leading chars of the token; the full value is never exposed.
 type TrustedDeviceView struct {
-	ID       int64
-	Prefix   string
-	IP       string
-	Created  string
-	LastUsed string
-	Expires  string
+	ID     int64
+	Prefix string
+	IP     string
+	// UA is the latest User-Agent the device presented, shown beside its IP as a
+	// recognition aid. Cosmetic only — never part of trust validation. Empty (and
+	// rendered as a dash) until the row's cookie has been presented at least once.
+	UA string
+	// IsCurrent marks the row whose trusted cookie is the very browser viewing the
+	// page, so the table can flag "this is you" with a leading indicator icon.
+	IsCurrent bool
+	Created   string
+	LastUsed  string
+	Expires   string
 }
 
 type ArchiveHubEntry struct {
@@ -755,16 +762,29 @@ func (e *Engine) RenderFuckReddit(w http.ResponseWriter, prefs reddit.Preference
 	fuckRedditPage(data).Render(e.i18nContext(prefs.Lang), w)
 }
 
-func AvailableThemes() []string {
+// computeAvailableThemes scans the embedded themes dir once. The embedded FS is
+// fixed at build time, so the result never changes at runtime.
+func computeAvailableThemes() ([]string, map[string]struct{}) {
 	entries, _ := fs.ReadDir(staticFS, "static/themes")
 	themes := make([]string, 0, len(entries))
+	set := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
 		name := e.Name()
 		if strings.HasSuffix(name, ".css") {
-			themes = append(themes, strings.TrimSuffix(name, ".css"))
+			t := strings.TrimSuffix(name, ".css")
+			themes = append(themes, t)
+			set[t] = struct{}{}
 		}
 	}
-	return themes
+	return themes, set
+}
+
+var availableThemes, availableThemeSet = computeAvailableThemes()
+
+// AvailableThemes returns the embedded theme list (sorted by filename, computed
+// once at startup). Callers must treat the result as read-only; it is shared.
+func AvailableThemes() []string {
+	return availableThemes
 }
 
 // IsSelectableTheme reports whether name is a concrete palette a user can pick
@@ -774,12 +794,8 @@ func IsSelectableTheme(name string) bool {
 	if name == "auto" || name == "system" {
 		return false
 	}
-	for _, t := range AvailableThemes() {
-		if t == name {
-			return true
-		}
-	}
-	return false
+	_, ok := availableThemeSet[name]
+	return ok
 }
 
 // autoThemeVars returns the CSS custom-property declarations from a theme's

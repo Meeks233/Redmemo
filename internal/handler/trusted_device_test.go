@@ -30,6 +30,7 @@ type fakeDeviceRow struct {
 	prefix    string
 	ip        string // primary (mint-time) binding
 	ipAlt     string // complementary-family binding, lazily learned (see Check)
+	ua        string // latest presented User-Agent (cosmetic, stamped on Check)
 	createdAt time.Time
 	lastUsed  *time.Time
 	expiresAt time.Time
@@ -47,12 +48,12 @@ func (f *fakeDeviceStore) CountActive() (int, error) {
 	return n, nil
 }
 
-func (f *fakeDeviceStore) Create(hash, prefix, ip string, expiresAt time.Time) error {
+func (f *fakeDeviceStore) Create(hash, prefix, ip, ua string, expiresAt time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
 	f.rows = append(f.rows, &fakeDeviceRow{
-		id: f.nextID, hash: hash, prefix: prefix, ip: ip,
+		id: f.nextID, hash: hash, prefix: prefix, ip: ip, ua: ua,
 		createdAt: time.Now(), expiresAt: expiresAt,
 	})
 	return nil
@@ -64,7 +65,7 @@ func (f *fakeDeviceStore) Create(hash, prefix, ip string, expiresAt time.Time) e
 // the OTHER family than ip (then validates); an expired row is deleted on the
 // spot (IP-agnostic, pure hygiene) and reported TrustExpired; a missing row — or
 // a live row presented from an unbound, non-learnable IP — is TrustAbsent.
-func (f *fakeDeviceStore) Check(hash, clientIP string, newExpiry time.Time) (store.TrustVerdict, error) {
+func (f *fakeDeviceStore) Check(hash, clientIP, ua string, newExpiry time.Time) (store.TrustVerdict, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	clientIsV6 := strings.Contains(clientIP, ":")
@@ -85,6 +86,7 @@ func (f *fakeDeviceStore) Check(hash, clientIP string, newExpiry time.Time) (sto
 			}
 			now := time.Now()
 			r.lastUsed = &now
+			r.ua = ua               // cosmetic UA stamp, mirrors the store CTE
 			r.expiresAt = newExpiry // sliding-window renewal, mirrors the store CTE
 			return store.TrustValid, nil
 		}
@@ -101,7 +103,7 @@ func (f *fakeDeviceStore) ListActive() ([]store.TrustedDevice, error) {
 	for _, r := range f.rows {
 		if r.expiresAt.After(time.Now()) {
 			out = append(out, store.TrustedDevice{
-				ID: r.id, TokenPrefix: r.prefix, IP: r.ip,
+				ID: r.id, TokenPrefix: r.prefix, IP: r.ip, UserAgent: r.ua,
 				CreatedAt: r.createdAt, LastUsed: r.lastUsed, ExpiresAt: r.expiresAt,
 			})
 		}
@@ -204,7 +206,7 @@ func TestTrustedDeviceRevokedImmediatelyRejected(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const tok = "deadbeefcafef00d0123456789abcdef"
-	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -229,6 +231,121 @@ func TestTrustedDeviceRevokedImmediatelyRejected(t *testing.T) {
 	}
 }
 
+// TestTrustedDeviceUACapturedAndSurfaced proves the cosmetic User-Agent column:
+// a valid presentation stamps the request's UA onto the row, ListActive surfaces
+// it, and a later presentation from a different browser overwrites it. The UA is
+// never an auth input — validation here still turns purely on token hash + IP.
+func TestTrustedDeviceUACapturedAndSurfaced(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const tok = "deadbeefcafef00d0123456789abcdef"
+	if err := f.Create(hashToken(tok), tok[:8], boundIP, "", time.Now().Add(trustedTokenTTL)); err != nil {
+		t.Fatalf("seed device: %v", err)
+	}
+
+	const firstUA = "Mozilla/5.0 (X11; Linux x86_64) Firefox/128.0"
+	req := trustedReq(tok)
+	req.Header.Set("User-Agent", firstUA)
+	if !a.HasValidTrustedDevice(req, boundIP) {
+		t.Fatal("trusted device should validate")
+	}
+	list, err := a.ListTrustedDevices()
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	if len(list) != 1 || list[0].UserAgent != firstUA {
+		t.Fatalf("want UA %q surfaced, got %+v", firstUA, list)
+	}
+
+	// A later valid presentation from a different browser overwrites the stamp.
+	const secondUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari/605.1"
+	req2 := trustedReq(tok)
+	req2.Header.Set("User-Agent", secondUA)
+	if !a.HasValidTrustedDevice(req2, boundIP) {
+		t.Fatal("trusted device should still validate")
+	}
+	list, err = a.ListTrustedDevices()
+	if err != nil {
+		t.Fatalf("relist devices: %v", err)
+	}
+	if len(list) != 1 || list[0].UserAgent != secondUA {
+		t.Fatalf("want UA overwritten to %q, got %+v", secondUA, list)
+	}
+}
+
+// TestCurrentTrustedDeviceFlagging proves the "this device" marker logic the
+// settings table uses: of several trusted rows, exactly the one whose token
+// hashes to the request's trusted cookie is flagged — and a request carrying no
+// (or a foreign) trusted cookie flags none. Mirrors the handler's per-row
+// deviceHashByID + requestIsTrustedDevice composition.
+func TestCurrentTrustedDeviceFlagging(t *testing.T) {
+	f := &fakeDeviceStore{}
+	a := newTestAuthWithDevices(f)
+
+	const mine = "aaaa1111aaaa1111aaaa1111aaaa1111"
+	const other = "bbbb2222bbbb2222bbbb2222bbbb2222"
+	for _, tok := range []string{mine, other} {
+		if err := f.Create(hashToken(tok), tok[:8], boundIP, "", time.Now().Add(trustedTokenTTL)); err != nil {
+			t.Fatalf("seed device: %v", err)
+		}
+	}
+
+	// flagged returns the set of device IDs the handler would mark IsCurrent for r.
+	flagged := func(r *http.Request) map[int64]bool {
+		out := map[int64]bool{}
+		list, err := a.ListTrustedDevices()
+		if err != nil {
+			t.Fatalf("list devices: %v", err)
+		}
+		for _, d := range list {
+			if hash, herr := a.deviceHashByID(d.ID); herr == nil && hash != "" {
+				if a.requestIsTrustedDevice(r, hash) {
+					out[d.ID] = true
+				}
+			}
+		}
+		return out
+	}
+
+	list, _ := a.ListTrustedDevices()
+	var mineID int64
+	for _, d := range list {
+		if h, _ := a.deviceHashByID(d.ID); h == hashToken(mine) {
+			mineID = d.ID
+		}
+	}
+
+	got := flagged(trustedReq(mine))
+	if len(got) != 1 || !got[mineID] {
+		t.Fatalf("only the presenting device should be flagged, got %v (mineID=%d)", got, mineID)
+	}
+
+	// No trusted cookie -> nothing flagged.
+	if g := flagged(httptest.NewRequest(http.MethodGet, "/settings", nil)); len(g) != 0 {
+		t.Fatalf("a request without a trusted cookie should flag no row, got %v", g)
+	}
+	// A foreign/forged cookie value -> nothing flagged.
+	if g := flagged(trustedReq("ffff9999ffff9999ffff9999ffff9999")); len(g) != 0 {
+		t.Fatalf("a foreign trusted cookie should flag no row, got %v", g)
+	}
+}
+
+// TestClientUAClampedAndTrimmed guards the length clamp / trim on the stored UA:
+// an oversized header is truncated to maxTrustedUALen and surrounding whitespace
+// is stripped, so a hostile client cannot park an unbounded string in the row.
+func TestClientUAClampedAndTrimmed(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	r.Header.Set("User-Agent", "  "+strings.Repeat("A", maxTrustedUALen+50)+"  ")
+	got := clientUA(r)
+	if len(got) != maxTrustedUALen {
+		t.Fatalf("want UA clamped to %d, got %d", maxTrustedUALen, len(got))
+	}
+	if strings.ContainsAny(got[:1], " ") {
+		t.Fatal("leading whitespace should be trimmed before clamping")
+	}
+}
+
 // TestRevokeAllTrustedDevicesOnTOTPReset proves that wiping the second factor
 // (the --reset-totp CLI path / a TOTP rotation) de-authorises EVERY trusted
 // device. A 365-day trust cookie minted under the old secret must not survive a
@@ -242,7 +359,7 @@ func TestRevokeAllTrustedDevicesOnTOTPReset(t *testing.T) {
 		"feedface0123456789abcdeffeedface",
 	}
 	for _, tok := range toks {
-		if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", time.Now().Add(trustedTokenTTL)); err != nil {
+		if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", "", time.Now().Add(trustedTokenTTL)); err != nil {
 			t.Fatalf("seed device: %v", err)
 		}
 	}
@@ -326,7 +443,7 @@ func TestTrustedDeviceSlidingRenewal(t *testing.T) {
 
 	const tok = "0011223344556677889900aabbccddee"
 	// Seed a row expiring in 1 minute — well inside its window but close to lapse.
-	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", time.Now().Add(time.Minute)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.5", "", time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -354,7 +471,7 @@ func TestTrustedDeviceBoundToIP(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const tok = "cafef00dcafef00dcafef00dcafef00d"
-	if err := f.Create(hashToken(tok), tok[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundIP, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -454,7 +571,7 @@ func TestSelfRevokeDropsAccessAndRedirectsHome(t *testing.T) {
 	h := testHandlerWithAuth(a)
 
 	const tok = "abc123abc123abc123abc123abc12345"
-	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.7", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], "192.0.2.7", "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 	list, _ := a.ListTrustedDevices()
@@ -506,8 +623,8 @@ func TestRevokeOtherDeviceKeepsAccess(t *testing.T) {
 
 	const mine = "1111111111111111aaaaaaaaaaaaaaaa"
 	const other = "2222222222222222bbbbbbbbbbbbbbbb"
-	_ = f.Create(hashToken(mine), mine[:8], boundIP, time.Now().Add(trustedTokenTTL))
-	_ = f.Create(hashToken(other), other[:8], boundIP, time.Now().Add(trustedTokenTTL))
+	_ = f.Create(hashToken(mine), mine[:8], boundIP, "", time.Now().Add(trustedTokenTTL))
+	_ = f.Create(hashToken(other), other[:8], boundIP, "", time.Now().Add(trustedTokenTTL))
 	list, _ := a.ListTrustedDevices()
 	var otherID int64
 	for _, d := range list {
@@ -539,7 +656,7 @@ func TestTrustedDeviceExpiredCleanedOnAccess(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const dead = "11111111ddddddddeeeeeeeeffffffff"
-	if err := f.Create(hashToken(dead), dead[:8], "", time.Now().Add(-time.Minute)); err != nil {
+	if err := f.Create(hashToken(dead), dead[:8], "", "", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("seed dead: %v", err)
 	}
 
@@ -582,13 +699,13 @@ func TestTrustedDeviceIssueReclaimsExpiredSlot(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	// Two expired + one live = 3 rows, but only 1 LIVE slot occupied.
-	if err := f.Create(hashToken("dead-a"), "dead-a00", "", time.Now().Add(-time.Hour)); err != nil {
+	if err := f.Create(hashToken("dead-a"), "dead-a00", "", "", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("seed dead-a: %v", err)
 	}
-	if err := f.Create(hashToken("dead-b"), "dead-b00", "", time.Now().Add(-time.Hour)); err != nil {
+	if err := f.Create(hashToken("dead-b"), "dead-b00", "", "", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("seed dead-b: %v", err)
 	}
-	if err := f.Create(hashToken("live-c"), "live-c00", "", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken("live-c"), "live-c00", "", "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed live-c: %v", err)
 	}
 
@@ -617,7 +734,7 @@ func TestTrustTripwireSealsAfterThreeFailures(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const good = "900dbeef0123456789abcdef0a1b2c3d"
-	if err := f.Create(hashToken(good), good[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(good), good[:8], boundIP, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed good: %v", err)
 	}
 
@@ -647,7 +764,7 @@ func TestTrustTripwireSelfClears(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const good = "abadcafe0123456789abcdef0a1b2c3d"
-	if err := f.Create(hashToken(good), good[:8], boundIP, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(good), good[:8], boundIP, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed good: %v", err)
 	}
 	for i := 0; i < trustMaxFailures; i++ {
@@ -705,10 +822,10 @@ func TestShouldShowTrustLimit(t *testing.T) {
 func TestTrustedSweeperRunsCleanup(t *testing.T) {
 	f := &fakeDeviceStore{}
 	a := newTestAuthWithDevices(f)
-	if err := f.Create(hashToken("expiredtok"), "expired0", "", time.Now().Add(-time.Minute)); err != nil {
+	if err := f.Create(hashToken("expiredtok"), "expired0", "", "", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("seed expired: %v", err)
 	}
-	if err := f.Create(hashToken("livetok000"), "livetok0", "", time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken("livetok000"), "livetok0", "", "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed live: %v", err)
 	}
 
@@ -732,8 +849,8 @@ func TestTrustedSweeperRunsCleanup(t *testing.T) {
 // client used by the OR-binding tests. boundV4 == boundIP so the existing
 // single-stack tests keep their meaning.
 const (
-	boundV4 = boundIP        // "192.0.2.5"
-	boundV6 = "2001:db8::5"  // same physical client, sibling family
+	boundV4 = boundIP       // "192.0.2.5"
+	boundV6 = "2001:db8::5" // same physical client, sibling family
 )
 
 // TestTrustedDeviceDualStackOR is the headline fix: a trusted cookie minted on a
@@ -747,7 +864,7 @@ func TestTrustedDeviceDualStackOR(t *testing.T) {
 
 	const tok = "0a0a0a0a0b0b0b0b0c0c0c0c0d0d0d0d"
 	// Minted over IPv4 — ip set, ip_alt still empty.
-	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -791,7 +908,7 @@ func TestTrustedDeviceSameFamilyRotationNotLearned(t *testing.T) {
 
 	const tok = "1212121234343434565656567878787a"
 	// Minted over IPv6.
-	if err := f.Create(hashToken(tok), tok[:8], boundV6, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundV6, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -820,7 +937,7 @@ func TestTrustedDeviceAltSlotBounded(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const tok = "9898989876767676545454543232321a"
-	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 	// Fill the alt slot with the IPv6 sibling.
@@ -844,6 +961,7 @@ func TestTrustedDeviceAltSlotBounded(t *testing.T) {
 //   - all succeed (every request is from a bound or learnable address);
 //   - converge on EXACTLY ONE learned sibling (no double-learn), and never spawn
 //     a second device row.
+//
 // The store's single-statement CTE makes the real DB path atomic; the fake mirror
 // is mutex-guarded, so this exercises the AuthManager-level concurrency and pins
 // the invariant.
@@ -852,7 +970,7 @@ func TestTrustedDeviceConcurrentDualStackSingleLearn(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const tok = "feedfacefeedfacefeedfacefeedface"
-	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 
@@ -901,7 +1019,7 @@ func TestTrustedDeviceConcurrentDistinctIPsBounded(t *testing.T) {
 	a := newTestAuthWithDevices(f)
 
 	const tok = "0123456789abcdef0123456789abcdef"
-	if err := f.Create(hashToken(tok), tok[:8], boundV4, time.Now().Add(trustedTokenTTL)); err != nil {
+	if err := f.Create(hashToken(tok), tok[:8], boundV4, "", time.Now().Add(trustedTokenTTL)); err != nil {
 		t.Fatalf("seed device: %v", err)
 	}
 

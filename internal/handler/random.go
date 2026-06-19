@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"hash/fnv"
 	"math"
 	"net/http"
 	"net/url"
@@ -413,9 +412,18 @@ var randomWalkLockArr [randomWalkLockShards]sync.Mutex
 
 // lockRandomWalk acquires the shard lock for stateKey and returns its unlock func.
 func lockRandomWalk(stateKey string) func() {
-	hsh := fnv.New32a()
-	hsh.Write([]byte(stateKey))
-	mu := &randomWalkLockArr[hsh.Sum32()%randomWalkLockShards]
+	// Inlined FNV-1a over stateKey's bytes: avoids the per-request hasher
+	// allocation (fnv.New32a returns a heap pointer) and the string->[]byte
+	// copy. Same algorithm and constants as fnv.New32a, so the shard index is
+	// identical to the previous implementation.
+	const offset32 = 2166136261
+	const prime32 = 16777619
+	var h uint32 = offset32
+	for i := 0; i < len(stateKey); i++ {
+		h ^= uint32(stateKey[i])
+		h *= prime32
+	}
+	mu := &randomWalkLockArr[h%randomWalkLockShards]
 	mu.Lock()
 	return mu.Unlock
 }

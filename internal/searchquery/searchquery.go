@@ -606,7 +606,8 @@ func numClause(key string, nc *NumConstraint) string {
 // Canonical re-serializes the whole parsed query back into the search-box
 // grammar. Round-trips through Parse to itself.
 func (p Parsed) Canonical() string {
-	var parts []string
+	// 13 fixed clause slots plus free-text terms.
+	parts := make([]string, 0, 13+len(p.Terms))
 	if c := p.SubClause(); c != "" {
 		parts = append(parts, c)
 	}
@@ -695,7 +696,7 @@ func parseDate(val string, endOfDay bool) *time.Time {
 // can't express (score, comments, media type, date range) are omitted here and
 // applied as a local post-filter instead.
 func (p Parsed) RedditQuery() string {
-	var parts []string
+	parts := make([]string, 0, 4+len(p.BlackSubs)+len(p.Terms))
 	switch len(p.WhiteSubs) {
 	case 0:
 	case 1:

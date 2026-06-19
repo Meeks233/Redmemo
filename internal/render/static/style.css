@@ -2718,9 +2718,22 @@ summary.comment_data {
     opacity: 0.75;
 }
 
-/* Revoke action lives in the leftmost column and must never wrap its label. */
+/* Revoke action lives in the leftmost column and must never wrap its label.
+   The optional "this device" marker sits to its left, hence the inline flex row. */
 .trusted-act {
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* "This is the browser you're on" marker — a chevrons-right glyph in the brand
+   accent, purely a reminder (not a control). */
+.trusted-current {
+    display: inline-flex;
+    align-items: center;
+    color: var(--accent);
+    flex-shrink: 0;
 }
 
 .trusted-revoke {

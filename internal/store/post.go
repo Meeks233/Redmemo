@@ -415,9 +415,10 @@ func (s *PostStore) randomWalkPage(opts ArchiveSearchOpts, low float64, hasHigh 
 // escapeLike escapes the LIKE/ILIKE wildcard metacharacters (\ % _) so a user's
 // free-text search term is matched literally rather than acting as wildcards.
 // Pair with `ESCAPE '\'` in the SQL.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 func escapeLike(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return r.Replace(s)
+	return likeEscaper.Replace(s)
 }
 
 func (s *PostStore) Search(query string, limit int, excludeNSFW bool) ([]*StoredPost, error) {

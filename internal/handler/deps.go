@@ -96,8 +96,8 @@ type hrManager interface {
 // in-memory fake — see trusted_device_test.go.
 type trustedDeviceStore interface {
 	CountActive() (int, error)
-	Create(tokenHash, prefix, ip string, expiresAt time.Time) error
-	Check(tokenHash, clientIP string, newExpiry time.Time) (store.TrustVerdict, error)
+	Create(tokenHash, prefix, ip, ua string, expiresAt time.Time) error
+	Check(tokenHash, clientIP, ua string, newExpiry time.Time) (store.TrustVerdict, error)
 	ListActive() ([]store.TrustedDevice, error)
 	HashByID(id int64) (string, error)
 	Revoke(id int64) (int64, error)

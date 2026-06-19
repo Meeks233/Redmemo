@@ -63,12 +63,18 @@ templ trustedDevices(d SettingsPageData) {
 							<th>{ T(ctx, "settings.trusted_th_created") }</th>
 							<th>{ T(ctx, "settings.trusted_th_last") }</th>
 							<th>{ T(ctx, "settings.trusted_th_ip") }</th>
+							<th>{ T(ctx, "settings.trusted_th_ua") }</th>
 						</tr>
 					</thead>
 					<tbody>
 						for _, dev := range d.TrustedDevices {
 							<tr>
 								<td class="trusted-act">
+									if dev.IsCurrent {
+										<span class="trusted-current" title={ T(ctx, "settings.trusted_current") } aria-label={ T(ctx, "settings.trusted_current") }>
+											<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevrons-right" aria-hidden="true"><path d="m6 17 5-5-5-5"></path><path d="m13 17 5-5-5-5"></path></svg>
+										</span>
+									}
 									<form method="post" action="/settings/trusted/revoke" style="margin:0">
 										<input type="hidden" name="id" value={ i64(dev.ID) }/>
 										<button type="submit" class="trusted-revoke">{ T(ctx, "settings.trusted_revoke") }</button>
@@ -78,6 +84,7 @@ templ trustedDevices(d SettingsPageData) {
 								<td class="trusted-time">{ dev.Created }</td>
 								<td class="trusted-time">{ dev.LastUsed }</td>
 								<td>{ dev.IP }</td>
+								<td class="trusted-ua" title={ dev.UA }>{ dev.UA }</td>
 							</tr>
 						}
 					</tbody>

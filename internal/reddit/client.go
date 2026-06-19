@@ -1,6 +1,7 @@
 package reddit
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -413,25 +414,37 @@ func isTransientTransportErr(err error) bool {
 		strings.Contains(s, "unexpected EOF")
 }
 
+// Error-detection patterns hoisted to package scope (read-only) so checkAPIError
+// scans the raw body bytes without copying it to a string or re-allocating the
+// literals on every call.
+var (
+	patSuspendedCompact = []byte(`"is_suspended":true`)
+	patSuspendedSpaced  = []byte(`"is_suspended": true`)
+	patQuarantined      = []byte(`"reason":"quarantined"`)
+	patPrivate          = []byte(`"reason":"private"`)
+	patBanned           = []byte(`"reason":"banned"`)
+	patGated            = []byte(`"reason":"gated"`)
+	patUnauthorized     = []byte(`"message":"Unauthorized"`)
+)
+
 func checkAPIError(body []byte) error {
 	// Quick check for common error patterns without full JSON parse
-	s := string(body)
-	if strings.Contains(s, `"is_suspended":true`) || strings.Contains(s, `"is_suspended": true`) {
+	if bytes.Contains(body, patSuspendedCompact) || bytes.Contains(body, patSuspendedSpaced) {
 		return ErrSuspended
 	}
-	if strings.Contains(s, `"reason":"quarantined"`) {
+	if bytes.Contains(body, patQuarantined) {
 		return ErrQuarantined
 	}
-	if strings.Contains(s, `"reason":"private"`) {
+	if bytes.Contains(body, patPrivate) {
 		return ErrPrivate
 	}
-	if strings.Contains(s, `"reason":"banned"`) {
+	if bytes.Contains(body, patBanned) {
 		return ErrBanned
 	}
-	if strings.Contains(s, `"reason":"gated"`) {
+	if bytes.Contains(body, patGated) {
 		return ErrGated
 	}
-	if strings.Contains(s, `"message":"Unauthorized"`) {
+	if bytes.Contains(body, patUnauthorized) {
 		return ErrUnauthorized
 	}
 	return nil

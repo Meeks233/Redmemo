@@ -73,10 +73,10 @@ const (
 	// cookies reads as an attack, so trust is sealed instance-wide until it cools.
 	trustFailWindow  = 30 * time.Minute
 	trustMaxFailures = 3
-	defaultTokenTTL       = 10 * time.Minute
-	maxTokenTTL           = 60 * time.Minute
-	maxAttempts           = 3
-	lockoutWindow   = totp.Period * time.Second
+	defaultTokenTTL  = 10 * time.Minute
+	maxTokenTTL      = 60 * time.Minute
+	maxAttempts      = 3
+	lockoutWindow    = totp.Period * time.Second
 	// globalMaxAttempts is the instance-wide failure ceiling that backstops the
 	// per-IP lockout: when RedMemo sits behind a proxy with no TrustedProxyCIDRs,
 	// every client collapses to one IP and the per-IP bucket alone is useless
@@ -128,7 +128,7 @@ type AuthManager struct {
 }
 
 type attempt struct {
-	count      int
+	count       int
 	lockedUntil time.Time
 	lastSeen    time.Time
 }
@@ -227,7 +227,7 @@ func (a *AuthManager) HasValidTrustedDevice(r *http.Request, ip string) bool {
 	// the browser cookie (the DB extension alone is moot if the cookie itself
 	// still expires at its original time). The check also binds to ip: only the
 	// address that passed the gate can renew/use the cookie.
-	verdict, err := a.devices.Check(hashToken(c.Value), ip, time.Now().Add(trustedTokenTTL))
+	verdict, err := a.devices.Check(hashToken(c.Value), ip, clientUA(r), time.Now().Add(trustedTokenTTL))
 	if err != nil {
 		log.Printf("[auth] check trusted device: %v", err)
 		return false
@@ -304,7 +304,7 @@ func (a *AuthManager) issueTrustedDevice(w http.ResponseWriter, r *http.Request,
 	// Show only the leading chars in the management table — enough to tell rows
 	// apart, not enough to reconstruct the token.
 	prefix := tok[:8]
-	if err := a.devices.Create(hashToken(tok), prefix, ip, exp); err != nil {
+	if err := a.devices.Create(hashToken(tok), prefix, ip, clientUA(r), exp); err != nil {
 		log.Printf("[auth] persist trusted device: %v", err)
 		return false
 	}
@@ -352,6 +352,24 @@ func (a *AuthManager) RevokeTrustedDevice(id int64) error {
 	}
 	_, err := a.devices.Revoke(id)
 	return err
+}
+
+// maxTrustedUALen bounds the stored User-Agent. A real browser UA is well under
+// this; the clamp stops a hostile client from parking an unbounded header string
+// in the row. The value is cosmetic (management-table reminder) so truncation
+// loses nothing that matters.
+const maxTrustedUALen = 400
+
+// clientUA extracts the request User-Agent for the trusted-device management
+// table, trimmed and length-clamped. Purely informational — never an auth input
+// (the UA is trivially spoofable) — so an empty/oversized header is harmless and
+// just renders as "—" or a truncated string.
+func clientUA(r *http.Request) string {
+	ua := strings.TrimSpace(r.UserAgent())
+	if len(ua) > maxTrustedUALen {
+		ua = ua[:maxTrustedUALen]
+	}
+	return ua
 }
 
 // requestIsTrustedDevice reports whether the request's trusted-device cookie
@@ -611,7 +629,7 @@ func (a *AuthManager) locked(ip string) (bool, time.Duration) {
 // it consumed for its remaining validity window. Returns (ok, replay):
 //   - ok=false                  -> code invalid
 //   - ok=true,  replay=true     -> code valid but already used; caller MUST
-//                                  refuse to mint a token (surface compromise)
+//     refuse to mint a token (surface compromise)
 //   - ok=true,  replay=false    -> caller may mint a token
 //
 // Atomicity matters: a naive verify-then-mark sequence lets two concurrent
@@ -651,6 +669,7 @@ func constantTimeEqual(a, b string) bool {
 //   - holds a valid ephemeral token -> next.ServeHTTP
 //   - otherwise -> render the auth page (GET) or process the form (POST),
 //     never falling through to the underlying settings handler.
+//
 // Every POST also gets an Origin/Referer same-origin check (a belt to go with
 // SameSite=Lax's suspenders) so a cross-site form submission can't drive any
 // /settings action even if a browser ever relaxes its Lax cookie behaviour.

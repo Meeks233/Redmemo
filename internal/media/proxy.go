@@ -930,7 +930,9 @@ func (p *Proxy) streamRangedTo(ctx context.Context, url string, start int64, ext
 			}
 			return resp.StatusCode, resp.Header, written, fmt.Errorf("status %d", resp.StatusCode)
 		}
-		n, cerr := io.Copy(w, resp.Body)
+		bufp := copyBufPool.Get().(*[]byte)
+		n, cerr := io.CopyBuffer(w, resp.Body, *bufp)
+		copyBufPool.Put(bufp)
 		resp.Body.Close()
 		written += n
 		offset += n
@@ -986,6 +988,11 @@ const (
 // the cache volume, since the loop's termination otherwise trusts the CDN's
 // Content-Range total.
 const maxStreamBytes = 2 << 30 // 2 GiB
+
+// copyBufPool supplies reusable scratch buffers for the per-chunk io.CopyBuffer
+// in streamRangedTo. Without it io.Copy allocates a fresh 32 KiB buffer on every
+// Range chunk (the writer has no ReaderFrom and the body has no WriterTo).
+var copyBufPool = sync.Pool{New: func() any { b := make([]byte, 64<<10); return &b }}
 
 // reverseProxy streams targetURL straight through to the client, fetching it
 // from the CDN in flow-control-safe chunks (see streamRangedTo) while presenting

@@ -923,8 +923,8 @@ func ParseUserListing(data []byte) ([]Post, []Comment, string, string, error) {
 		return nil, nil, "", "", fmt.Errorf("parse user listing: %w", err)
 	}
 
-	var posts []Post
-	var comments []Comment
+	posts := make([]Post, 0, len(raw.Data.Children))
+	comments := make([]Comment, 0, len(raw.Data.Children))
 
 	for _, child := range raw.Data.Children {
 		var peek struct {

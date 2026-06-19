@@ -25,7 +25,14 @@ const htmlCacheTTL = 60 * time.Second
 func prefsCacheTag(prefs reddit.Preferences) string {
 	h := fnv.New64a()
 	fmt.Fprintf(h, "%+v", prefs)
-	return fmt.Sprintf("%016x", h.Sum64())
+	const hexdigits = "0123456789abcdef"
+	sum := h.Sum64()
+	var out [16]byte
+	for i := 15; i >= 0; i-- {
+		out[i] = hexdigits[sum&0xf]
+		sum >>= 4
+	}
+	return string(out[:])
 }
 
 // htmlCacheKey composes the Redis key. urlPath + rawQuery stays as a literal

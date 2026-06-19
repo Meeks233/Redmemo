@@ -240,10 +240,16 @@ func AppHeaderOrder() []string {
 	return out
 }
 
+// pHeaderOrder is the canonical HTTP/2 pseudo-header order for the spoofed
+// client. Shared read-only; fhttp only range-iterates it.
+var pHeaderOrder = []string{":method", ":path", ":authority", ":scheme"}
+
 // ApplyHeaderOrder pins an outbound request's header and pseudo-header order to
 // the canonical Reddit-app layout via fhttp's HeaderOrderKey / PHeaderOrderKey.
-// Call it after all headers have been set.
+// Call it after all headers have been set. The slices are shared and treated as
+// read-only by fhttp (it Clone()s the header before wire serialization), so it
+// is safe to hand it the package-level slices directly.
 func ApplyHeaderOrder(req *http.Request) {
-	req.Header[http.HeaderOrderKey] = AppHeaderOrder()
-	req.Header[http.PHeaderOrderKey] = []string{":method", ":path", ":authority", ":scheme"}
+	req.Header[http.HeaderOrderKey] = appHeaderOrder
+	req.Header[http.PHeaderOrderKey] = pHeaderOrder
 }

@@ -296,6 +296,8 @@
   "settings.trusted_th_created": "创建时间",
   "settings.trusted_th_last": "上次访问",
   "settings.trusted_th_ip": "IP",
+  "settings.trusted_th_ua": "用户代理",
+  "settings.trusted_current": "当前设备",
   "settings.trusted_revoke": "吊销",
   "settings.th_archived_sub": "已存档 Subreddit",
   "settings.th_posts": "帖子数",
