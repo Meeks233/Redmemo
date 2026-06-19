@@ -177,28 +177,3 @@ func TestPublicFetch_SetsHeaders(t *testing.T) {
 		t.Errorf("Cookie = %q, want public opt-in cookie", cookie)
 	}
 }
-
-func TestPublicFetchSubreddit_Success(t *testing.T) {
-	listing := `{"kind":"Listing","data":{"before":null,"after":"t3_x","children":[
-		{"kind":"t3","data":{"id":"p1","title":"Hello","subreddit":"golang","is_self":true,"score":3,"created_utc":1700000000}}
-	]}}`
-	var gotPath string
-	c := newTestPublicClient(t, 8, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path + "?" + r.URL.RawQuery
-		w.Write([]byte(listing))
-	}))
-
-	posts, before, after, err := c.FetchSubreddit(context.Background(), "golang", "new", "", "", "", 25)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(posts) != 1 || posts[0].ID != "p1" {
-		t.Fatalf("posts = %+v", posts)
-	}
-	if before != "" || after != "t3_x" {
-		t.Errorf("cursors before=%q after=%q", before, after)
-	}
-	if gotPath != "/r/golang/new.json?raw_json=1&limit=25" {
-		t.Errorf("request path = %q", gotPath)
-	}
-}

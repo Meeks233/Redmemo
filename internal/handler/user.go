@@ -2,10 +2,8 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
@@ -38,39 +36,6 @@ func (h *Handler) handleUser(w http.ResponseWriter, r *http.Request) {
 
 	// 3. No archive for users
 	h.serveDegradeMiss(w, r, reason)
-}
-
-// backgroundArchiveUser fetches a user's listing out-of-band and archives the
-// posts. It owns its own context (decoupled from the request) and never touches
-// the HTTP response, so it is safe to launch as a goroutine to keep growing the
-// archive on the authenticated path.
-//
-// It passes through the same global degrade gate as live traffic: when HR is in
-// cooldown or OAuth quota is exhausted it stands down instead of fetching. There
-// is deliberately no publicCli fallback — this work consumes quota and emitting
-// an unauthenticated request from the session IP is a stealth tell we won't
-// accept (see prefetch scheduler's "No fallback" note). The public client is
-// reserved for media resources only.
-func (h *Handler) backgroundArchiveUser(name, listing, sort, after string) {
-	if name == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if degrade, _ := h.shouldDegrade(ctx); degrade {
-		return
-	}
-
-	_, posts, _, err := h.redditCli.FetchUser(ctx, name, listing, sort, after)
-	h.recordUpstream(ctx)
-	if err != nil {
-		log.Printf("background archive user %s: %v", name, err)
-		return
-	}
-	if len(posts) > 0 {
-		h.archiver.ArchivePosts(posts, "", "user_listing")
-	}
 }
 
 func (h *Handler) renderUserFallback(w http.ResponseWriter, r *http.Request, name, listing, sort, after, urlPath string, prefs reddit.Preferences, cacheKey string) bool {

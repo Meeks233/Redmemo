@@ -169,28 +169,3 @@ func TestMoveOrCopy_MissingSource(t *testing.T) {
 		t.Error("expected an error when the source does not exist")
 	}
 }
-
-func TestPublishToCache(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "staging.mp4")
-	out := filepath.Join(dir, "final.mp4")
-	content := []byte("muxed video bytes")
-	if err := os.WriteFile(src, content, 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := publishToCache(src, out); err != nil {
-		t.Fatalf("publishToCache: %v", err)
-	}
-	got, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatalf("read out: %v", err)
-	}
-	if string(got) != string(content) {
-		t.Errorf("published content = %q, want %q", got, content)
-	}
-	// The .part staging file must not survive a successful publish.
-	if _, err := os.Stat(out + ".part"); !os.IsNotExist(err) {
-		t.Errorf(".part file should be gone after publish, stat err = %v", err)
-	}
-}

@@ -102,22 +102,3 @@ func TestParseParentID(t *testing.T) {
 		}
 	}
 }
-
-func TestFilterPosts(t *testing.T) {
-	posts := []Post{
-		{Community: "golang", Author: Author{Name: "alice"}},
-		{Community: "rust", Author: Author{Name: "bob"}},
-		{Community: "python", Author: Author{Name: "charlie"}},
-	}
-	filters := map[string]bool{"rust": true}
-	count, allFiltered := FilterPosts(&posts, filters)
-	if count != 1 {
-		t.Errorf("filtered count = %d, want 1", count)
-	}
-	if allFiltered {
-		t.Error("allFiltered should be false")
-	}
-	if len(posts) != 2 {
-		t.Errorf("remaining posts = %d, want 2", len(posts))
-	}
-}

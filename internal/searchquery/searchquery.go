@@ -45,22 +45,6 @@ type NumConstraint struct {
 	Val int
 }
 
-// Match reports whether v satisfies the constraint.
-func (n NumConstraint) Match(v int) bool {
-	switch n.Op {
-	case OpGT:
-		return v > n.Val
-	case OpLT:
-		return v < n.Val
-	case OpGE:
-		return v >= n.Val
-	case OpLE:
-		return v <= n.Val
-	default: // OpEQ
-		return v == n.Val
-	}
-}
-
 // MatchFloat reports whether v satisfies the constraint, comparing as floats.
 // Used for the media cache eviction score, which is a continuous value.
 func (n NumConstraint) MatchFloat(v float64) bool {
@@ -85,27 +69,27 @@ func (n NumConstraint) SQLOp() string { return string(n.Op) }
 // Parsed is the neutral result of parsing a query box. Zero-value fields mean
 // "no constraint" so an empty Parsed matches everything.
 type Parsed struct {
-	Terms     []string // free-text words/phrases
-	Rating    string   // "nsfw" | "safe" | ""
-	WhiteSubs []string // whitelist subreddits (lowercased, deduped)
-	BlackSubs []string // blacklist subreddits (lowercased, deduped)
-	Author    string   // author filter
-	Flair     string   // flair text filter
+	Terms      []string // free-text words/phrases
+	Rating     string   // "nsfw" | "safe" | ""
+	WhiteSubs  []string // whitelist subreddits (lowercased, deduped)
+	BlackSubs  []string // blacklist subreddits (lowercased, deduped)
+	Author     string   // author filter
+	Flair      string   // flair text filter
 	MediaTypes []string // ordered, deduped subset of {"image","video","gif"}; nil = any
 	// Instant is set by `mode:raw` (or `mode:instant`). Not a media type but a
 	// sibling flag asking /random to return the matched post's resource (cached
 	// media bytes via redirect, or the post's text body) instead of a JSON
 	// envelope.
-	Instant bool
-	Score     *NumConstraint
-	Comments  *NumConstraint
+	Instant  bool
+	Score    *NumConstraint
+	Comments *NumConstraint
 	// CacheScore filters by the media cache *eviction* score (media_content.score,
 	// 0–100, higher = evicted sooner), NOT the Reddit post score. It is meaningful
 	// only for locally-cached media, so it is honored solely by the offline
 	// archive/random paths and silently dropped on live Reddit search.
 	CacheScore *NumConstraint
-	After     *time.Time // created on/after (UTC midnight)
-	Before    *time.Time // created on/before (UTC end-of-day)
+	After      *time.Time // created on/after (UTC midnight)
+	Before     *time.Time // created on/before (UTC end-of-day)
 	// Timeframe is Reddit's relative window keyword (hour|day|week|month|year|
 	// all) — forwarded verbatim to `/search.json?t=` and `/r/X/{sort}.json?t=`.
 	// Populated by `date:<keyword>`; the archive path collapses it to a

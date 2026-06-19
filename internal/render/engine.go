@@ -694,18 +694,6 @@ func (e *Engine) RenderDebug(w io.Writer, msg string, prefs reddit.Preferences, 
 	errorPage(data).Render(e.i18nContext(prefs.Lang), w)
 }
 
-func (e *Engine) RenderRateLimit(w http.ResponseWriter, lang string, resetSeconds int, details []string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusTooManyRequests)
-	prefs := reddit.Preferences{Lang: lang}
-	data := FuckRedditPageData{
-		BasePage:     e.basePage("", prefs),
-		ResetSeconds: resetSeconds,
-		Reason:       "hr_l3",
-	}
-	fuckRedditPage(data).Render(e.i18nContext(lang), w)
-}
-
 // RenderError funnels every user-facing error through the /fuckreddit page so
 // there is exactly one error route and one design. The caller's message is
 // mapped to a localized reason code; status-specific reasons take precedence

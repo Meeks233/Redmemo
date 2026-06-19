@@ -225,18 +225,6 @@ var timeframes = []string{"hour", "day", "week", "month", "year", "all"}
 // commentSorts is the comment sort option set on the post page.
 var commentSorts = []string{"confidence", "top", "new", "controversial", "old"}
 
-// deeperRepliesStep is the per-click load size for the in-place "more replies"
-// loader. Reddit's /api/morechildren charges per call (not per child) with a
-// hard ceiling of 100 child IDs per call, so the cheapest UX is one click =
-// one call = every remaining child. The label always matches the actual
-// fetched count, which also fixes the prior 5-vs-7 label mismatch.
-func deeperRepliesStep(remaining int) int {
-	if remaining > 100 {
-		return 100
-	}
-	return remaining
-}
-
 // loadMoreStep computes how many top-level comments the next "Load more"
 // click should request. Reddit's /r/<sub>/comments/<id>.json?limit=N call is
 // billed per request (1 OAuth quota unit) regardless of N, so the cheapest
@@ -485,16 +473,6 @@ func archiveSubCardTitle(ctx context.Context, e ArchiveHubEntry) string {
 // layoutOptions is the option value set the settings page iterates over (the
 // old `list ...` literal).
 var layoutOptions = []string{"card", "clean", "compact"}
-
-// displayNoneIf returns "display:none" when cond holds, else "" — mirrors the
-// old inline `style="{{ if ... }}display:none{{ end }}"`. SafeCSS bypasses
-// templ's style sanitizer so the empty case renders as a bare style="" too.
-func displayNoneIf(cond bool) templ.SafeCSS {
-	if cond {
-		return templ.SafeCSS("display:none")
-	}
-	return templ.SafeCSS("")
-}
 
 // subView is the {name, posts} shape the sub-picker JS consumes via JSONScript.
 type subView struct {

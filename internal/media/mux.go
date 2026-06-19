@@ -370,9 +370,9 @@ func (p *Proxy) downloadMuxed(ctx context.Context, videoURL, key string) (*store
 	// "audio appearing" wall-clock collapses to ~= video download time + mux.
 	videoTmp := filepath.Join(tmpDir, "v.mp4")
 	type audioResult struct {
-		path           string
+		path            string
 		confirmedAbsent bool
-		err            error
+		err             error
 	}
 	audioCh := make(chan audioResult, 1)
 	// A dedicated child ctx lets a video-download failure abort the in-flight
@@ -577,22 +577,6 @@ func (p *Proxy) saveMuxedFile(key, hash, outPath string) (*store.MediaMeta, erro
 	return meta, nil
 }
 
-// publishToCache atomically installs srcPath's content at outPath. srcPath may
-// live on another filesystem, so it is first copied to a staging file inside
-// outPath's own directory; the final rename is atomic on the cache volume — a
-// request serving a previous version of outPath never sees a torn file.
-func publishToCache(srcPath, outPath string) error {
-	partPath := outPath + ".part"
-	if err := moveOrCopy(srcPath, partPath); err != nil {
-		return err
-	}
-	if err := os.Rename(partPath, outPath); err != nil {
-		os.Remove(partPath)
-		return err
-	}
-	return nil
-}
-
 // downloadSilent fetches just the raw video (no audio probe, no mux) for
 // videos we've previously confirmed have no audio track.
 func (p *Proxy) downloadSilent(ctx context.Context, videoURL, key string) (*store.MediaMeta, error) {
@@ -678,11 +662,6 @@ func (p *Proxy) downloadToWithStatus(ctx context.Context, url, dst string) (int,
 	defer f.Close()
 	status, _, _, err := p.streamRangedTo(ctx, url, 0, nil, f, nil)
 	return status, err
-}
-
-func (p *Proxy) downloadTo(ctx context.Context, url, dst string) error {
-	_, err := p.downloadToWithStatus(ctx, url, dst)
-	return err
 }
 
 // ListFailedAudio returns the v.redd.it video URLs whose audio mux has been

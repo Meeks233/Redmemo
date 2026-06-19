@@ -23,34 +23,6 @@ func (h *Handler) notifyUserRequest() {
 	}
 }
 
-func (h *Handler) fetchSubreddit(ctx context.Context, sub, sort, t, after, before string, limit int) ([]reddit.Post, string, string, error) {
-	if h.oauthHolder.HasAvailableTokens() {
-		posts, beforeCur, after, err := h.redditCli.FetchSubreddit(ctx, sub, sort, t, after, before, limit)
-		h.recordUpstream(ctx)
-		if err == nil {
-			h.notifyUserRequest()
-			return posts, beforeCur, after, nil
-		}
-	}
-	posts, beforeCur, afterCur, err := h.publicCli.FetchSubreddit(ctx, sub, sort, t, after, before, limit)
-	h.recordUpstream(ctx)
-	return posts, beforeCur, afterCur, err
-}
-
-func (h *Handler) fetchPost(ctx context.Context, sub, id, commentSort string) (reddit.Post, []reddit.Comment, error) {
-	if h.oauthHolder.HasAvailableTokens() {
-		post, comments, err := h.redditCli.FetchPost(ctx, sub, id, commentSort)
-		h.recordUpstream(ctx)
-		if err == nil {
-			h.notifyUserRequest()
-			return post, comments, nil
-		}
-	}
-	post, comments, err := h.publicCli.FetchPost(ctx, sub, id, commentSort)
-	h.recordUpstream(ctx)
-	return post, comments, err
-}
-
 const archivePageSize = 25
 const archiveHubMinPosts = 10
 

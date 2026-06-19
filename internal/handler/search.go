@@ -2,14 +2,12 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
@@ -497,30 +495,6 @@ func (h *Handler) serveSearchArchivePartial(w http.ResponseWriter, r *http.Reque
 	if err := h.renderer.RenderSearchPostList(w, posts, prefs); err != nil {
 		log.Printf("handler: render search archive partial: %v", err)
 	}
-}
-
-func (h *Handler) backgroundArchiveSearch(query, sub, sort, t, after string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	_, redditQ := buildSearchQuery(query, sub)
-	if redditQ == "" {
-		return
-	}
-	var posts []reddit.Post
-	var err error
-
-	if h.oauthHolder.HasAvailableTokens() {
-		posts, _, _, _, err = h.redditCli.FetchSearch(ctx, redditQ, "", sort, t, after, "", 5)
-	} else {
-		posts, _, _, _, err = h.publicCli.FetchSearch(ctx, redditQ, "", sort, t, after, "", 5)
-	}
-	h.recordUpstream(ctx)
-	if err != nil {
-		log.Printf("background archive search %q: %v", query, err)
-		return
-	}
-	h.archiver.ArchivePosts(posts, sub, "search")
 }
 
 // searchPageEnds picks the [prev, next] cursors the search template renders

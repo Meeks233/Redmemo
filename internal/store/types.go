@@ -122,13 +122,3 @@ type SubIcon struct {
 	AboutFetchedAt *time.Time
 	AboutExpiresAt *time.Time
 }
-
-type StoredPrefetchConfig struct {
-	Subreddit     string
-	SortBy        string
-	MaxPages      int
-	FetchComments bool
-	FetchMedia    bool
-	Priority      int
-	Enabled       bool
-}

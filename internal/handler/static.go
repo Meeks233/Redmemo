@@ -66,18 +66,6 @@ func (h *Handler) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	h.mediaProxy.ServeMedia(w, r)
 }
 
-// splitDLTitle removes the dl_title parameter from a raw URL query string
-// while preserving the relative order of every other parameter. Reddit's
-// signed media URLs (preview.redd.it, external-preview.redd.it, v.redd.it)
-// validate an HMAC over the original parameter order, so this must not go
-// through url.Values which sorts alphabetically. The returned title is
-// URL-decoded; the returned query is the remainder, still URL-encoded and
-// in original order.
-func splitDLTitle(raw string) (title, rest string) {
-	title, _, rest = splitClientParams(raw)
-	return title, rest
-}
-
 // splitClientParams strips frontend-only query params (dl_title and long)
 // from raw so they never leak to Reddit's signed media hosts, returning the
 // decoded dl_title, whether long=1 was present, and the remainder query

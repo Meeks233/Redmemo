@@ -73,20 +73,6 @@ func Capitalize(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// FilterPosts removes posts whose community or author (u_name) is in filters.
-// It modifies the slice in place and returns (filtered count, all filtered).
-func FilterPosts(posts *[]Post, filters map[string]bool) (uint64, bool) {
-	before := len(*posts)
-	result := (*posts)[:0]
-	for _, p := range *posts {
-		if !filters[p.Community] && !filters["u_"+p.Author.Name] {
-			result = append(result, p)
-		}
-	}
-	*posts = result
-	return uint64(before - len(result)), len(result) == 0
-}
-
 // ParseParentID splits a Reddit parent_id like "t1_xxx" into (kind, id).
 func ParseParentID(parentID string) (kind, id string) {
 	parts := strings.SplitN(parentID, "_", 2)

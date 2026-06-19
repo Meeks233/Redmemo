@@ -54,21 +54,6 @@ func (s *PrefetchRunStore) Schedule(layer, bucket, subreddit, postID, cycleID st
 	return id, nil
 }
 
-// MarkRunning stamps started_at and flips status to 'running'. Used by L2
-// waves when their offset elapses so /debug can distinguish queued vs in
-// flight without reading an in-memory ring buffer.
-func (s *PrefetchRunStore) MarkRunning(id int64) error {
-	_, err := s.db.Exec(`
-		UPDATE prefetch_runs
-		   SET status     = 'running',
-		       started_at = COALESCE(started_at, NOW())
-		 WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("mark prefetch run running: %w", err)
-	}
-	return nil
-}
-
 // MarkFinished writes the terminal status (ok|fail|skipped) and stamps
 // finished_at. errStr is stored on 'fail'; 'ok'/'skipped' may pass "".
 func (s *PrefetchRunStore) MarkFinished(id int64, status, errStr string) error {
@@ -100,34 +85,6 @@ func (s *PrefetchRunStore) Record(layer, bucket, subreddit, postID, cycleID, sta
 		return fmt.Errorf("record prefetch run: %w", err)
 	}
 	return nil
-}
-
-// ListPending returns every row still in 'pending' status. Used at scheduler
-// startup to revive L2/L3 waves whose in-memory goroutine died with the
-// previous container — once Schedule() persisted the row, the wave must fire
-// regardless of process death.
-func (s *PrefetchRunStore) ListPending() ([]PrefetchRun, error) {
-	rows, err := s.db.Query(`
-		SELECT id, layer, bucket, subreddit, post_id, cycle_id, sub_interval,
-		       scheduled_at, started_at, finished_at, status, payload, error
-		  FROM prefetch_runs
-		 WHERE status = 'pending'
-		 ORDER BY scheduled_at`)
-	if err != nil {
-		return nil, fmt.Errorf("list pending prefetch runs: %w", err)
-	}
-	defer rows.Close()
-	var out []PrefetchRun
-	for rows.Next() {
-		var r PrefetchRun
-		if err := rows.Scan(&r.ID, &r.Layer, &r.Bucket, &r.Subreddit, &r.PostID,
-			&r.CycleID, &r.SubInterval, &r.ScheduledAt, &r.StartedAt, &r.FinishedAt,
-			&r.Status, &r.Payload, &r.Error); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
 }
 
 // ListWavesForActiveCycles returns every L2/L3 row belonging to a cycle that
@@ -296,28 +253,4 @@ func (s *PrefetchRunStore) FailStaleRunning() (int64, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
-}
-
-// CountByLayerSince is a small helper for the debug page: how many rows of
-// each layer landed in the last window. Returns zero for layers with no rows.
-func (s *PrefetchRunStore) CountByLayerSince(window time.Duration) (map[string]int, error) {
-	rows, err := s.db.Query(`
-		SELECT layer, COUNT(*)
-		  FROM prefetch_runs
-		 WHERE scheduled_at >= NOW() - $1::interval
-		 GROUP BY layer`, fmt.Sprintf("%d seconds", int(window.Seconds())))
-	if err != nil {
-		return nil, fmt.Errorf("count prefetch runs: %w", err)
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	for rows.Next() {
-		var layer string
-		var n int
-		if err := rows.Scan(&layer, &n); err != nil {
-			return nil, err
-		}
-		out[layer] = n
-	}
-	return out, rows.Err()
 }

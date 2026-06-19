@@ -40,32 +40,6 @@ func TestCanonicalizeDepth(t *testing.T) {
 	}
 }
 
-// TestDepthPredicates is a paranoia check that DepthHasL2/L3 agree with the
-// canonical depth table from the docs — any future renaming of canonical
-// values must update both predicates and this test together.
-func TestDepthPredicates(t *testing.T) {
-	cases := []struct {
-		depth string
-		l2    bool
-		l3    bool
-	}{
-		{"none", false, false},
-		{"l2", true, false},
-		{"l3", false, true},
-		{"l2+l3", true, true},
-		{"", false, false},
-		{"garbage", false, false},
-	}
-	for _, c := range cases {
-		if got := DepthHasL2(c.depth); got != c.l2 {
-			t.Errorf("DepthHasL2(%q) = %v, want %v", c.depth, got, c.l2)
-		}
-		if got := DepthHasL3(c.depth); got != c.l3 {
-			t.Errorf("DepthHasL3(%q) = %v, want %v", c.depth, got, c.l3)
-		}
-	}
-}
-
 // TestParsePrefetchSubModes_Depth exercises the per-sub depth override path:
 // valid values, aliases, mixed sort+time+depth clauses, multiple subs, depth
 // override of "none" alongside a "l2+l3" default (the user's golang example),

@@ -90,16 +90,6 @@ func CanonicalizeDepth(raw string) (string, bool) {
 	return "", false
 }
 
-// DepthHasL2 reports whether the canonical depth value covers L2 media downloads.
-func DepthHasL2(depth string) bool {
-	return depth == "l2" || depth == "l2+l3"
-}
-
-// DepthHasL3 reports whether the canonical depth value covers L3 comment fetches.
-func DepthHasL3(depth string) bool {
-	return depth == "l3" || depth == "l2+l3"
-}
-
 type prefetchSubModeReject struct {
 	raw    string
 	reason string

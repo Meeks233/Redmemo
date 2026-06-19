@@ -286,7 +286,7 @@ func TestParseRetainedShortAliases(t *testing.T) {
 func TestDroppedAliasesAreFreeText(t *testing.T) {
 	// Aliases that were retired must NOT silently re-attach to their concepts.
 	for _, in := range []string{
-		"s:golang",           // dropped: ambiguous with score
+		"s:golang",         // dropped: ambiguous with score
 		"a:bob",            // dropped: ambiguous with after
 		"c:5",              // dropped: ambiguous with cached
 		"f:art",            // dropped: low value
@@ -295,7 +295,7 @@ func TestDroppedAliasesAreFreeText(t *testing.T) {
 		"u:50",             // dropped: ambiguous single letter
 		"comment:5",        // dropped: redundant with comments
 		"cache_score:50",   // dropped: renamed to cached
-		"subreddit:golang",   // dropped: redundant with sub
+		"subreddit:golang", // dropped: redundant with sub
 		"time:week",        // dropped: merged into date
 		"timeframe:week",   // dropped
 		"tf:week",          // dropped
@@ -473,13 +473,6 @@ func TestUnknownKeyStaysText(t *testing.T) {
 	want := []string{"foo:bar", "baz"}
 	if !reflect.DeepEqual(p.Terms, want) {
 		t.Errorf("Terms = %v, want %v", p.Terms, want)
-	}
-}
-
-func TestNumConstraintMatch(t *testing.T) {
-	n := NumConstraint{Op: OpGT, Val: 100}
-	if !n.Match(101) || n.Match(100) || n.Match(99) {
-		t.Errorf("OpGT match wrong")
 	}
 }
 

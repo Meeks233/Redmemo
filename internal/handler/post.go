@@ -2,14 +2,12 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/redmemo/redmemo/internal/archive"
 	"github.com/redmemo/redmemo/internal/reddit"
@@ -114,41 +112,6 @@ func (h *Handler) servePost(w http.ResponseWriter, r *http.Request, sub, id stri
 
 	// 4. Nothing available
 	h.serveDegradeMiss(w, r, reason)
-}
-
-func (h *Handler) backgroundArchivePost(sub, id, urlPath, commentSort string, htmlSnapshot []byte) {
-	existing, _ := h.postStore.Get(urlPath)
-	if existing != nil && time.Since(existing.LastUpdated) < 10*time.Minute {
-		return
-	}
-	// Removed-upstream is sticky: skip the background fetch so we never burn
-	// quota re-confirming a permalink Reddit will not give back.
-	if existing != nil && existing.UpstreamRemoved {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	post, comments, err := h.fetchPost(ctx, sub, id, commentSort)
-	if err != nil {
-		log.Printf("background archive post %s/%s: %v", sub, id, err)
-		return
-	}
-	h.archiver.ArchivePost(&post, sub, "background")
-	h.archiver.ArchiveComments(post.Permalink, comments)
-	if h.prefetcher != nil {
-		h.prefetcher.RecordL3Fetch(sub, id, len(comments), reportedNumComments(&post))
-	}
-
-	if len(htmlSnapshot) > 0 {
-		permalink := post.Permalink
-		if permalink == "" {
-			permalink = urlPath
-		}
-		if err := h.postStore.SaveHTML(permalink, htmlSnapshot); err != nil {
-			log.Printf("background save html %s: %v", permalink, err)
-		}
-	}
 }
 
 func (h *Handler) handleRefreshPost(w http.ResponseWriter, r *http.Request) {

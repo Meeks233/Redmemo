@@ -233,13 +233,6 @@ var appHeaderOrder = []string{
 	"connection",
 }
 
-// AppHeaderOrder returns a copy of the canonical Reddit-app header order.
-func AppHeaderOrder() []string {
-	out := make([]string, len(appHeaderOrder))
-	copy(out, appHeaderOrder)
-	return out
-}
-
 // pHeaderOrder is the canonical HTTP/2 pseudo-header order for the spoofed
 // client. Shared read-only; fhttp only range-iterates it.
 var pHeaderOrder = []string{":method", ":path", ":authority", ":scheme"}
