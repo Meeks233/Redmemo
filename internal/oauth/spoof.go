@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/redmemo/redmemo/internal/useragent"
 )
 
 type SpoofIdentity struct {
@@ -195,30 +194,5 @@ func GenerateIdentity() SpoofIdentity {
 		UserAgent: ua,
 		DeviceID:  deviceID,
 		Headers:   headers,
-	}
-}
-
-// genericWebIdentity builds the spoof identity for the standby generic_web OAuth
-// backend, binding a UA from the pool. Blocks if the pool is empty rather than
-// fabricating one.
-func genericWebIdentity(browserUA *useragent.Pool) SpoofIdentity {
-	deviceID := uuid.New().String()
-	var ua string
-	if browserUA != nil && browserUA.Size() > 0 {
-		ua = browserUA.Get()
-	} else {
-		// No pool entry to bind — block rather than invent a UA.
-		log.Printf("oauth: genericWebIdentity blocked — UA pool empty, waiting")
-		for browserUA == nil || browserUA.Size() == 0 {
-			time.Sleep(time.Second)
-		}
-		ua = browserUA.Get()
-	}
-	return SpoofIdentity{
-		UserAgent: ua,
-		DeviceID:  deviceID,
-		Headers: map[string]string{
-			"User-Agent": ua,
-		},
 	}
 }

@@ -272,8 +272,8 @@ func (h *Handler) handleMediaStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) proxyHLSManifest(w http.ResponseWriter, r *http.Request, upstream string) {
 	// Reuse the active OAuth session's UA so this manifest fetch shares one
-	// identity with every other Reddit-facing request; the browser UA pool is now
-	// dead code here. Blocks through cold start rather than emit a pool UA.
+	// identity with every other Reddit-facing request. Blocks through cold start
+	// rather than emit any other UA — there is no browser-UA fallback.
 	ua := h.oauthHolder.WaitForUserAgent(r.Context())
 	if ua == "" {
 		http.Error(w, "upstream error", http.StatusBadGateway)

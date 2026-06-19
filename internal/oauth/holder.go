@@ -14,7 +14,6 @@ import (
 	"github.com/redmemo/redmemo/internal/cache"
 	"github.com/redmemo/redmemo/internal/config"
 	"github.com/redmemo/redmemo/internal/store"
-	"github.com/redmemo/redmemo/internal/useragent"
 	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
@@ -34,7 +33,6 @@ type TokenHolder struct {
 	tracker     *versionintel.Tracker
 	cache       *cache.Cache
 	cfg         config.OAuthConfig
-	browserUA   *useragent.Pool
 	cancel      context.CancelFunc
 	wg          sync.WaitGroup
 
@@ -67,7 +65,7 @@ const (
 	maxRefreshCooldown = 5 * time.Minute
 )
 
-func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache, browserUA *useragent.Pool) *TokenHolder {
+func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache) *TokenHolder {
 	return &TokenHolder{
 		client:      client,
 		store:       tokenStore,
@@ -75,7 +73,6 @@ func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.To
 		tracker:     tracker,
 		cache:       c,
 		cfg:         cfg,
-		browserUA:   browserUA,
 		backend:     "mobile_spoof",
 		uaReady:     make(chan struct{}),
 		tokenReady:  make(chan struct{}),
@@ -750,12 +747,11 @@ func (p *TokenHolder) restoreIdentity(st *store.StoredToken) SpoofIdentity {
 	}
 
 	// Fallback: no persisted headers (token row predates identity persistence).
+	// mobile_spoof is the only backend, so any token — including a legacy row
+	// still tagged generic_web — rebinds to the pinned mobile device identity.
 	log.Printf("oauth: no persisted identity for token %d, using pinned device profile", st.ID)
-	if st.Backend == "mobile_spoof" || st.Backend == "" {
-		if p.client != nil {
-			return p.client.DeviceIdentity()
-		}
-		return GenerateIdentity()
+	if p.client != nil {
+		return p.client.DeviceIdentity()
 	}
-	return genericWebIdentity(p.browserUA)
+	return GenerateIdentity()
 }

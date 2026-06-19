@@ -24,9 +24,8 @@ type PublicClient struct {
 	// userAgentFn returns the active OAuth session's bound User-Agent so every
 	// public-endpoint request shares one identity with the authenticated API
 	// client. It is expected to block during cold start (see
-	// TokenHolder.WaitForUserAgent) rather than fall back to a pool UA — emitting
-	// a second UA from the session IP is a stealth tell. The browser UA pool that
-	// previously fed pinnedUA is now dead code on this path.
+	// TokenHolder.WaitForUserAgent) rather than fall back to any other UA —
+	// emitting a second UA from the session IP is a stealth tell.
 	userAgentFn func() string
 
 	mu         sync.Mutex

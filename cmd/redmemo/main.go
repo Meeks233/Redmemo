@@ -23,7 +23,6 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
-	"github.com/redmemo/redmemo/internal/useragent"
 	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
@@ -207,38 +206,34 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 7. Init browser UA source (only feeds the standby generic_web OAuth backend)
-	browserUA := useragent.NewPool(settingsStore)
-
-	// 8. Init OAuth
+	// 7. Init OAuth
 	deviceProfile, err := oauth.ResolveDeviceProfile(deviceProfileStore)
 	if err != nil {
 		log.Fatalf("oauth: resolve device profile: %v", err)
 	}
 	log.Printf("oauth: pinned device profile (android=%d, app=%s, device=%s)",
 		deviceProfile.AndroidVersion, deviceProfile.AppVersion, deviceProfile.DeviceID)
-	oauthClient := oauth.NewClient(browserUA, deviceProfile)
+	oauthClient := oauth.NewClient(deviceProfile)
 	versionTracker := versionintel.NewTracker(&http.Client{Timeout: 15 * time.Second})
-	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache, browserUA)
+	oauthHolder := oauth.NewTokenHolder(cfg.OAuth, oauthClient, tokenStore, deviceProfileStore, versionTracker, redisCache)
 
 	// sessionUA returns the active OAuth session's bound User-Agent, blocking
 	// through the cold-start window (see TokenHolder.WaitForUserAgent). Every
 	// Reddit-facing client shares this one closure so a single identity drives
-	// every outbound request; falling back to a browser UA pool would emit a
-	// second UA from the session IP — a stealth tell. The browser UA pool is now
-	// dead code on these paths.
+	// every outbound request. There is deliberately no browser-UA fallback:
+	// emitting a second UA from the session IP would be a stealth tell.
 	sessionUA := func() string {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		return oauthHolder.WaitForUserAgent(ctx)
 	}
 
-	// 9. Init Reddit clients
+	// 8. Init Reddit clients
 	redditAdapter := &oauthAdapter{holder: oauthHolder}
 	redditCli := reddit.NewClient(redditAdapter)
 	publicCli := reddit.NewPublicClient(sessionUA)
 
-	// 10. Init modules
+	// 9. Init modules
 	hrLimiter := hrlimit.NewManager(redisCache.Client(), cfg.HRLimit)
 
 	renderer, err := render.New(cfg.Render)
@@ -286,7 +281,7 @@ func main() {
 		prefetchRunStore, subIconStore, hrLimiter,
 	)
 
-	// 11. Start background tasks
+	// 10. Start background tasks
 	if err := oauthHolder.Start(ctx); err != nil {
 		log.Printf("oauth holder start: %v (continuing without tokens)", err)
 	}
@@ -298,7 +293,7 @@ func main() {
 	// muxed (audio) copy has since superseded.
 	go mediaProxy.SweepSupersededPlainRows()
 
-	// 12. Register routes, start HTTP server
+	// 11. Register routes, start HTTP server
 	h := handler.New(
 		hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
@@ -312,7 +307,7 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
-	// 13. Graceful shutdown
+	// 12. Graceful shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
