@@ -343,7 +343,9 @@
     }
 
     function scan() {
-        var videos = document.querySelectorAll("video");
+        // Exclude link-preview videos — external, never-cached embeds owned by
+        // linkPreview.js; the reddit reload/mux machinery must not attach to them.
+        var videos = document.querySelectorAll("video:not(.link-preview-media)");
         for (var i = 0; i < videos.length; i++) {
             attach(videos[i]);
         }

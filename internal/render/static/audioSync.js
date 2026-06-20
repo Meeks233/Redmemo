@@ -712,7 +712,10 @@
     }
 
     function scan() {
-        var videos = document.querySelectorAll("video");
+        // Exclude link-preview videos — external, never-cached embeds owned by
+        // linkPreview.js. They are never v.redd.it /vid/ segments, so they have no
+        // separate audio to mux; audioSync must not adopt them.
+        var videos = document.querySelectorAll("video:not(.link-preview-media)");
         for (var i = 0; i < videos.length; i++) {
             watch(videos[i]);
         }

@@ -1828,14 +1828,12 @@ video.lazy-media:not([src]) {
 
 /* Link-preview cards: the Discord/Telegram-style "social card" unfurl of a bare
    external link in a post or comment body, built lazily on the client by
-   linkPreview.js once the link scrolls into view. Three display variants mirror
-   the OpenGraph card types:
+   linkPreview.js once the link scrolls into view. Display variants:
      --small : compact card, square logo/favicon thumbnail on the left (a site
                with only an icon, e.g. Stack Overflow's apple-touch-icon);
-     --large : "summary_large_image" — a full-width banner image on top, text
-               below (GitHub's 1280×640 repo card, news hero shots);
-     --video : a full-width playable embed on top (X/Twitter via fixupx), the
-               browser streams it directly;
+     --media : a real photo or video (X/Twitter via fixupx, GitHub repo card,
+               article hero) rendered at its natural aspect ratio — portrait stays
+               portrait, landscape stays landscape — sized inline by the JS;
      --text  : no media, text only.
    Themed purely with the portable theme vars: surface + neutral border are a
    translucent wash of --text (which always contrasts with the background by
@@ -1859,11 +1857,14 @@ video.lazy-media:not([src]) {
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-/* Per-variant sizing. Compact (thumbnail-left) stays a small fixed card; the
-   image variants stack vertically and FILL the body column (max-width: 100%) so
-   the wide banner shows large and no dead space is left to the right of the card
-   — matching the comment text width. The triple selector keeps these at the same
-   specificity as the base box rule so the max-width override always lands. */
+/* Per-variant sizing.
+   --small : compact left-thumbnail card for a small square logo/favicon/avatar.
+   --media : a real photo or video rendered at its NATURAL aspect ratio (portrait
+             stays portrait, landscape stays landscape) and never upscaled.
+             linkPreview.js sets the card's width and the media's aspect-ratio
+             inline from the loaded pixel dimensions, so the card shrink-fits the
+             media — no crushed thumbnails, no cropped banners.
+   --text  : no usable media; title + description only. */
 .link-preview--small,
 .comment_body a.link-preview--small,
 .post_body a.link-preview--small {
@@ -1871,34 +1872,18 @@ video.lazy-media:not([src]) {
     align-items: stretch;
     max-width: 460px;
 }
-.link-preview--large,
-.comment_body a.link-preview--large,
-.post_body a.link-preview--large,
-.link-preview--video,
-.comment_body a.link-preview--video,
-.post_body a.link-preview--video,
+.link-preview--media,
+.comment_body a.link-preview--media,
+.post_body a.link-preview--media {
+    flex-direction: column;
+    /* Card width is set inline by JS from the media's real size; this is just the
+       pre-load default and the mobile cap. */
+    max-width: min(100%, 440px);
+}
 .link-preview--text,
 .comment_body a.link-preview--text,
 .post_body a.link-preview--text {
     flex-direction: column;
-}
-
-/* Banner cards (large/video) get a tighter desktop cap so the preview image
-   stays modest — the aspect-ratio on the media keeps it scaled in proportion.
-   Fills the column on narrow/mobile. */
-.link-preview--large,
-.comment_body a.link-preview--large,
-.post_body a.link-preview--large,
-.link-preview--video,
-.comment_body a.link-preview--video,
-.post_body a.link-preview--video {
-    max-width: min(100%, 440px);
-}
-
-/* Text-only cards have no banner to shrink; allow a touch more width. */
-.link-preview--text,
-.comment_body a.link-preview--text,
-.post_body a.link-preview--text {
     max-width: min(100%, 520px);
 }
 
@@ -1910,7 +1895,7 @@ video.lazy-media:not([src]) {
 
 /* The `.link-preview` ancestor raises max-width to specificity (0,2,0) so it
    beats the body-wide `.comment img { max-width: 50% }` rule that otherwise
-   crushed the banner to half the card width. */
+   crushed the media to half the card width. */
 .link-preview .link-preview-media {
     display: block;
     max-width: 100%;
@@ -1927,20 +1912,17 @@ video.lazy-media:not([src]) {
     object-fit: cover;
 }
 
-/* Large / video: full-width banner. aspect-ratio gives a stable box before the
-   image loads (no layout jump); the wide GitHub/Twitter card fills it instead of
-   being crushed into a tiny square. */
-.link-preview--large .link-preview-media {
+/* Media: fill the card's (JS-set) width; height follows the inline aspect-ratio
+   so the natural proportions are preserved with no crop and no upscale. The 1.91
+   default holds a sensible box for the brief moment before the media loads and JS
+   stamps the real ratio. */
+.link-preview--media .link-preview-media {
     width: 100%;
-    aspect-ratio: 1200 / 630;
-    max-height: 232px;
-    object-fit: cover;
+    height: auto;
+    aspect-ratio: 1.91;
 }
 
-.link-preview--video .link-preview-media {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    max-height: 248px;
+.link-preview--media video.link-preview-media {
     object-fit: contain;
     background: #000;
 }

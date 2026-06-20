@@ -67,40 +67,69 @@
     return n;
   }
 
+  // Media display bounds (CSS px). A real photo/video renders at its NATURAL
+  // aspect ratio within these — portrait stays portrait, landscape stays
+  // landscape — and is never upscaled past its native size. Only a small,
+  // square-ish image (a logo / favicon / avatar) collapses to the compact
+  // left-thumbnail layout.
+  var MEDIA_MAX_W = 420, MEDIA_MAX_H = 440, MEDIA_MIN_W = 230, LOGO_MAX = 300;
+
+  // applyMedia sizes the card from the media's REAL dimensions. This is the
+  // authoritative classifier (the server's image_wide is only an initial hint):
+  // og:image:width meta lies often (GitHub stamps summary_large_image on square
+  // avatars; many sites omit it), but the loaded pixels never do.
+  function applyMedia(a, m, w, h) {
+    if (!w || !h) return;
+    a.classList.remove("link-preview--media", "link-preview--small", "link-preview--text");
+    a.style.width = "";
+    m.style.aspectRatio = "";
+    var maxd = Math.max(w, h), r = w / h;
+    if (maxd <= LOGO_MAX && r >= 0.8 && r <= 1.25) {
+      a.classList.add("link-preview--small"); // small square → logo thumbnail (CSS sizes it)
+      return;
+    }
+    // Real media: fit within the bounds preserving aspect, never enlarging.
+    a.classList.add("link-preview--media");
+    var scale = Math.min(MEDIA_MAX_W / w, MEDIA_MAX_H / h, 1);
+    var dw = Math.round(w * scale);
+    a.style.width = Math.max(dw, MEDIA_MIN_W) + "px";
+    m.style.aspectRatio = w + " / " + h; // holds the box; height follows width
+  }
+
   function buildCard(data, href) {
-    var variant = data.video ? "video" : data.image_wide ? "large" : data.image ? "small" : "text";
-    var a = el("a", "link-preview link-preview--" + variant);
+    // Start every media card as a natural-aspect "media" card (reasonably sized),
+    // not a tiny thumbnail — applyMedia downgrades to a logo thumbnail only if the
+    // loaded pixels are actually small+square. This avoids the jarring "tiny → big"
+    // flip and never leaves a real photo stuck at 84px.
+    var initial = data.image || data.video ? "media" : "text";
+    var a = el("a", "link-preview link-preview--" + initial);
     a.href = data.url || href;
     a.target = "_blank";
     a.rel = "nofollow noopener noreferrer";
 
-    // Media: image banner / thumbnail / playable video — all loaded directly by
-    // the browser from the third-party host.
     if (data.video) {
       var v = el("video", "link-preview-media");
       v.controls = true;
       v.preload = "none";
+      v.playsInline = true;
       if (data.image) v.poster = data.image;
       v.src = data.video;
-      // A click on the <video> controls must not also follow the card link.
+      // A click on the <video> must not also follow the card link.
       v.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); });
+      // A not-yet-played video has no readable dimensions, so size the card from
+      // the poster image's aspect (Twitter's video poster matches the clip) — a
+      // portrait clip then renders portrait before the user ever hits play.
+      if (data.image) {
+        var probe = new Image();
+        probe.addEventListener("load", function () { applyMedia(a, v, probe.naturalWidth, probe.naturalHeight); });
+        probe.src = data.image;
+      }
       a.appendChild(v);
     } else if (data.image) {
       var img = el("img", "link-preview-media");
       img.loading = "lazy"; // native defer: only fetched when near the viewport
       img.alt = "";
-      // The server's image_wide is only a hint. The real image's aspect ratio is
-      // the authoritative signal: GitHub (and others) set summary_large_image
-      // even on profile pages whose og:image is a SQUARE avatar — rendering that
-      // as a banner blows a logo up huge. So once the image loads, reclassify by
-      // its natural ratio — clearly landscape → large banner, square-ish → small
-      // logo thumbnail.
-      img.addEventListener("load", function () {
-        if (!img.naturalWidth || !img.naturalHeight) return;
-        var wide = img.naturalWidth / img.naturalHeight >= 1.6;
-        a.classList.toggle("link-preview--large", wide);
-        a.classList.toggle("link-preview--small", !wide);
-      });
+      img.addEventListener("load", function () { applyMedia(a, img, img.naturalWidth, img.naturalHeight); });
       // Image hosts that gate by IP (GitHub's opengraph.githubassets.com) can
       // 429 a burst of card images on a link-heavy page. Retry a couple of times
       // with jittered backoff — the throttle clears quickly — before giving up
@@ -115,7 +144,8 @@
             1200 * attempts + Math.floor(Math.random() * 1500));
         } else if (img.parentNode) {
           img.parentNode.removeChild(img);
-          a.classList.remove("link-preview--small", "link-preview--large");
+          a.style.width = "";
+          a.classList.remove("link-preview--media", "link-preview--small");
           a.classList.add("link-preview--text");
         }
       });

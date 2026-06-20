@@ -171,6 +171,69 @@ func TestFetchWideImageAndVideo(t *testing.T) {
 	}
 }
 
+func TestCleanText(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"plain text", "plain text"},
+		{"line one<br><br>line two", "line one\n\nline two"},
+		{"a <br/> b", "a \n b"},
+		{"<b>bold</b> and <i>x</i>", "bold and x"},
+		{"  spaced  ", "  spaced  "}, // no tags → untouched
+	}
+	for _, c := range cases {
+		if got := cleanText(c.in); got != c.want {
+			t.Errorf("cleanText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestDirectVideo(t *testing.T) {
+	cases := []struct {
+		name string
+		meta map[string]string
+		want string
+	}{
+		{"youtube embed (text/html) → none",
+			map[string]string{"og:video:url": "https://www.youtube.com/embed/abc", "og:video:type": "text/html"}, ""},
+		{"direct mp4 by type",
+			map[string]string{"og:video:url": "https://v.fixupx.com/x.mp4", "og:video:type": "video/mp4"}, "https://v.fixupx.com/x.mp4"},
+		{"direct mp4 by extension, no type",
+			map[string]string{"og:video": "https://cdn.example.com/clip.mp4"}, "https://cdn.example.com/clip.mp4"},
+		{"hls m3u8",
+			map[string]string{"og:video:url": "https://cdn.example.com/v.m3u8", "og:video:type": "application/x-mpegURL"}, "https://cdn.example.com/v.m3u8"},
+		{"none", map[string]string{}, ""},
+	}
+	for _, c := range cases {
+		if got := directVideo(c.meta, "https://site.example.com/p"); got != c.want {
+			t.Errorf("%s: directVideo = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestFetchYouTubeFallsBackToImage verifies a YouTube-style page (HTML-embed
+// og:video) yields an image card, not a broken inline <video>.
+func TestFetchYouTubeFallsBackToImage(t *testing.T) {
+	const page = "https://www.youtube.com/watch?v=abc"
+	doer := &fakeDoer{pages: map[string]fakePage{
+		page: {200, `<head>
+			<meta property="og:title" content="Cool Video">
+			<meta property="og:image" content="https://i.ytimg.com/vi/abc/maxresdefault.jpg">
+			<meta property="og:video:url" content="https://www.youtube.com/embed/abc">
+			<meta property="og:video:type" content="text/html">
+		</head>`},
+	}}
+	f := &fetcher{client: doer}
+	p, err := f.Fetch(context.Background(), page)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if p.VideoURL != "" {
+		t.Errorf("YouTube HTML embed must NOT be a playable video, got %q", p.VideoURL)
+	}
+	if p.ImageURL == "" || p.Title != "Cool Video" {
+		t.Errorf("expected image card with title, got %+v", p)
+	}
+}
+
 func TestIsWideImage(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -36,26 +36,40 @@ cross-origin HTML read impossible in the browser).
 
 ## Display variants
 
-`linkPreview.js` picks a layout from the metadata, mirroring the OpenGraph card
-types:
+`linkPreview.js` picks a layout from the **real loaded media's pixel
+dimensions** — the only fully reliable signal (og:image:width meta lies often:
+GitHub stamps `summary_large_image` on square avatars; many sites omit
+dimensions). The server's `image_wide` is just an initial hint.
 
-- **small** — compact card, square logo/favicon thumbnail on the left (a site
-  with only an icon, e.g. Stack Overflow's apple-touch-icon).
-- **large** — a banner on top, text below (GitHub's 1280×640 repo card with
-  stars/forks/avatar, news hero shots). Capped at ~540px on desktop, full-width
-  on mobile, so a wide image doesn't dominate the thread.
-- **video** — a full-width playable `<video>` on top (X/Twitter via fixupx's
-  `og:video`), streamed by the browser. Telegram-style inline play.
-- **text** — no usable image; title + description only.
+- **small** — compact card, square logo/favicon thumbnail on the left, ONLY for a
+  genuinely small + square-ish image (`max(w,h) ≤ 300`, ratio 0.8–1.25), e.g.
+  Stack Overflow's apple-touch-icon or a GitHub org avatar.
+- **media** — a real photo or video, rendered at its **natural aspect ratio**:
+  portrait stays portrait, landscape stays landscape, square stays square. The JS
+  fits the media within ~420×440 px **without upscaling past its native size**,
+  sets the card width + the media `aspect-ratio` inline, and the card shrink-fits.
+  So a portrait phone screenshot (an X/fixupx tweet, 750×1334) shows as a proper
+  tall ~247×439 card instead of being crushed to an 84px thumbnail, and a 3:2
+  photo isn't mis-binned as a tiny logo. (Replaced the old fixed-aspect banner
+  crop.)
+- **text** — no usable media; title + description only.
 
-The small-vs-large choice is made **authoritatively on the client** from the real
-loaded image's aspect ratio (`linkPreview.js`): clearly landscape (≥1.6:1) →
-large banner, square-ish → small logo thumbnail. The server sends an
-`image_wide` *hint* (`unfurl.isWideImage`) to avoid a layout jump, derived from
-og:image dimensions + known GitHub host patterns — deliberately **not** from
-`twitter:card=summary_large_image` alone, since GitHub sets that on org/user
-profile pages whose og:image is a square avatar (which would otherwise stretch a
-logo into a banner — the AuthPlane case).
+**Video** (X/Twitter via fixupx) uses the `media` layout with a `<video>`, played
+ONLY when `og:video` is a *direct* media file (`og:video:type` `video/*`/HLS, or
+a `.mp4`/`.webm`/`.m3u8` URL). An HTML `/embed/` `og:video` (`type=text/html`,
+YouTube/Vimeo) is NOT inline-playable, so those fall back to the thumbnail card
+the way Telegram shows a YouTube link — never a broken `<video>`. A video card's
+orientation is sized from the poster image's aspect (a not-yet-played video has
+no readable dimensions), so a portrait clip renders portrait before play.
+
+These external `<video>` elements (class `link-preview-media`) are owned entirely
+by `linkPreview.js`; the reddit media scripts (audioSync/videoPreload/
+videoReload) explicitly skip `video.link-preview-media` via a `:not()` selector,
+since they are external, never-cached embeds with no v.redd.it audio track to mux.
+
+Title/description text runs through `unfurl.cleanText`, which converts the literal
+`<br>` and stray HTML that fxtwitter/fixupx put in `og:description` into clean
+plain text.
 
 ## Metadata failover chain (`unfurl.fetcher.Fetch`)
 

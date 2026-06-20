@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 
 	fhttp "github.com/bogdanfinn/fhttp"
@@ -144,14 +145,58 @@ func (f *fetcher) fetchOG(ctx context.Context, fetchURL, displayURL string) (*Pr
 	image := absImage(firstNonEmpty(meta["og:image"], meta["og:image:url"], meta["twitter:image"], meta["twitter:image:src"]), fetchURL)
 	p := &Preview{
 		URL:         displayURL,
-		Title:       firstNonEmpty(meta["og:title"], meta["twitter:title"], meta["__title__"]),
-		Description: firstNonEmpty(meta["og:description"], meta["twitter:description"], meta["description"]),
+		Title:       cleanText(firstNonEmpty(meta["og:title"], meta["twitter:title"], meta["__title__"])),
+		Description: cleanText(firstNonEmpty(meta["og:description"], meta["twitter:description"], meta["description"])),
 		ImageURL:    image,
 		SiteName:    firstNonEmpty(meta["og:site_name"], hostLabel(displayURL)),
 		ImageWide:   isWideImage(meta, image),
-		VideoURL:    absImage(firstNonEmpty(meta["og:video:secure_url"], meta["og:video:url"], meta["og:video"]), fetchURL),
+		VideoURL:    directVideo(meta, fetchURL),
 	}
 	return p, nil
+}
+
+// directVideo returns an og:video URL only when it is a video the browser can
+// actually play inline in a <video> element — a direct media file, not an HTML
+// embed. Most sites (YouTube, Vimeo) set og:video:url to an /embed/ page with
+// og:video:type=text/html; rendering that as <video src> just yields a broken
+// black box, so those fall back to the thumbnail (image) card the way Telegram
+// shows a YouTube link. Only a `video/*` type (or a direct video file extension)
+// — what fxtwitter/fixupx expose for real tweet videos — is treated as playable.
+func directVideo(meta map[string]string, base string) string {
+	raw := firstNonEmpty(meta["og:video:secure_url"], meta["og:video:url"], meta["og:video"])
+	if raw == "" {
+		return ""
+	}
+	typ := strings.ToLower(strings.TrimSpace(meta["og:video:type"]))
+	if strings.HasPrefix(typ, "video/") || strings.HasPrefix(typ, "application/x-mpegurl") || strings.HasPrefix(typ, "application/vnd.apple.mpegurl") {
+		return absImage(raw, base)
+	}
+	if typ == "" && videoFileRe.MatchString(raw) {
+		return absImage(raw, base)
+	}
+	return "" // HTML embed (text/html) or unknown — not inline-playable
+}
+
+// videoFileRe matches a URL path ending in a direct video file extension.
+var videoFileRe = regexp.MustCompile(`(?i)\.(mp4|webm|mov|m4v|m3u8)(\?|#|$)`)
+
+var brRe = regexp.MustCompile(`(?i)<br\s*/?>`)
+var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
+var blankLinesRe = regexp.MustCompile(`\n{3,}`)
+
+// cleanText normalizes an OG title/description for display as plain text. Some
+// embed mirrors (notably fxtwitter/fixupx) put literal HTML in og:description —
+// `<br>` line breaks and stray tags — which, rendered via textContent, would show
+// as ugly literal "<br>" markup. Convert <br> to newlines and strip any other
+// tags so the card text reads cleanly.
+func cleanText(s string) string {
+	if s == "" || !strings.Contains(s, "<") {
+		return s
+	}
+	s = brRe.ReplaceAllString(s, "\n")
+	s = htmlTagRe.ReplaceAllString(s, "")
+	s = blankLinesRe.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
 }
 
 // isWideImage is the server's INITIAL hint for the banner-vs-thumbnail layout;
@@ -221,12 +266,12 @@ func (f *fetcher) fetchJina(ctx context.Context, rawURL string) (*Preview, error
 	image := absImage(firstNonEmpty(md["og:image"], md["og:image:url"], md["twitter:image"]), rawURL)
 	p := &Preview{
 		URL:         rawURL,
-		Title:       firstNonEmpty(jr.Data.Title, md["og:title"], md["twitter:title"]),
-		Description: firstNonEmpty(jr.Data.Description, md["og:description"], md["twitter:description"]),
+		Title:       cleanText(firstNonEmpty(jr.Data.Title, md["og:title"], md["twitter:title"])),
+		Description: cleanText(firstNonEmpty(jr.Data.Description, md["og:description"], md["twitter:description"])),
 		ImageURL:    image,
 		SiteName:    firstNonEmpty(md["og:site_name"], hostLabel(rawURL)),
 		ImageWide:   isWideImage(md, image),
-		VideoURL:    absImage(firstNonEmpty(md["og:video:secure_url"], md["og:video:url"], md["og:video"]), rawURL),
+		VideoURL:    directVideo(md, rawURL),
 	}
 	return p, nil
 }

@@ -29,7 +29,9 @@
   );
 
   function observeVideos() {
-    document.querySelectorAll("video").forEach(function (v) {
+    // Skip link-preview videos: those are external, never-cached embeds handled
+    // entirely by linkPreview.js — the reddit media machinery must not touch them.
+    document.querySelectorAll("video:not(.link-preview-media)").forEach(function (v) {
       if (v._preloadObserved) return;
       v._preloadObserved = true;
       observer.observe(v);
