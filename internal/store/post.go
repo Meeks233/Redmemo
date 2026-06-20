@@ -856,6 +856,18 @@ func (s *PostStore) SetMediaDone(urlPath string) error {
 	return nil
 }
 
+// ClearMediaDone resets a post to the media-needed state so the next L2 wave
+// re-harvests it. Used when an L3 comment fetch surfaces inline comment-body
+// images the L2 media pass — which only saw the post body and structured media
+// — never queued. L2, not L3, downloads the bytes; this only re-arms the queue.
+func (s *PostStore) ClearMediaDone(urlPath string) error {
+	_, err := s.db.Exec(`UPDATE posts SET media_done = false WHERE url_path = $1`, urlPath)
+	if err != nil {
+		return fmt.Errorf("clear media done: %w", err)
+	}
+	return nil
+}
+
 func (s *PostStore) ListNeedingMedia(sub string, limit int) ([]*StoredPost, error) {
 	rows, err := s.db.Query(`
 		SELECT url_path, subreddit, post_id, title, json_data, rendered_html,

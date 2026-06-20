@@ -183,6 +183,11 @@ type Scheduler struct {
 	// assert which posts trigger a bound L3 fetch.
 	pendingMediaFn func(sub string, limit int) ([]*store.StoredPost, error)
 
+	// commentMediaFn, when non-nil, replaces archiver.CommentMediaURLs so
+	// runL2Wave's comment-image harvest can be exercised without an archive
+	// service / comment store. Tests return a fixed URL slice per post path.
+	commentMediaFn func(urlPath string) []string
+
 	// l3FetchFn, when non-nil, replaces the cli.FetchPost + archiver.ArchiveComments
 	// network+persist step inside fetchL3Single. It returns the archived comment
 	// count. Tests record (sub, postID) to assert exactly which posts the L3
@@ -2392,6 +2397,61 @@ func (s *Scheduler) markMediaDone(urlPath string) {
 	}
 }
 
+// commentMediaURLs returns the raw CDN URLs of inline images embedded in the
+// post's archived comment bodies, via the archiver (or the commentMediaFn test
+// seam). Empty when no archiver is wired or no comments carry an image.
+func (s *Scheduler) commentMediaURLs(urlPath string) []string {
+	if s.commentMediaFn != nil {
+		return s.commentMediaFn(urlPath)
+	}
+	if s.archiver == nil || urlPath == "" {
+		return nil
+	}
+	return s.archiver.CommentMediaURLs(urlPath)
+}
+
+// appendCommentMedia adds any inline preview/i.redd.it images embedded in the
+// post's archived comment bodies to items, deduped (by CanonicalKey) against the
+// media already queued for the post. Comment images are signed and expire like
+// selftext body images, so L2 caches them here rather than letting them 403
+// after the user finally opens the thread.
+func (s *Scheduler) appendCommentMedia(items []mediaItem, urlPath string) []mediaItem {
+	urls := s.commentMediaURLs(urlPath)
+	if len(urls) == 0 {
+		return items
+	}
+	seen := make(map[string]bool, len(items)+len(urls))
+	for _, it := range items {
+		seen[reddit.CanonicalKey(it.URL)] = true
+	}
+	for _, raw := range urls {
+		if key := reddit.CanonicalKey(raw); !seen[key] {
+			seen[key] = true
+			items = append(items, mediaItem{URL: raw, Kind: "image"})
+		}
+	}
+	return items
+}
+
+// requeueForCommentMedia re-arms a post's media queue when its freshly fetched
+// comments carry inline images not yet on disk, so the next L2 wave harvests and
+// downloads them. L3 only signals here — the download itself is L2's job. No-op
+// when every comment image is already cached, so a periodic L3 re-fetch of an
+// unchanged thread does not churn the L2 queue.
+func (s *Scheduler) requeueForCommentMedia(urlPath string, comments []reddit.Comment) {
+	if s.postStore == nil || urlPath == "" {
+		return
+	}
+	for _, raw := range reddit.ExtractCommentImageURLs(comments) {
+		if s.media == nil || !s.media.IsCached(raw) {
+			if err := s.postStore.ClearMediaDone(urlPath); err != nil {
+				s.Events.Addf(LevelWarn, "L3", "%s: re-arm media for comment image failed: %v", urlPath, err)
+			}
+			return
+		}
+	}
+}
+
 // listL3Candidates returns the next batch of L3-eligible posts for sub under
 // the cycle-freeze + min-comments rules. The l3CandidatesFn seam lets tests
 // drive runL3Wave without a live DB; production uses the PostStore query.
@@ -2452,6 +2512,12 @@ func (s *Scheduler) runL2Wave(ctx context.Context, tf, sub string, limit int, cy
 		}
 
 		mediaItems := ExtractMediaItems(&p)
+		// Images pasted into the post's archived comment bodies (signed,
+		// short-lived preview.redd.it/i.redd.it links) live only in the comment
+		// tree, not in the post JSON ExtractMediaItems sees. Harvest them here so
+		// L2 — the NP media layer — caches the bytes; an L3 fetch only signals
+		// that they exist (it re-arms media_done), it never downloads.
+		mediaItems = s.appendCommentMedia(mediaItems, sp.URLPath)
 		if len(mediaItems) == 0 {
 			// Text/link posts carry no media, so the L2 download path is a
 			// no-op and the post is marked done immediately. Comments (if the
@@ -2986,6 +3052,10 @@ func (s *Scheduler) fetchL3Single(ctx context.Context, tf, sub, postID, urlPath,
 		}
 		if s.archiver != nil && urlPath != "" {
 			s.archiver.ArchiveComments(urlPath, comments)
+			// Comment bodies can embed signed preview images L2's post-only media
+			// pass never saw. Re-arm the post's media queue so L2 (not L3) caches
+			// them before the signatures expire.
+			s.requeueForCommentMedia(urlPath, comments)
 		}
 		fetched = len(comments)
 		s.Events.Addf(LevelOK, "L3", "%s r/%s post %s: archived %d comments", mode, sub, postID, fetched)

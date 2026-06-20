@@ -335,3 +335,45 @@ func TestArchiveListing_StampsSequentialRanks(t *testing.T) {
 		}
 	}
 }
+
+// TestCommentMediaURLs verifies the L2 harvest source: it pulls inline image
+// URLs out of the latest archived comment tree (including nested replies) and
+// returns nil when no comments are stored.
+func TestCommentMediaURLs(t *testing.T) {
+	tree := []reddit.Comment{
+		{
+			Kind: "t1",
+			Body: `<a href="/preview/pre/c1.png?width=640&amp;s=sig">link</a>`,
+			Replies: []reddit.Comment{
+				{Kind: "t1", Body: `<img src="/img/c2.jpg">`},
+			},
+		},
+	}
+	data, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("marshal tree: %v", err)
+	}
+	svc := newServiceWithCommentRepo(&fakeCommentRepo{
+		prior: &store.StoredComments{JSONData: data},
+	})
+
+	got := svc.CommentMediaURLs("/r/sub/comments/abc")
+	want := []string{
+		"https://preview.redd.it/c1.png?width=640&s=sig",
+		"https://i.redd.it/c2.jpg",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CommentMediaURLs() = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("CommentMediaURLs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// No archived comments → nil.
+	empty := newServiceWithCommentRepo(&fakeCommentRepo{})
+	if got := empty.CommentMediaURLs("/r/sub/comments/abc"); got != nil {
+		t.Errorf("CommentMediaURLs() with no comments = %v, want nil", got)
+	}
+}

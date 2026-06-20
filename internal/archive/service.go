@@ -236,6 +236,26 @@ func (s *Service) ArchiveComments(postURLPath string, comments []reddit.Comment)
 	}
 }
 
+// CommentMediaURLs returns the raw Reddit CDN URLs for every inline image
+// embedded in the latest archived comment tree for postURLPath. The L2 media
+// layer (NP) calls it so it can proactively cache comment-body preview images,
+// which are signed and expire just like selftext body images. Returns nil when
+// no comments are archived or none carry an inline image.
+func (s *Service) CommentMediaURLs(postURLPath string) []string {
+	if s.commentStore == nil || postURLPath == "" {
+		return nil
+	}
+	stored, err := s.commentStore.GetLatest(postURLPath)
+	if err != nil || stored == nil || len(stored.JSONData) == 0 {
+		return nil
+	}
+	var comments []reddit.Comment
+	if err := json.Unmarshal(stored.JSONData, &comments); err != nil {
+		return nil
+	}
+	return reddit.ExtractCommentImageURLs(comments)
+}
+
 func (s *Service) ArchiveSubreddit(sub *reddit.Subreddit) {
 	if ctl := s.control.load(); ctl != nil && !ctl.Allow(sub.Name) {
 		return

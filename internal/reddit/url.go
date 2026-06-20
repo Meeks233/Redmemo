@@ -322,6 +322,38 @@ func ExtractBodyImageURLs(bodyHTML string) []string {
 	return urls
 }
 
+// ExtractCommentImageURLs walks a comment tree and returns the original Reddit
+// CDN URLs for every inline image embedded in any comment body — the same
+// harvest ExtractBodyImageURLs performs on a post's selftext, applied to each
+// comment's already-rewritten Body and recursed through Replies.
+//
+// A user can paste an image (preview.redd.it / i.redd.it, signed and
+// short-lived) straight into a reply. It surfaces only in the rendered Body
+// HTML — no structured media field carries it — so unless these URLs are
+// harvested and handed to the media layer, the bytes are never cached and the
+// inline <img> 403s the moment Reddit's `s=` signature expires, leaving a
+// permanent "Sorry, we missed it" placeholder. Comment media is downloaded by
+// L2 (the NP media layer), not at L3 comment-fetch time. Deduped by
+// CanonicalKey (one image arrives under many signed URLs); nil when none found.
+func ExtractCommentImageURLs(comments []Comment) []string {
+	seen := map[string]bool{}
+	var urls []string
+	var walk func([]Comment)
+	walk = func(cs []Comment) {
+		for i := range cs {
+			for _, raw := range ExtractBodyImageURLs(string(cs[i].Body)) {
+				if key := CanonicalKey(raw); !seen[key] {
+					seen[key] = true
+					urls = append(urls, raw)
+				}
+			}
+			walk(cs[i].Replies)
+		}
+	}
+	walk(comments)
+	return urls
+}
+
 // EmbedBodyImages re-applies inline-image embedding to an already-rendered post
 // Body. It exists for the archive render path: posts archived before
 // EmbedCommentImages was wired into ParsePost have a Body whose inline images

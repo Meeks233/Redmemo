@@ -149,6 +149,31 @@ func TestRunL2Wave_NeverFetchesL3(t *testing.T) {
 	}
 }
 
+// TestRunL2Wave_DownloadsCommentMedia pins that L2 — the NP media layer —
+// downloads inline images pasted into a post's archived comment bodies, even
+// for a bare text post that carries no structured media of its own. The comment
+// images reach L2 via the commentMediaFn seam (production: archiver.CommentMediaURLs).
+func TestRunL2Wave_DownloadsCommentMedia(t *testing.T) {
+	post := l3TestPost(t, "text1", false, 50) // self post, no structured media
+	s, _, dl := newL2WaveScheduler(t, "l2", []*store.StoredPost{post})
+	commentImg := "https://preview.redd.it/c1.png?width=640&s=sig"
+	s.commentMediaFn = func(urlPath string) []string {
+		if urlPath == post.URLPath {
+			return []string{commentImg}
+		}
+		return nil
+	}
+
+	if err := s.runL2Wave(context.Background(), "day", "selfhosted", 25, "cycle:1", 1); err != nil {
+		t.Fatalf("runL2Wave returned error: %v", err)
+	}
+
+	calls := dl.getCalls()
+	if len(calls) != 1 || calls[0] != commentImg {
+		t.Fatalf("L2 media downloads = %v, want exactly the comment image %q", calls, commentImg)
+	}
+}
+
 // TestRunL2Wave_DepthNoneSkipsEverything pins that a sub resolved to depth=none
 // downloads no media and fetches no comments even if runL2Wave is invoked
 // directly (a mid-cycle settings flip is the only way to reach it).

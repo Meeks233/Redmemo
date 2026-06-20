@@ -389,3 +389,42 @@ func TestVideoQualityURL(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractCommentImageURLs pins that inline images pasted into comment
+// bodies — including nested replies — are harvested for L2 caching, while
+// non-image links are ignored and the same asset under different signed
+// queries collapses on the canonical key.
+func TestExtractCommentImageURLs(t *testing.T) {
+	comments := []Comment{
+		{
+			Body: template.HTML(`<a href="/preview/pre/top.png?width=640&amp;s=sig1">link</a>`),
+			Replies: []Comment{
+				{Body: template.HTML(`<img src="/img/reply.jpg">`)},
+				// Same asset as the top comment under a different signature — must
+				// collapse on the canonical key, not double-queue.
+				{Body: template.HTML(`<a href="/preview/pre/top.png?width=320&amp;s=sig2">again</a>`)},
+				// A plain reddit permalink must not be harvested as media.
+				{Body: template.HTML(`<a href="/r/sub/comments/x/title">perma</a>`)},
+			},
+		},
+		{Body: template.HTML(`<p>no media here</p>`)},
+	}
+
+	got := ExtractCommentImageURLs(comments)
+	want := []string{
+		"https://preview.redd.it/top.png?width=640&s=sig1",
+		"https://i.redd.it/reply.jpg",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ExtractCommentImageURLs() = %v, want %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("ExtractCommentImageURLs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if got := ExtractCommentImageURLs(nil); got != nil {
+		t.Errorf("ExtractCommentImageURLs(nil) = %v, want nil", got)
+	}
+}
