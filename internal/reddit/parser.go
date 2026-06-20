@@ -111,6 +111,13 @@ func buildPost(d map[string]interface{}) Post {
 	bodyHTML := getString(d, "selftext_html")
 	if bodyHTML != "" {
 		bodyHTML = RewriteURLs(bodyHTML)
+		// An image pasted into a self post's selftext (e.g. a footer
+		// screenshot) arrives as an auto-link whose text equals its href. Inline
+		// it as an <img> — same treatment comment bodies get — so the picture
+		// actually shows instead of a bare /preview/pre/... link the reader has
+		// to click. EmbedCommentImages only touches text==href auto-links, so
+		// user-written labelled links are left alone.
+		bodyHTML = EmbedCommentImages(bodyHTML)
 	}
 
 	// Removed/deleted upstream — set p.Removed so the archive layer skips

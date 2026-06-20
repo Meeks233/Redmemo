@@ -2,6 +2,7 @@ package reddit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,32 @@ func TestParsePost_SelfPost(t *testing.T) {
 	}
 	if post.Score[1] != "42" {
 		t.Errorf("Score raw = %q, want 42", post.Score[1])
+	}
+}
+
+// TestParsePost_SelfPostBodyImageEmbedded pins that an image pasted into a self
+// post's selftext (the "Remove Turnkey footer" case) renders as an inline <img>
+// rather than a bare /preview/pre/... link the reader has to click. Reddit emits
+// it as an auto-link whose visible text equals its href; after RewriteURLs both
+// are local proxy paths and EmbedCommentImages inlines it.
+func TestParsePost_SelfPostBodyImageEmbedded(t *testing.T) {
+	raw := json.RawMessage(`{"kind":"t3","data":{
+		"id":"u9hwfp","title":"Remove Turnkey footer","subreddit":"selfhosted",
+		"is_self":true,"score":2,"num_comments":4,
+		"created_utc":1700000000,"author":"rapturedShadow",
+		"permalink":"/r/selfhosted/comments/u9hwfp/remove_turnkey_footer/",
+		"selftext_html":"<div class=\"md\"><p>footer:</p><p><a href=\"https://preview.redd.it/ahmk357bs38h1.png?width=370&amp;format=png&amp;auto=webp&amp;s=abc\">https://preview.redd.it/ahmk357bs38h1.png?width=370&amp;format=png&amp;auto=webp&amp;s=abc</a></p></div>"
+	}}`)
+	post, err := ParsePost(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body := string(post.Body)
+	if !strings.Contains(body, "<img") {
+		t.Errorf("self-post body image should render as <img>, got: %q", body)
+	}
+	if !strings.Contains(body, `src="/preview/pre/ahmk357bs38h1.png?width=370&amp;format=png&amp;auto=webp&amp;s=abc"`) {
+		t.Errorf("embedded <img> should point at the local proxy path, got: %q", body)
 	}
 }
 
