@@ -219,6 +219,47 @@ func TestExtractMediaItems_ImagePost(t *testing.T) {
 	}
 }
 
+// TestExtractMediaItems_SelfPostBodyImage pins the "Remove Turnkey footer"
+// regression: a self/text post whose only image is a signed preview link pasted
+// into the selftext body. Before the fix ExtractMediaItems returned nothing for
+// such posts, so the archive never cached the bytes and the image 403'd once
+// Reddit's `s=` signature expired. The body carries the local proxy path (post
+// of RewriteURLs) with entity-encoded query, exactly as it is stored.
+func TestExtractMediaItems_SelfPostBodyImage(t *testing.T) {
+	p := &reddit.Post{
+		ID:       "s1",
+		PostType: "self",
+		Body:     `<p>footer:</p><a href="/preview/pre/ahmk357bs38h1.png?width=370&amp;format=png&amp;auto=webp&amp;s=ea1035f1">img</a>`,
+	}
+	items := ExtractMediaItems(p)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 body image item, got %d: %+v", len(items), items)
+	}
+	if items[0].Kind != "image" {
+		t.Errorf("Kind = %q, want image", items[0].Kind)
+	}
+	want := "https://preview.redd.it/ahmk357bs38h1.png?width=370&format=png&auto=webp&s=ea1035f1"
+	if items[0].URL != want {
+		t.Errorf("URL = %q, want %q", items[0].URL, want)
+	}
+}
+
+// TestExtractMediaItems_BodyImageDedupedAgainstMedia ensures a body image that
+// is the same asset as the post's structured Media.URL (different width variant
+// → same canonical key) is not queued twice.
+func TestExtractMediaItems_BodyImageDedupedAgainstMedia(t *testing.T) {
+	p := &reddit.Post{
+		ID:       "s2",
+		PostType: "image",
+		Media:    reddit.Media{URL: "https://preview.redd.it/x.png?width=1080&s=aaa"},
+		Body:     `<a href="/preview/pre/x.png?width=370&amp;s=bbb">thumb</a>`,
+	}
+	items := ExtractMediaItems(p)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item after canonical dedup, got %d: %+v", len(items), items)
+	}
+}
+
 func TestMediaKindSummary(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -362,9 +403,9 @@ func (m *mockPool) setBudget(resetAt time.Time, remaining int) {
 }
 
 type mockDownloader struct {
-	mu         sync.Mutex
-	calls      []string
-	err        error
+	mu           sync.Mutex
+	calls        []string
+	err          error
 	cached       map[string]bool
 	fetching     map[string]bool
 	failedURLs   []string
@@ -1176,18 +1217,18 @@ func TestCursorKey(t *testing.T) {
 
 func TestNormalizeBucket(t *testing.T) {
 	tests := map[string]string{
-		"":             bucketDay,
-		"  ":           bucketDay,
-		"day":          bucketDay,
-		"DAY":          bucketDay,
-		" hour ":       bucketHour,
-		"week":         bucketWeek,
-		"month":        bucketMonth,
-		"year":         bucketYear,
-		"all":          bucketAll,
-		"forever":      bucketDay, // unknown → default
-		"never":        bucketDay,
-		"halfhour":     bucketDay,
+		"":         bucketDay,
+		"  ":       bucketDay,
+		"day":      bucketDay,
+		"DAY":      bucketDay,
+		" hour ":   bucketHour,
+		"week":     bucketWeek,
+		"month":    bucketMonth,
+		"year":     bucketYear,
+		"all":      bucketAll,
+		"forever":  bucketDay, // unknown → default
+		"never":    bucketDay,
+		"halfhour": bucketDay,
 	}
 	for in, want := range tests {
 		if got := normalizeBucket(in); got != want {

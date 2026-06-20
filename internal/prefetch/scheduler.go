@@ -3176,6 +3176,26 @@ func ExtractMediaItems(p *reddit.Post) []mediaItem {
 			items = append(items, mediaItem{URL: reddit.UnformatURL(p.Gallery[i].URL), Kind: "gallery"})
 		}
 	}
+	// Images pasted directly into a self post's selftext (e.g. a footer
+	// screenshot) live only in the rendered body HTML, not in the structured
+	// Media/Gallery/Thumbnail fields above. Harvest them so the archive caches
+	// the bytes while Reddit's signed preview URL is still valid — otherwise the
+	// inline image 403s once the `s=` signature expires and the post renders a
+	// permanent "Sorry, we missed it" placeholder. Skip any that duplicate a URL
+	// already queued above (canonicalisation collapses them anyway, but this
+	// keeps the per-post media-kind summary honest).
+	if p.Body != "" {
+		seen := make(map[string]bool, len(items))
+		for _, it := range items {
+			seen[reddit.CanonicalKey(it.URL)] = true
+		}
+		for _, raw := range reddit.ExtractBodyImageURLs(string(p.Body)) {
+			if key := reddit.CanonicalKey(raw); !seen[key] {
+				seen[key] = true
+				items = append(items, mediaItem{URL: raw, Kind: "image"})
+			}
+		}
+	}
 	return items
 }
 

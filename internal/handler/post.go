@@ -568,6 +568,12 @@ func (h *Handler) reviveMediaForPost(urlPath string) {
 			urls = append(urls, u)
 		}
 	}
+	// Images pasted into the selftext body (e.g. a footer screenshot) are
+	// marked unavailable on the same ledger as structured media but live only
+	// in the rendered body HTML — without reviving them here the "Reopen the
+	// post to retry" hint on their placeholder would be a dead end. Mirrors the
+	// body-image harvest in prefetch.ExtractMediaItems.
+	urls = append(urls, reddit.ExtractBodyImageURLs(string(post.Body))...)
 	h.mediaProxy.ReviveMedia(urls)
 }
 

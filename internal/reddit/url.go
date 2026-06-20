@@ -2,6 +2,7 @@ package reddit
 
 import (
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -275,6 +276,49 @@ func EmbedCommentImages(body string) string {
 		}
 		return fmt.Sprintf(`<a href="%s" target="_blank" rel="nofollow noopener" class="comment_image"><img loading="lazy" alt="Comment image" src="%s"></a>`, m[1], m[1])
 	})
+}
+
+// bodyImageRe matches local image proxy paths that RewriteURLs has already
+// inlined into rendered post/comment body HTML — an image pasted into a self
+// post's selftext (or a comment) surfaces as an href/src pointing at /img/,
+// /preview/pre/, or /preview/external-pre/. These inline body images are NOT
+// represented in a post's structured Media/Gallery/Thumbnail fields, so the
+// archive layer never learns about them from ExtractMediaItems. Harvesting them
+// here lets the cache fetch the bytes while Reddit's signed preview URL is still
+// fresh; without it a self post's footer/inline image 403s the moment the `s=`
+// signature expires (preview.redd.it URLs are short-lived) and the viewer sees
+// the "Sorry, we missed it" placeholder for an asset we could have kept.
+var bodyImageRe = regexp.MustCompile(`(?:href|src)="(/(?:img|preview/pre|preview/external-pre)/[^"]+)"`)
+
+// ExtractBodyImageURLs returns the original Reddit CDN URLs for every inline
+// image embedded in rendered body HTML (post selftext or comment body). Each
+// match is HTML-unescaped (the rewritten body still carries &amp; entities in
+// the signed query) and run back through UnformatURL so the result matches the
+// raw URL the media proxy fetches and keys the cache on. Duplicates and any
+// path that doesn't map to a known CDN prefix are dropped.
+func ExtractBodyImageURLs(bodyHTML string) []string {
+	if bodyHTML == "" {
+		return nil
+	}
+	ms := bodyImageRe.FindAllStringSubmatch(bodyHTML, -1)
+	if len(ms) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(ms))
+	var urls []string
+	for _, m := range ms {
+		raw := UnformatURL(html.UnescapeString(m[1]))
+		// UnformatURL returns the input unchanged for an unknown prefix; the
+		// regex already pins us to /img|/preview, so a still-local path here
+		// means a malformed match — skip it rather than feed the proxy a
+		// non-URL it would reject as a disallowed host.
+		if raw == "" || strings.HasPrefix(raw, "/") || seen[raw] {
+			continue
+		}
+		seen[raw] = true
+		urls = append(urls, raw)
+	}
+	return urls
 }
 
 // RewriteEmotes rewrites emote references in comment body HTML using media_metadata.

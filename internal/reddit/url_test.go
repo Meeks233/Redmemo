@@ -265,6 +265,73 @@ func TestEmbedCommentImages_IRedditImg(t *testing.T) {
 	}
 }
 
+func TestExtractBodyImageURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "empty body",
+			body: "",
+			want: nil,
+		},
+		{
+			name: "no images",
+			body: `<p>just some <a href="/r/golang">text</a></p>`,
+			want: nil,
+		},
+		{
+			// The reported "Remove Turnkey footer" case: a signed preview link
+			// pasted into a self post's selftext. The rewritten body still
+			// carries &amp; entities in the query; we must un-escape them so the
+			// reconstructed CDN URL matches what the proxy actually fetches.
+			name: "preview footer image with entity-encoded query",
+			body: `<p>footer:</p>` +
+				`<a href="/preview/pre/ahmk357bs38h1.png?width=370&amp;format=png&amp;auto=webp&amp;s=ea1035f1">link</a>`,
+			want: []string{"https://preview.redd.it/ahmk357bs38h1.png?width=370&format=png&auto=webp&s=ea1035f1"},
+		},
+		{
+			name: "img src and external-preview",
+			body: `<img src="/img/foo.png"> and ` +
+				`<a href="/preview/external-pre/bar.jpg?s=z">x</a>`,
+			want: []string{
+				"https://i.redd.it/foo.png",
+				"https://external-preview.redd.it/bar.jpg?s=z",
+			},
+		},
+		{
+			// Same asset under two width variants collapses on the canonical
+			// key, but ExtractBodyImageURLs itself only de-dups exact raw URLs;
+			// distinct queries are distinct raws (both worth fetching — the
+			// store's variant-upgrade rule keeps the bigger). Exact dupes drop.
+			name: "exact duplicate dropped",
+			body: `<a href="/img/dup.png">a</a><a href="/img/dup.png">b</a>`,
+			want: []string{"https://i.redd.it/dup.png"},
+		},
+		{
+			// A non-image proxy link (a rewritten reddit.com permalink) must not
+			// be harvested as cacheable media.
+			name: "non-image local link ignored",
+			body: `<a href="/r/sub/comments/abc/title">perma</a>`,
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractBodyImageURLs(tt.body)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ExtractBodyImageURLs() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("ExtractBodyImageURLs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestRewriteEmotes_Empty(t *testing.T) {
 	result := RewriteEmotes(nil, "no emotes here")
 	if result != "no emotes here" {
