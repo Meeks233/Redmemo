@@ -336,7 +336,7 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 			<a id="post_url" href={ templ.URL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
 		}
 		<div class="post_body">
-			@templ.Raw(string(post.Body))
+			@templ.Raw(embedBody(post.Body))
 			@poll(post.Poll)
 		</div>
 		<div class="post_score" title={ post.Score[1] }>

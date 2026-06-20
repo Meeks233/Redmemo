@@ -32,7 +32,7 @@ templ searchPostList(posts []reddit.Post, prefs reddit.Preferences, lazy bool) {
 						<a class="comment_link" href={ templ.SafeURL(p.Permalink) }>{ T(ctx, "search.comment_link") }</a>
 						<span class="created" title={ p.Created }>{ p.RelTime }</span>
 					</summary>
-					<p class="comment_body">@templ.Raw(string(p.Body))</p>
+					<p class="comment_body">@templ.Raw(embedBody(p.Body))</p>
 				</details>
 			</div>
 		}

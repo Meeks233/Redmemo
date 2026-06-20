@@ -593,12 +593,10 @@ func (h *Handler) renderPostFromArchive(w http.ResponseWriter, r *http.Request, 
 	if sp.UpstreamRemoved {
 		post.Removed = true
 	}
-	// Retroactively embed inline body images for posts archived before the
-	// selftext-image embedding was wired into ParsePost. The stored Body is
-	// served verbatim (we don't re-parse on view), so without this an old self
-	// post's footer image stays a bare /preview/pre/... link. Idempotent for
-	// bodies already embedded by the current parser.
-	post.Body = reddit.EmbedBodyImages(post.Body)
+	// NOTE: inline body-image embedding (turning a stored /preview/pre auto-link
+	// into an <img>) happens at the render-layer chokepoint render.embedBody, so
+	// every post-body surface — detail page, listing cards, search, user — is
+	// covered uniformly. Don't re-embed here.
 
 	var comments []reddit.Comment
 	stored, _ := h.commentStore.GetLatest(sp.URLPath)

@@ -50,7 +50,7 @@ templ commentTree(c reddit.Comment) {
 				if c.IsFiltered {
 					<div class={ "comment_body_filtered", templ.KV("highlighted", c.Highlighted) }>{ T(ctx, "comment.filtered") }</div>
 				} else {
-					<div class={ "comment_body", templ.KV("highlighted", c.Highlighted) }>@templ.Raw(string(c.Body))</div>
+					<div class={ "comment_body", templ.KV("highlighted", c.Highlighted) }>@templ.Raw(embedBody(c.Body))</div>
 				}
 				<blockquote class="replies">
 					for _, r := range c.Replies {

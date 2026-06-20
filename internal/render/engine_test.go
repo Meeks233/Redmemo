@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"html/template"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -125,6 +126,39 @@ func TestRenderSubreddit(t *testing.T) {
 	}
 	if !strings.Contains(html, "TestBrand") {
 		t.Error("output should contain brand name")
+	}
+}
+
+// TestRenderSubredditEmbedsBodyImage pins that a self post whose stored Body is
+// a bare /preview/pre auto-link (e.g. an archived post that pre-dates parser-side
+// embedding) renders as an inline <img> in the LISTING card, not a clickable
+// link. Regression for the home/subreddit preview still showing a link after the
+// detail page was fixed — embedBody must run on every post-body surface.
+func TestRenderSubredditEmbedsBodyImage(t *testing.T) {
+	e := newTestEngine(t)
+	var buf bytes.Buffer
+
+	linkForm := `<p><a href="/preview/pre/ahmk357bs38h1.png?width=370&amp;s=z">/preview/pre/ahmk357bs38h1.png?width=370&amp;s=z</a></p>`
+	data := SubredditPageData{
+		BasePage: BasePage{URL: "/r/golang", BrandName: "TestBrand", Version: "0.1.0"},
+		Sub:      reddit.Subreddit{Name: "golang"},
+		Posts: []reddit.Post{{
+			ID: "abc123", Title: "Footer post", Community: "golang", PostType: "self",
+			Score: [2]string{"1", "1"}, Comments: [2]string{"0", "0"},
+			Author: reddit.Author{Name: "u"}, RelTime: "2h ago",
+			Body: template.HTML(linkForm),
+		}},
+		Sort: [2]string{"hot", ""},
+	}
+	if err := e.RenderSubreddit(&buf, data); err != nil {
+		t.Fatalf("RenderSubreddit() error: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, "<img") || !strings.Contains(html, `class="comment_image"`) {
+		t.Errorf("listing card should embed the body image as <img>, got body region without it")
+	}
+	if strings.Contains(html, `>/preview/pre/ahmk357bs38h1.png`) {
+		t.Errorf("listing card still shows the bare /preview/pre link text instead of an image")
 	}
 }
 

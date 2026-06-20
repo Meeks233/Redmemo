@@ -75,7 +75,7 @@ templ userBody(d UserPageData) {
 												<span class="created" title={ p.Created }>&nbsp;{ p.RelTime }</span>
 											</div>
 										</summary>
-										<p class="comment_body">@templ.Raw(string(p.Body))</p>
+										<p class="comment_body">@templ.Raw(embedBody(p.Body))</p>
 									</details>
 								</div>
 							}

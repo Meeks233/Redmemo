@@ -480,6 +480,15 @@ const previewExpandThreshold = 600
 // preview clip (.post_preview, max-height:250px) is likely to truncate it.
 func isLongBody(body template.HTML) bool { return len(body) > previewExpandThreshold }
 
+// embedBody is the single render-time chokepoint for a post's selftext body: it
+// turns inline image auto-links (/preview/pre, /img, ...) into <img> tags so a
+// self post's pasted image shows as a picture everywhere it's rendered —
+// listing cards, detail page, search, and user pages alike. Archived posts are
+// deserialized straight from stored JSON (ParsePost does not re-run), so without
+// embedding here their bodies would still render the bare link. Idempotent: a
+// body already embedded by the parser passes through unchanged.
+func embedBody(body template.HTML) string { return string(reddit.EmbedBodyImages(body)) }
+
 // postPreview renders the listing-card text body. For bodies long enough to be
 // clipped by .post_preview it wraps the body in a pure-CSS, no-JS expander: a
 // hidden checkbox plus a chevron <label>. Clicking the label toggles the
@@ -490,13 +499,13 @@ templ postPreview(post reddit.Post) {
 	if isLongBody(post.Body) {
 		<div class="post_body_wrap">
 			<input type="checkbox" id={ "expand-" + post.ID } class="post_expand_toggle"/>
-			<div class="post_body post_preview post_clipped">@templ.Raw(string(post.Body))</div>
+			<div class="post_body post_preview post_clipped">@templ.Raw(embedBody(post.Body))</div>
 			<label for={ "expand-" + post.ID } class="post_expand_label" aria-label={ T(ctx, "post.expand") }>
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"></path></svg>
 			</label>
 		</div>
 	} else {
-		<div class="post_body post_preview">@templ.Raw(string(post.Body))</div>
+		<div class="post_body post_preview">@templ.Raw(embedBody(post.Body))</div>
 	}
 }
 
