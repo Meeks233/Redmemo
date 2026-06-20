@@ -3,6 +3,7 @@ package reddit
 import (
 	"fmt"
 	"html"
+	"html/template"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -319,6 +320,18 @@ func ExtractBodyImageURLs(bodyHTML string) []string {
 		urls = append(urls, raw)
 	}
 	return urls
+}
+
+// EmbedBodyImages re-applies inline-image embedding to an already-rendered post
+// Body. It exists for the archive render path: posts archived before
+// EmbedCommentImages was wired into ParsePost have a Body whose inline images
+// are still bare /preview/pre/... auto-links, and the stored Body is served
+// verbatim (ParsePost does not re-run on view). Calling this at render time
+// retroactively turns those auto-links into <img> without re-archiving.
+// Idempotent — EmbedCommentImages only matches text==href auto-links, so a Body
+// already embedded (or freshly parsed) passes through unchanged.
+func EmbedBodyImages(body template.HTML) template.HTML {
+	return template.HTML(EmbedCommentImages(string(body)))
 }
 
 // RewriteEmotes rewrites emote references in comment body HTML using media_metadata.

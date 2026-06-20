@@ -1,6 +1,7 @@
 package reddit
 
 import (
+	"html/template"
 	"strings"
 	"testing"
 )
@@ -329,6 +330,20 @@ func TestExtractBodyImageURLs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestEmbedBodyImages_RetroAndIdempotent(t *testing.T) {
+	// Old archived self-post Body: a bare /preview/pre auto-link (text==href).
+	old := `<p>footer:</p><a href="/preview/pre/ahmk357bs38h1.png?width=370&amp;s=z">/preview/pre/ahmk357bs38h1.png?width=370&amp;s=z</a>`
+	embedded := string(EmbedBodyImages(template.HTML(old)))
+	if !strings.Contains(embedded, "<img") || !strings.Contains(embedded, `class="comment_image"`) {
+		t.Fatalf("archived auto-link should embed <img>, got: %q", embedded)
+	}
+	// Idempotent: running it again must not double-wrap or change the output.
+	again := string(EmbedBodyImages(template.HTML(embedded)))
+	if again != embedded {
+		t.Errorf("EmbedBodyImages not idempotent:\n first: %q\nsecond: %q", embedded, again)
 	}
 }
 
