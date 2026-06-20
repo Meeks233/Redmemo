@@ -25,6 +25,18 @@ type Config struct {
 	HRLimit   HRLimitConfig   `yaml:"hrlimit"`
 	Render    RenderConfig    `yaml:"render"`
 	SEO       SEOConfig       `yaml:"seo"`
+	Unfurl    UnfurlConfig    `yaml:"unfurl"`
+}
+
+// UnfurlConfig controls link-preview cards for external links in post/comment
+// bodies. Enabled drives the whole feature; JinaFallback opts into the
+// r.jina.ai reader as a last-resort fetcher for links a direct OpenGraph crawl
+// can't reach (anti-bot interstitials) — it sends the link URL to a third party,
+// so it is a separate, explicit opt-in from the privacy-preserving direct fetch.
+type UnfurlConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	JinaFallback bool          `yaml:"jina_fallback"`
+	Timeout      time.Duration `yaml:"timeout"`
 }
 
 // SEOConfig controls how the instance presents itself to search engines.
@@ -185,6 +197,11 @@ func defaults() *Config {
 		Render: RenderConfig{
 			BrandName:        "RedMemo",
 			ShowArchiveBadge: true,
+		},
+		Unfurl: UnfurlConfig{
+			Enabled:      true,
+			JinaFallback: true,
+			Timeout:      8 * time.Second,
 		},
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/redmemo/redmemo/internal/reddit"
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
+	"github.com/redmemo/redmemo/internal/unfurl"
 	"github.com/redmemo/redmemo/internal/versionintel"
 )
 
@@ -263,6 +264,21 @@ func main() {
 	// defer, nothing the gate would protect.
 	renderer.SetMediaCachedFn(mediaProxy.IsCached)
 
+	// Link-preview unfurling: external links in post/comment bodies are marked
+	// for lazy, client-driven preview cards. The body just carries data-unfurl
+	// hints; the browser asks /api/unfurl (served by this Service) for one
+	// preview at a time as cards scroll into view, and loads preview images/video
+	// directly. The Service holds the cache, single-flight, SSRF guard, and
+	// outbound concurrency cap. nil when the operator disables the feature.
+	var unfurlSvc *unfurl.Service
+	if cfg.Unfurl.Enabled {
+		unfurlSvc = unfurl.New(store.NewLinkPreviewStore(db), unfurl.Config{
+			Enabled:      cfg.Unfurl.Enabled,
+			JinaFallback: cfg.Unfurl.JinaFallback,
+			Timeout:      cfg.Unfurl.Timeout,
+		})
+	}
+
 	archiver := archive.NewService(postStore, commentStore, subStore)
 	subStatusStore := store.NewSubStatusStore(db)
 	archiver.SetSubStatusStore(subStatusStore)
@@ -298,7 +314,7 @@ func main() {
 		hrLimiter, redisCache, renderer, redditCli, publicCli, oauthHolder,
 		postStore, commentStore, subStore, mediaIndexStore, settingsStore,
 		mediaProxy, archiver, prefetcher, evictor, subStatusStore, subIconStore, cfg,
-	).WithAuth(authMgr)
+	).WithAuth(authMgr).WithUnfurl(unfurlSvc)
 
 	srv := &http.Server{
 		Addr:         cfg.Server.Listen,

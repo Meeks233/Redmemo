@@ -105,3 +105,16 @@ render:
 seo:
   allow_indexing: false
   canonical_host: ""
+
+# Link previews — Telegram-style "unfurl" of bare external links in post and
+# comment bodies into a card (OpenGraph/Twitter-card title, description, image).
+# enabled drives the whole feature. jina_fallback opts into the r.jina.ai reader
+# as a last-resort fetcher for links a direct OpenGraph crawl can't reach
+# (Cloudflare/anti-bot interstitials, e.g. Stack Overflow) — it sends the link
+# URL to a third party, so it is a separate opt-in from the privacy-preserving
+# direct fetch (X/Twitter use the fxtwitter/fixupx mirror, no extra opt-in).
+# timeout bounds each per-link fetch. See docs/Link-Preview.md.
+unfurl:
+  enabled: true
+  jina_fallback: true
+  timeout: 8s

@@ -721,6 +721,34 @@ var migrations = []string{
 	// UA is freely spoofable. Nullable, no backfill: existing rows show "—" until
 	// their cookie is next presented, at which point Check stamps the current UA.
 	`ALTER TABLE trusted_devices ADD COLUMN IF NOT EXISTS ua TEXT;`,
+
+	// v38: cached external-link previews. Each external link in a post/comment
+	// body is unfurled once (OpenGraph/Twitter-card fetch, with a fxtwitter and
+	// Jina-reader fallback chain — see internal/unfurl) and the resulting card
+	// metadata persisted here, keyed by the link's CanonicalKey. status='ok'
+	// rows render a card; status='failed' rows are negative-cache entries that
+	// stop us re-fetching a link that can't be unfurled on every page view.
+	// fetched_at drives the freshness window so titles/images eventually refresh
+	// and failed links are eventually retried.
+	`CREATE TABLE IF NOT EXISTS link_preview (
+		url_key     TEXT PRIMARY KEY,
+		url         TEXT NOT NULL,
+		title       TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		image_url   TEXT NOT NULL DEFAULT '',
+		site_name   TEXT NOT NULL DEFAULT '',
+		status      TEXT NOT NULL DEFAULT 'ok',
+		fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`,
+
+	// v39: card display variants for the lazy link-preview layer. image_wide
+	// flags a "summary_large_image" preview (GitHub repo card, news hero) that
+	// renders as a full-width banner instead of a small logo thumbnail; video_url
+	// carries a playable embed (X/Twitter via fixupx's og:video) the viewer's
+	// browser streams directly. Both default empty/false so pre-v39 rows behave
+	// as compact image/text cards until they next refresh.
+	`ALTER TABLE link_preview ADD COLUMN IF NOT EXISTS image_wide BOOLEAN NOT NULL DEFAULT FALSE;
+	 ALTER TABLE link_preview ADD COLUMN IF NOT EXISTS video_url  TEXT    NOT NULL DEFAULT '';`,
 }
 
 // migrationAdvisoryLockKey is an arbitrary constant identifying the migration

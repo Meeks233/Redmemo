@@ -46,6 +46,7 @@ func buildMediaBundle() []byte {
 		"static/scrollReveal.js",
 		"static/galleryNav.js",
 		"static/expandAnchor.js",
+		"static/linkPreview.js",
 	}
 	var buf []byte
 	for _, p := range parts {

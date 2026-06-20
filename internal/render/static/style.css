@@ -1826,6 +1826,169 @@ video.lazy-media:not([src]) {
     margin-right: auto;
 }
 
+/* Link-preview cards: the Discord/Telegram-style "social card" unfurl of a bare
+   external link in a post or comment body, built lazily on the client by
+   linkPreview.js once the link scrolls into view. Three display variants mirror
+   the OpenGraph card types:
+     --small : compact card, square logo/favicon thumbnail on the left (a site
+               with only an icon, e.g. Stack Overflow's apple-touch-icon);
+     --large : "summary_large_image" — a full-width banner image on top, text
+               below (GitHub's 1280×640 repo card, news hero shots);
+     --video : a full-width playable embed on top (X/Twitter via fixupx), the
+               browser streams it directly;
+     --text  : no media, text only.
+   Themed purely with the portable theme vars: surface + neutral border are a
+   translucent wash of --text (which always contrasts with the background by
+   design — unlike --foreground, which equals the background on OLED/black
+   themes), so every built-in theme gets a visible card with no per-theme rules.
+   The accent left edge is the one solid brand colour. */
+.link-preview,
+.comment_body a.link-preview,
+.post_body a.link-preview {
+    display: flex;
+    width: 100%;
+    margin: 10px 0;
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+    color: var(--text);
+    text-decoration: none;
+    box-shadow: var(--shadow, 0 1px 3px rgba(0, 0, 0, 0.25));
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* Per-variant sizing. Compact (thumbnail-left) stays a small fixed card; the
+   image variants stack vertically and FILL the body column (max-width: 100%) so
+   the wide banner shows large and no dead space is left to the right of the card
+   — matching the comment text width. The triple selector keeps these at the same
+   specificity as the base box rule so the max-width override always lands. */
+.link-preview--small,
+.comment_body a.link-preview--small,
+.post_body a.link-preview--small {
+    flex-direction: row;
+    align-items: stretch;
+    max-width: 460px;
+}
+.link-preview--large,
+.comment_body a.link-preview--large,
+.post_body a.link-preview--large,
+.link-preview--video,
+.comment_body a.link-preview--video,
+.post_body a.link-preview--video,
+.link-preview--text,
+.comment_body a.link-preview--text,
+.post_body a.link-preview--text {
+    flex-direction: column;
+}
+
+/* Banner cards (large/video) get a tighter desktop cap so the preview image
+   stays modest — the aspect-ratio on the media keeps it scaled in proportion.
+   Fills the column on narrow/mobile. */
+.link-preview--large,
+.comment_body a.link-preview--large,
+.post_body a.link-preview--large,
+.link-preview--video,
+.comment_body a.link-preview--video,
+.post_body a.link-preview--video {
+    max-width: min(100%, 440px);
+}
+
+/* Text-only cards have no banner to shrink; allow a touch more width. */
+.link-preview--text,
+.comment_body a.link-preview--text,
+.post_body a.link-preview--text {
+    max-width: min(100%, 520px);
+}
+
+.link-preview:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--text) 11%, transparent);
+    text-decoration: none;
+}
+
+/* The `.link-preview` ancestor raises max-width to specificity (0,2,0) so it
+   beats the body-wide `.comment img { max-width: 50% }` rule that otherwise
+   crushed the banner to half the card width. */
+.link-preview .link-preview-media {
+    display: block;
+    max-width: 100%;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* Small: fixed square thumbnail that stretches to the card's height. */
+.link-preview--small .link-preview-media {
+    flex: 0 0 auto;
+    width: 84px;
+    align-self: stretch;
+    object-fit: cover;
+}
+
+/* Large / video: full-width banner. aspect-ratio gives a stable box before the
+   image loads (no layout jump); the wide GitHub/Twitter card fills it instead of
+   being crushed into a tiny square. */
+.link-preview--large .link-preview-media {
+    width: 100%;
+    aspect-ratio: 1200 / 630;
+    max-height: 232px;
+    object-fit: cover;
+}
+
+.link-preview--video .link-preview-media {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 248px;
+    object-fit: contain;
+    background: #000;
+}
+
+.link-preview-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 14px;
+    line-height: 1.3;
+}
+
+/* The `.link-preview` ancestor qualifier raises these to specificity (0,2,0),
+   which beats the markdown body's `.md a, .md a *` rule (0,1,1) that otherwise
+   paints every descendant of a body anchor in --accent and underlines it. */
+.link-preview .link-preview-site {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.link-preview .link-preview-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.link-preview .link-preview-desc {
+    font-size: 12.5px;
+    color: var(--text);
+    opacity: 0.7;
+    text-decoration: none;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
 .post_poll {
     grid-area: post_poll;
     padding: 5px 15px 5px 12px;

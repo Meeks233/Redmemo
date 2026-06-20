@@ -17,6 +17,7 @@ import (
 	"github.com/redmemo/redmemo/internal/render"
 	"github.com/redmemo/redmemo/internal/store"
 	"github.com/redmemo/redmemo/internal/transport"
+	"github.com/redmemo/redmemo/internal/unfurl"
 )
 
 type Handler struct {
@@ -53,7 +54,10 @@ type Handler struct {
 	siteDefaults   map[string]string
 	siteDefaultsMu sync.RWMutex
 	auth           *AuthManager
-	stats         statsCache
+	// unfurl resolves external link previews for the lazy /api/unfurl endpoint.
+	// nil when the feature is disabled — the endpoint then 404-equivalents.
+	unfurl *unfurl.Service
+	stats  statsCache
 	// upstreamFlight coalesces concurrent identical Reddit fetches so N parallel
 	// requests for the same /r/sub/sort page (or /comments/id) only spend one
 	// OAuth quota unit. See singleflight.go.
@@ -65,6 +69,13 @@ type Handler struct {
 // requireSettingsAuth will fail closed.
 func (h *Handler) WithAuth(a *AuthManager) *Handler {
 	h.auth = a
+	return h
+}
+
+// WithUnfurl wires the lazy link-preview service used by GET /api/unfurl. nil
+// (feature disabled) leaves the endpoint returning a "failed" status.
+func (h *Handler) WithUnfurl(u *unfurl.Service) *Handler {
+	h.unfurl = u
 	return h
 }
 
@@ -168,6 +179,11 @@ func (h *Handler) Routes() http.Handler {
 
 	// Media proxy
 	mux.HandleFunc("GET /proxy/media", h.handleMedia)
+
+	// Lazy link-preview metadata (JSON). The browser hits this one link at a
+	// time as a card scrolls into view; preview images/video are loaded directly
+	// by the client, never proxied through here.
+	mux.HandleFunc("GET /api/unfurl", h.handleUnfurl)
 
 	// Image CDN Proxy
 	mux.HandleFunc("GET /img/", h.handleImageProxy)

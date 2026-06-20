@@ -1,6 +1,7 @@
 package render
 
 import (
+	"context"
 	"encoding/json"
 	"html/template"
 	"strconv"
@@ -487,7 +488,12 @@ func isLongBody(body template.HTML) bool { return len(body) > previewExpandThres
 // deserialized straight from stored JSON (ParsePost does not re-run), so without
 // embedding here their bodies would still render the bare link. Idempotent: a
 // body already embedded by the parser passes through unchanged.
-func embedBody(body template.HTML) string { return string(reddit.EmbedBodyImages(body)) }
+// embedBody also marks every bare external auto-link for lazy, client-side
+// preview-card upgrading (see preview.go / linkPreview.js); links pass through
+// as plain anchors until the browser unfurls them on scroll.
+func embedBody(ctx context.Context, body template.HTML) string {
+	return markLazyLinks(ctx, string(reddit.EmbedBodyImages(body)))
+}
 
 // postPreview renders the listing-card text body. For bodies long enough to be
 // clipped by .post_preview it wraps the body in a pure-CSS, no-JS expander: a
@@ -499,13 +505,13 @@ templ postPreview(post reddit.Post) {
 	if isLongBody(post.Body) {
 		<div class="post_body_wrap">
 			<input type="checkbox" id={ "expand-" + post.ID } class="post_expand_toggle"/>
-			<div class="post_body post_preview post_clipped">@templ.Raw(embedBody(post.Body))</div>
+			<div class="post_body post_preview post_clipped">@templ.Raw(embedBody(ctx, post.Body))</div>
 			<label for={ "expand-" + post.ID } class="post_expand_label" aria-label={ T(ctx, "post.expand") }>
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"></path></svg>
 			</label>
 		</div>
 	} else {
-		<div class="post_body post_preview">@templ.Raw(embedBody(post.Body))</div>
+		<div class="post_body post_preview">@templ.Raw(embedBody(ctx, post.Body))</div>
 	}
 }
 
