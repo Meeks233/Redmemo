@@ -16,6 +16,92 @@
 	var gen = 0;
 	var pending429 = null;
 
+	// --- View restoration -------------------------------------------------
+	// Clicking a post is a full-page navigation; pressing Back would otherwise
+	// reload the listing fresh, discarding every infinitely-scrolled post and
+	// resetting the scroll position. Two layers keep the view intact:
+	//   1. The browser back/forward cache (bfcache) restores the live page as-is
+	//      when eligible — nothing for us to do (the script does not re-run).
+	//   2. When bfcache misses, we re-render from a sessionStorage snapshot that
+	//      we write on pagehide. Restoring from storage also spares the backend
+	//      the work of re-fetching every page the user had already scrolled.
+	var SNAP_TTL = 30 * 60 * 1000; // 30 min — stale snapshots are ignored.
+
+	function snapKey() {
+		return 'rm:scroll:' + location.pathname + location.search;
+	}
+
+	function navType() {
+		try {
+			var nav = performance.getEntriesByType('navigation')[0];
+			if (nav && nav.type) return nav.type; // navigate | reload | back_forward | prerender
+		} catch (e) {}
+		// Legacy fallback (deprecated performance.navigation).
+		if (performance.navigation) {
+			if (performance.navigation.type === 2) return 'back_forward';
+			if (performance.navigation.type === 1) return 'reload';
+		}
+		return 'navigate';
+	}
+
+	function saveSnapshot() {
+		try {
+			sessionStorage.setItem(snapKey(), JSON.stringify({
+				html: posts.innerHTML,
+				offset: offset,
+				sort: sort,
+				done: done,
+				scrollY: window.scrollY || window.pageYOffset || 0,
+				ts: Date.now()
+			}));
+		} catch (e) {}
+	}
+
+	function restoreScroll(y) {
+		if (!y) return;
+		// Media is lazy-loaded, so document height grows after restore; keep
+		// re-applying the target until it sticks (or content can't reach it).
+		var attempts = 0;
+		function set() {
+			window.scrollTo(0, y);
+			attempts++;
+			if (Math.abs((window.scrollY || window.pageYOffset || 0) - y) > 2 && attempts < 40) {
+				window.requestAnimationFrame(set);
+			}
+		}
+		set();
+		window.addEventListener('load', function () { window.scrollTo(0, y); }, { once: true });
+	}
+
+	function tryRestore() {
+		if (navType() !== 'back_forward') return false;
+		var raw;
+		try { raw = sessionStorage.getItem(snapKey()); } catch (e) { return false; }
+		if (!raw) return false;
+		var snap;
+		try { snap = JSON.parse(raw); } catch (e) { return false; }
+		if (!snap || !snap.html || (Date.now() - (snap.ts || 0)) > SNAP_TTL) return false;
+		posts.innerHTML = snap.html;
+		if (typeof snap.offset === 'number') offset = snap.offset;
+		if (snap.sort) sort = snap.sort;
+		done = !!snap.done;
+		if (done && endMsg) endMsg.style.display = '';
+		restoreScroll(snap.scrollY || 0);
+		return true;
+	}
+
+	// Let us own scroll position on back/forward; the browser's own guess fights
+	// the snapshot restore on a page whose height changes after re-render.
+	if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+	window.addEventListener('pagehide', saveSnapshot);
+	// Safari may not fire pagehide reliably; persist when the tab is hidden too.
+	document.addEventListener('visibilitychange', function () {
+		if (document.visibilityState === 'hidden') saveSnapshot();
+	});
+
+	tryRestore();
+	// ---------------------------------------------------------------------
+
 	function buildURL(off, sortOverride) {
 		var parts = [];
 		if (extraQS) parts.push(extraQS);
