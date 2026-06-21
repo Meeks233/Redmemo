@@ -1869,6 +1869,16 @@ video.lazy-media:not([src]) {
     flex-direction: row;
 }
 
+/* Media banner: a wide preview image (GitHub repo card, news hero) spans the
+   full card width on top, meta below — the "summary_large_image" layout, sized
+   bigger than the compact logo card so a real preview reads as a real preview. */
+.link-preview--media,
+.comment_body a.link-preview--media,
+.post_body a.link-preview--media {
+    flex-direction: column;
+    max-width: min(100%, 480px);
+}
+
 /* Video: player on top, meta below. */
 .link-preview--video,
 .comment_body a.link-preview--video,
@@ -1922,6 +1932,19 @@ video.lazy-media:not([src]) {
     flex: 0 0 auto;
     width: 96px;
     align-self: stretch;
+    object-fit: cover;
+}
+
+/* Media banner image: fill the card width; height follows the inline aspect-ratio
+   JS stamps from the real loaded pixels so the banner keeps the image's natural
+   proportions with no crop. The 1.91 default holds a sensible box until it loads,
+   and max-height caps an unusually tall landscape so the card never dominates. */
+.link-preview--media .link-preview-media {
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    max-height: 340px;
+    aspect-ratio: 1.91;
     object-fit: cover;
 }
 

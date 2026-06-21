@@ -161,13 +161,36 @@
     if (w && h) m.style.aspectRatio = w + " / " + h;
   }
 
+  // applyImageVariant makes the FINAL big-vs-small call from the real loaded
+  // pixels (the only fully reliable signal — server isWideImage only seeds the
+  // pre-load placeholder to avoid a flip). A wide landscape preview (GitHub's
+  // 1280×640 repo card, a news hero shot) becomes a full-width banner (--media);
+  // a small square favicon / site logo (Stack Overflow's apple-touch-icon) stays
+  // a compact thumbnail row (--card). Square-but-large og:images stay compact too
+  // — only a clearly landscape image earns the banner, so a logo never balloons.
+  var BANNER_MIN_LONG = 400; // a banner image's longer side must clear this
+  var BANNER_MIN_RATIO = 1.3; // …and it must be at least this much wider than tall
+  function applyImageVariant(a, img, w, h) {
+    if (!w || !h) return;
+    a.classList.remove("link-preview--media", "link-preview--card");
+    if (w / h >= BANNER_MIN_RATIO && Math.max(w, h) >= BANNER_MIN_LONG) {
+      a.classList.add("link-preview--media");
+      img.style.aspectRatio = w + " / " + h; // hold the banner box; height follows width
+    } else {
+      a.classList.add("link-preview--card");
+      img.style.aspectRatio = "";
+    }
+  }
+
   function buildCard(data, href) {
-    // Every link unfurls into ONE compact "intel" card — the industry-standard
-    // inline embed (Discord/Slack/Telegram): a small square thumbnail on the left,
-    // meta on the right. A playable clip is the lone exception (--video) and keeps
-    // the player on top. No more giant full-bleed media cards, no tiny→big flip.
+    // Each link unfurls into one of three card shapes: a playable clip keeps the
+    // player on top (--video); an image-bearing link splits big-vs-small — a wide
+    // GitHub/news preview banners full-width (--media), a bare logo/favicon stays a
+    // compact thumbnail row (--card). image_wide is the server's pre-load hint; the
+    // real call is remade from the loaded image's aspect ratio (applyImageVariant).
     var isVideo = !!data.video;
-    var a = el("a", "link-preview link-preview--" + (isVideo ? "video" : "card"));
+    var variant = isVideo ? "video" : (data.image && data.image_wide ? "media" : "card");
+    var a = el("a", "link-preview link-preview--" + variant);
     a.href = data.url || href;
     a.target = "_blank";
     a.rel = "nofollow noopener noreferrer";
@@ -191,6 +214,8 @@
       var img = el("img", "link-preview-media");
       img.loading = "lazy"; // native defer: only fetched when near the viewport
       img.alt = "";
+      // Re-decide banner vs compact thumbnail from the real pixels once they load.
+      img.addEventListener("load", function () { applyImageVariant(a, img, img.naturalWidth, img.naturalHeight); });
       // Image hosts that gate by IP (GitHub's opengraph.githubassets.com) can
       // 429 a burst of card images on a link-heavy page. Retry a couple of times
       // with jittered backoff — the throttle clears quickly — before giving up and
@@ -205,6 +230,9 @@
             1200 * attempts + Math.floor(Math.random() * 1500));
         } else if (img.parentNode) {
           img.parentNode.removeChild(img);
+          // No image survived: collapse any banner back to the compact text row.
+          a.classList.remove("link-preview--media");
+          a.classList.add("link-preview--card");
         }
       });
       img.src = data.image;
