@@ -30,22 +30,51 @@
   var seen = Object.create(null);
   function normURL(u) { return (u || "").replace(/\/+$/, "").toLowerCase(); }
 
+  // clipOf returns the unexpanded teaser clip an element lives in (with its expand
+  // state), or null when the element isn't inside a collapsed listing preview.
+  function clipOf(el) {
+    var clip = el.closest && el.closest(".post_clipped");
+    if (!clip) return null;
+    var toggle = clip.parentNode && clip.parentNode.querySelector(".post_expand_toggle");
+    return { clip: clip, expanded: !!(toggle && toggle.checked) };
+  }
+
   // A long listing body is rendered into a collapsed teaser: .post_clipped caps it
-  // at ~250px with a bottom gradient mask that fades the final lines out (the CSS
-  // mask starts at FADE_START of the box height). A link sitting in that fade tail
-  // — or scrolled clean out below the clip — is "about to disappear"; unfurling a
-  // full intel card there is wasted work and visual noise. So inside an UNEXPANDED
-  // clip we only unfurl links in the crisp top region; the rest are parked until
-  // the user expands the preview (see the change listener below). Once expanded
-  // the clip drops its cap, the whole body is visible, and every link may unfurl.
+  // at ~250px with a bottom gradient mask that fades the final lines out (the mask
+  // starts at FADE_START of the box height). A link is parked — left a plain link
+  // until the user expands the preview — in two cases inside an UNEXPANDED clip:
+  //
+  //   (a) it sits in the fade tail (or scrolled clean out below the cap): it's
+  //       "about to disappear", so unfurling a card there is wasted + noisy; and
+  //   (b) the clip is already card-blocked — an earlier link in this same teaser
+  //       unfurled into an OVER-LONG banner/video card (taller than the 250px
+  //       window, which alone swallows the whole preview), so per the over-long
+  //       rule NO further link here parses until expand (see tooTallForClip).
+  //
+  // The change listener below re-enqueues both kinds once the cap drops. A
+  // non-clipped (short) body is never affected — its single inline card is fine.
   var FADE_START = 0.6; // mirror .post_clipped mask-image gradient stop (#000 60%)
   function clippedAway(el) {
-    var clip = el.closest && el.closest(".post_clipped");
-    if (!clip) return false;
-    var toggle = clip.parentNode && clip.parentNode.querySelector(".post_expand_toggle");
-    if (toggle && toggle.checked) return false; // expanded: full body shown
-    var offset = el.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-    return offset > clip.clientHeight * FADE_START;
+    var c = clipOf(el);
+    if (!c || c.expanded) return false;
+    if (c.clip.getAttribute("data-cards-blocked")) return true; // (b) over-long card already here
+    var offset = el.getBoundingClientRect().top - c.clip.getBoundingClientRect().top;
+    return offset > c.clip.clientHeight * FADE_START; // (a) in the fade tail / below the cap
+  }
+
+  // tooTallForClip is the over-long guard: a banner (--media) or video card is far
+  // taller than the ~250px teaser, so dropping one into an unexpanded clip blows
+  // the preview out. When the card we just built is one of those AND lives in an
+  // unexpanded clip, we refuse it and mark the clip card-blocked, so every later
+  // link in the same teaser also stays a plain link until the user expands it.
+  // A compact (--card) thumbnail row fits the window and is always allowed.
+  function tooTallForClip(el, card) {
+    if (!card.classList.contains("link-preview--media") &&
+        !card.classList.contains("link-preview--video")) return false;
+    var c = clipOf(el);
+    if (!c || c.expanded) return false;
+    c.clip.setAttribute("data-cards-blocked", "1");
+    return true;
   }
 
   function pump() {
@@ -86,6 +115,9 @@
           // than dropping a card no one can see.
           if (clippedAway(el)) { el.setAttribute("data-unfurl-state", "clipped"); return; }
           var card = buildCard(data, el.getAttribute("href"));
+          // Over-long guard: a banner/video card would swallow an unexpanded teaser.
+          // Refuse it (and block the clip's later links) until the user expands.
+          if (card && tooTallForClip(el, card)) { el.setAttribute("data-unfurl-state", "clipped"); return; }
           if (card && el.parentNode) el.parentNode.replaceChild(card, el);
         } else {
           // Leave the plain link; mark so we don't retry it.
@@ -172,8 +204,18 @@
   var BANNER_MIN_RATIO = 1.3; // …and it must be at least this much wider than tall
   function applyImageVariant(a, img, w, h) {
     if (!w || !h) return;
+    var wide = w / h >= BANNER_MIN_RATIO && Math.max(w, h) >= BANNER_MIN_LONG;
+    // Late over-long guard: this card was inserted compact (the server hint said
+    // not-wide) but the real pixels are a banner. If it lives in an unexpanded
+    // teaser, do NOT let it balloon — keep it compact and block the clip's other
+    // links, mirroring tooTallForClip's insert-time refusal. Once expanded it
+    // unfurls at full banner size like anywhere else.
+    if (wide) {
+      var c = clipOf(a);
+      if (c && !c.expanded) { c.clip.setAttribute("data-cards-blocked", "1"); wide = false; }
+    }
     a.classList.remove("link-preview--media", "link-preview--card");
-    if (w / h >= BANNER_MIN_RATIO && Math.max(w, h) >= BANNER_MIN_LONG) {
+    if (wide) {
       a.classList.add("link-preview--media");
       img.style.aspectRatio = w + " / " + h; // hold the banner box; height follows width
     } else {
@@ -296,14 +338,17 @@
   }
 
   // Expanding a collapsed preview (.post_clipped) drops its height cap and reveals
-  // the full body — so the links we parked in the old fade/clip zone are now fully
-  // visible and should unfurl. Re-enqueue every parked link under the toggled
-  // wrapper. (The toggle is a pure-CSS checkbox; we only need its change event.)
+  // the full body — so the links we parked (fade tail, or blocked behind an
+  // over-long banner) are now fully visible and should unfurl. Lift the clip's
+  // card-block and re-enqueue every parked link under the toggled wrapper. (The
+  // toggle is a pure-CSS checkbox; we only need its change event.)
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (!t || !t.classList || !t.classList.contains("post_expand_toggle") || !t.checked) return;
     var wrap = t.closest(".post_body_wrap");
     if (!wrap) return;
+    var clip = wrap.querySelector(".post_clipped");
+    if (clip) clip.removeAttribute("data-cards-blocked"); // banners may unfurl now
     wrap.querySelectorAll(SELECTOR).forEach(function (a) {
       if (a.getAttribute("data-unfurl-state") === "clipped") {
         a.removeAttribute("data-unfurl-state");
