@@ -144,6 +144,9 @@ func (h *Handler) Routes() http.Handler {
 	// SEO.AllowIndexing is off); sitemap.xml 404s when off.
 	mux.HandleFunc("GET /robots.txt", h.handleRobotsTxt)
 	mux.HandleFunc("GET /sitemap.xml", h.handleSitemapXML)
+	// /np.json is the decentralized-discovery advert: the instance's Natural-
+	// Prefetch sub list as machine-readable JSON (404s when indexing is off).
+	mux.HandleFunc("GET /np.json", h.handleNPDiscovery)
 
 	// Static assets
 	static := h.staticHandler()

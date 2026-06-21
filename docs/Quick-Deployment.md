@@ -22,7 +22,7 @@ Visit `http://<host>:8080/settings` directly — no TOTP gate.
 
 ## Public instance — strict TOTP
 
-For an internet-facing deployment behind nginx/Caddy + TLS. TOTP enforced, `/debug` hidden, on-demand upstream calls disabled (every page served from the local archive), SEO opt-in.
+For an internet-facing deployment behind nginx/Caddy + TLS. TOTP enforced, `/debug` hidden, on-demand upstream calls disabled (every page served from the local archive). SEO/discovery is **on by default** so the instance is findable by its Natural-Prefetch subs (`/np.json`, `/sitemap.xml`, archive hub) — set `REDMEMO_SEO_ALLOW_INDEXING=false` for a private instance.
 
 ```bash
 mkdir redmemo && cd redmemo

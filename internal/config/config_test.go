@@ -173,6 +173,31 @@ media:
 	}
 }
 
+func TestEnvOverrideUnfurl(t *testing.T) {
+	// The unfurl (link-preview) feature must be fully env-controllable so an
+	// env-only (no config.yaml) deployment can disable it or opt out of the
+	// third-party Jina reader. Defaults are enabled/enabled/8s.
+	t.Setenv("REDMEMO_POSTGRES_DSN", "postgres://localhost/test")
+	t.Setenv("REDMEMO_REDIS_ADDR", "localhost:6379")
+	t.Setenv("REDMEMO_UNFURL_ENABLED", "off")
+	t.Setenv("REDMEMO_UNFURL_JINA_FALLBACK", "off")
+	t.Setenv("REDMEMO_UNFURL_TIMEOUT", "3s")
+
+	cfg, err := Load("/nonexistent/path/config.yaml")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Unfurl.Enabled {
+		t.Error("REDMEMO_UNFURL_ENABLED=off should disable the feature")
+	}
+	if cfg.Unfurl.JinaFallback {
+		t.Error("REDMEMO_UNFURL_JINA_FALLBACK=off should disable the Jina reader")
+	}
+	if cfg.Unfurl.Timeout != 3*time.Second {
+		t.Errorf("env override Unfurl.Timeout = %v, want 3s", cfg.Unfurl.Timeout)
+	}
+}
+
 func TestEnvOverrideLegacyInstance(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

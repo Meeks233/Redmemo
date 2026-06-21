@@ -1,6 +1,8 @@
 # Natural Prefetch (NP)
 
-← [Wiki index](README.md) · Related: [Architecture](Architecture.md) · [HR Rate-Limit](HR-Rate-Limit.md)
+← [Wiki index](README.md) · Related: [Architecture](Architecture.md) · [HR Rate-Limit](HR-Rate-Limit.md) · [Configuration → SEO](Configuration.md#seo)
+
+> **Discovery:** the NP sub list is the instance's public identity. With SEO on (the default — see [Configuration → SEO](Configuration.md#seo)) the chosen subs are advertised to search engines and aggregators via the archive hub, `/sitemap.xml`, and the machine-readable `/np.json` feed — the union of *archived* and *configured-but-not-yet-archived* subs — so people can find which self-hosted instance mirrors a given sub without a central directory.
 
 NP is a producer/consumer pipeline that quietly fills the archive without burst patterns. All outbound traffic — both the L1 Reddit-API listing fetch and the L2 CDN media downloads — flows through one **NP dispatcher** goroutine that applies a 1–3 s random delay between calls and pauses 30 s after any user-triggered upstream request.
 

@@ -38,6 +38,8 @@ Booleans accept `on` / `off`. `true` / `false` are **not** recognised — use `o
 
 ## Auth / TOTP gate
 
+Full enrolment flow, trusted devices, lockout and rotation: [Auth / TOTP Gate](Auth-TOTP.md).
+
 | YAML key | Env var | Required | Description |
 |----------|---------|----------|-------------|
 | `auth.server_secret` | `REDMEMO_SERVER_SECRET` | **yes (unless bypass)** | Pre-shared secret required before TOTP enrolment. |
@@ -131,12 +133,48 @@ The settings page has no enable checkbox: filling the prefetch box turns the lay
 
 ## SEO
 
-Off by default. When `allow_indexing=off`: `/robots.txt` is `Disallow: /`, `/sitemap.xml` 404s, every page emits `<meta name=robots content="noindex,nofollow">`.
+**On by default** — decentralized discovery is the whole point: search engines must be able to surface which instance mirrors which Natural-Prefetch subs so people can find a live mirror without a central directory. The archive surfaces, `/sitemap.xml` and `/np.json` all advertise the instance's chosen NP subs. Set `allow_indexing=off` only for a **private** instance: that flips `/robots.txt` to `Disallow: /`, 404s `/sitemap.xml` + `/np.json`, and emits `<meta name=robots content="noindex,nofollow">` on every page.
+
+The advertised sub set is the **union** of (a) subs already archived and (b) subs configured for Natural Prefetch (`prefetch_subs`) — so a freshly stood-up instance is discoverable by its chosen subs immediately, before the first crawl cycle lands.
 
 | YAML key | Env var | Default | Description |
 |----------|---------|---------|-------------|
-| `seo.allow_indexing` | `REDMEMO_SEO_ALLOW_INDEXING` | `off` | Master switch for indexing the archive surfaces. |
-| `seo.canonical_host` | `REDMEMO_SEO_CANONICAL_HOST` | (empty) | Public origin used for absolute URLs in `sitemap.xml` and `<link rel="canonical">`. |
+| `seo.allow_indexing` | `REDMEMO_SEO_ALLOW_INDEXING` | `on` | Master switch for indexing the archive surfaces + `/np.json`. |
+| `seo.canonical_host` | `REDMEMO_SEO_CANONICAL_HOST` | (empty) | Public origin used for absolute URLs in `sitemap.xml`, `/np.json` and `<link rel="canonical">`. |
+
+### `/np.json` — decentralized discovery feed
+
+A stable, machine-readable advert of this instance's Natural-Prefetch sub list, for aggregators/directories that map *sub → mirror* without scraping HTML. Served at the site root, allowed in `robots.txt`, cross-origin readable (`Access-Control-Allow-Origin: *`), 404s when indexing is off.
+
+```json
+{
+  "brand": "RedMemo",
+  "host": "https://memo.example.com",
+  "archive_url": "https://memo.example.com/archive",
+  "count": 2,
+  "subs": ["transgender", "ftm"],
+  "sub_links": [
+    {"sub": "transgender", "url": "https://memo.example.com/archive/r/transgender", "archived": true},
+    {"sub": "ftm", "url": "https://memo.example.com/archive/r/ftm", "archived": false}
+  ]
+}
+```
+
+## Link previews (unfurl)
+
+Telegram/Discord-style preview **cards** for bare external links in post and
+comment bodies. Full design in [Link Preview](Link-Preview.md).
+
+| YAML key | Env var | Default | Description |
+|----------|---------|---------|-------------|
+| `unfurl.enabled` | `REDMEMO_UNFURL_ENABLED` | `on` | Master switch. When `off`, bodies render plain links and `/api/unfurl` returns `failed`. |
+| `unfurl.jina_fallback` | `REDMEMO_UNFURL_JINA_FALLBACK` | `on` | Opt into the `r.jina.ai` reader as a last-resort fetcher for anti-bot pages a direct OpenGraph crawl can't reach. **Sends the link URL to a third party** — a separate opt-in from the privacy-preserving direct fetch. |
+| `unfurl.timeout` | `REDMEMO_UNFURL_TIMEOUT` | `8s` | Per-link server-side metadata fetch ceiling (Go duration). |
+
+Card metadata is fetched lazily (client-driven, one link at a time as it scrolls
+into view) and cached in Postgres, so a link is fetched once across all viewers.
+Preview images/videos load directly in the viewer's browser — RedMemo does not
+proxy them.
 
 ## Legacy redlib sync
 

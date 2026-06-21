@@ -40,11 +40,13 @@ type UnfurlConfig struct {
 }
 
 // SEOConfig controls how the instance presents itself to search engines.
-// Off by default — only the instance owner who actually wants the archive
-// pages crawled flips AllowIndexing on. When off, robots.txt is "Disallow: /",
-// sitemap.xml 404s, and every page keeps noindex,nofollow. The "what this
-// instance archives" story (archive hub + per-sub pages + sitemap of subs)
-// only goes live once the owner opts in.
+// ON by default — decentralized discovery is the whole point: search engines
+// must be able to surface which instance mirrors which Natural-Prefetch subs so
+// people can find a live mirror without a central directory. The archive hub,
+// per-sub pages, sitemap.xml and /np.json all advertise the instance's chosen
+// NP subs. An operator who wants a private instance sets AllowIndexing=false,
+// which flips robots.txt to "Disallow: /", 404s sitemap.xml + /np.json, and
+// keeps every page noindex,nofollow.
 type SEOConfig struct {
 	AllowIndexing bool   `yaml:"allow_indexing"`
 	CanonicalHost string `yaml:"canonical_host"` // e.g. "https://memo.example.com" — used for absolute URLs in sitemap + <link rel=canonical>
@@ -152,6 +154,11 @@ type RenderConfig struct {
 	ShowArchiveBadge bool   `yaml:"show_archive_badge"`
 }
 
+// Default returns a fresh Config populated with the built-in defaults, before
+// any config.yaml or REDMEMO_* env overrides are applied. Exported so callers
+// (and tests) can inspect the shipped defaults without a full Load.
+func Default() *Config { return defaults() }
+
 func defaults() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -202,6 +209,15 @@ func defaults() *Config {
 			Enabled:      true,
 			JinaFallback: true,
 			Timeout:      8 * time.Second,
+		},
+		// Indexing is ON by default: RedMemo's reason to exist is decentralized,
+		// undirectory-able discovery — a person looking for a mirror of some sub
+		// must be able to find, via a plain search engine, which self-hosted
+		// instance archives it. That only works if instances let crawlers in and
+		// advertise their Natural-Prefetch sub list. Operators who want a private
+		// instance set seo.allow_indexing=false (or REDMEMO_SEO_ALLOW_INDEXING=false).
+		SEO: SEOConfig{
+			AllowIndexing: true,
 		},
 	}
 }
@@ -354,6 +370,8 @@ func applyEnvOverrides(cfg *Config) {
 		"REDMEMO_SEO_ALLOW_INDEXING":        &cfg.SEO.AllowIndexing,
 		"REDMEMO_AUTH_BYPASS":               &cfg.Auth.BypassAuth,
 		"REDMEMO_HRLIMIT_ENABLED":           &cfg.HRLimit.Enabled,
+		"REDMEMO_UNFURL_ENABLED":            &cfg.Unfurl.Enabled,
+		"REDMEMO_UNFURL_JINA_FALLBACK":      &cfg.Unfurl.JinaFallback,
 	}
 	for env, ptr := range boolEnv {
 		if v := os.Getenv(env); v != "" {
@@ -387,6 +405,7 @@ func applyEnvOverrides(cfg *Config) {
 		"REDMEMO_HRLIMIT_L1_WINDOW":             &cfg.HRLimit.L1Window,
 		"REDMEMO_HRLIMIT_L2_WINDOW":             &cfg.HRLimit.L2Window,
 		"REDMEMO_HRLIMIT_L3_WINDOW":             &cfg.HRLimit.L3Window,
+		"REDMEMO_UNFURL_TIMEOUT":                &cfg.Unfurl.Timeout,
 	}
 	for env, ptr := range durationEnv {
 		if v := os.Getenv(env); v != "" {

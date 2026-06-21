@@ -4,7 +4,10 @@
 # Auth is mandatory (TOTP gate enforced; REDMEMO_AUTH_BYPASS deliberately
 # absent), the instance NEVER initiates upstream Reddit calls on its own
 # (every page served comes from the local archive — no on-demand upstream
-# leak), and /debug is hidden from the world.
+# leak), and /debug is hidden from the world. Discovery is ON: the instance
+# advertises its Natural-Prefetch sub list (/np.json, /sitemap.xml, archive
+# hub) so people can find it by the subs it mirrors — that's the point of a
+# public node. Set the NP list + canonical host below before going live.
 #
 # Required: an .env file containing
 #   PG_PASSWORD=<strong-password>
@@ -54,12 +57,46 @@ services:
       # here (e.g. REDMEMO_DEFAULT_FRONT_PAGE_SUBS=sub:golang+rust) or per
       # account from /settings.
 
-      # ---- SEO -------------------------------------------------------
-      # Off by default — flip on only if you actually want the archive
-      # crawled. canonical_host must match the public origin for
-      # sitemap.xml / <link rel=canonical> to produce absolute URLs.
-      - REDMEMO_SEO_ALLOW_INDEXING=false
+      # ---- Natural Prefetch ------------------------------------------
+      # This is what a public instance contributes to the network: the subs
+      # it mirrors. Master switch on; fill the crawl list with the subs this
+      # instance archives, in the unified search grammar (e.g.
+      # "sub:golang+rust+selfhosted") — or set it later from /settings.
+      # Whatever ends up here is ADVERTISED to crawlers + aggregators by the
+      # SEO surfaces below (/np.json, /sitemap.xml, the archive hub), so people
+      # can find this instance by the subs it carries. An empty list means the
+      # instance advertises nothing — set it before going live.
+      - REDMEMO_PREFETCH_ENABLED=true
+      - REDMEMO_DEFAULT_PREFETCH_SUBS=
+      # Default crawl depth across every sub: l2+l3 = listings + media +
+      # comments. "none"/"l2"/"l3" narrow it; per-sub overrides go in
+      # REDMEMO_DEFAULT_PREFETCH_SUB_MODES. See docs/Natural-Prefetch.md.
+      - REDMEMO_DEFAULT_PREFETCH_DEFAULT_DEPTH=l2+l3
+
+      # ---- SEO / discovery -------------------------------------------
+      # ON by default — decentralized discovery is the point: this lets
+      # search engines + aggregators find which instance mirrors which
+      # Natural-Prefetch subs (via the /archive hub, /sitemap.xml and the
+      # machine-readable /np.json feed — the union of archived + configured
+      # NP subs). Set =false only for a PRIVATE instance. canonical_host
+      # SHOULD match the public origin so sitemap.xml / np.json /
+      # <link rel=canonical> emit absolute URLs — uncomment + set it.
+      - REDMEMO_SEO_ALLOW_INDEXING=true
       # - REDMEMO_SEO_CANONICAL_HOST=https://memo.example.com
+
+      # ---- Link previews (unfurl) -----------------------------------
+      # Telegram-style preview cards for bare external links in post and
+      # comment bodies. Metadata is fetched server-side once and cached;
+      # preview images/videos load directly in each viewer's browser
+      # (never proxied). Defaults are ON / ON / 8s.
+      - REDMEMO_UNFURL_ENABLED=on
+      # jina_fallback forwards a link's URL to the r.jina.ai reader for
+      # pages a direct OpenGraph crawl can't reach (Cloudflare/anti-bot).
+      # That is an off-instance disclosure of which links your archive
+      # holds — keep it off on a privacy-strict public box; flip on only
+      # if you accept that trade for richer cards. See docs/Link-Preview.md.
+      - REDMEMO_UNFURL_JINA_FALLBACK=off
+      - REDMEMO_UNFURL_TIMEOUT=8s
 
       # ---- Trusted reverse proxy ------------------------------------
       # If you front this with nginx/Caddy on the same host, add the

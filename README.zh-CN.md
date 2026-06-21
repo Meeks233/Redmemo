@@ -8,6 +8,9 @@
 
 <sub>用 RedMemo 浏览 <code>/r/golang</code> —— UI 完全继承自 Redlib，上游被限速时由本地存档接管。</sub>
 
+> **▶ 在线 Demo —— [redmemo.meekslab.cc](https://redmemo.meekslab.cc)**
+> 一个尽力维持的公共实例,跑的是下面的 **Public** 配置。浏览和搜索存档随便用;`/settings` 与预取控制由 TOTP 把守,当作只读看待即可。上游 Reddit 限速时它可能变慢或回退到本地存档 —— 这种回退正是 RedMemo 存在的意义。
+
 ---
 
 **10 秒简介。** 沿用 Redlib 的 UI，把后端用 Go 重写，主动 + 被动地缓存资源。你熟悉的 Redlib 路由、主题与 cookie 一概保留 —— 底层加入 Postgres + 内容寻址的媒体存档、被动的自然预取调度器，以及一个 TOTP 保护的 `/settings` 面板。

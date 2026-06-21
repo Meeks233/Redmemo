@@ -40,6 +40,14 @@ services:
       # media). Without this, only the local archive is served.
       - REDMEMO_DEFAULT_DISABLE_INITIATIVE_UPSTREAM_ACCESS=off
 
+      # ---- SEO / discovery -------------------------------------------
+      # OFF for a private LAN/Tailnet box: there is nothing for a search
+      # engine to crawl and no reason to advertise this instance's NP sub
+      # list. This flips /robots.txt to "Disallow: /", 404s /sitemap.xml +
+      # /np.json, and keeps every page noindex,nofollow. (Public instances
+      # leave this ON — the code default — to enable decentralized discovery.)
+      - REDMEMO_SEO_ALLOW_INDEXING=false
+
       # ---- Media viewing ---------------------------------------------
       # A trusted LAN/Tailnet box has bandwidth to spare: play longer clips
       # inline (gate at 10 min vs the conservative 3-min code default) and
@@ -66,6 +74,16 @@ services:
       # drive-by 1-comment threads but still captures real discussion. Set 0
       # to disable. Negative or non-integer → container refuses to start.
       - REDMEMO_DEFAULT_PREFETCH_L3_MIN_COMMENTS=50
+
+      # ---- Link previews (unfurl) ------------------------------------
+      # Telegram-style preview cards for bare external links in bodies.
+      # All default ON / 8s — shown here for visibility. jina_fallback
+      # forwards a link's URL to r.jina.ai for pages a direct OpenGraph
+      # crawl can't reach; set it off for zero third-party metadata calls.
+      # See docs/Link-Preview.md.
+      - REDMEMO_UNFURL_ENABLED=on
+      - REDMEMO_UNFURL_JINA_FALLBACK=on
+      - REDMEMO_UNFURL_TIMEOUT=8s
     volumes:
       - media_data:/data/media
     depends_on:

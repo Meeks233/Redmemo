@@ -67,3 +67,4 @@ desktop.ini
 nul
 
 deploy/docker-compose.public-test.yml
+promo/

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/redmemo/redmemo/internal/render"
+	"github.com/redmemo/redmemo/internal/searchquery"
 )
 
 // archiveDescSubCap bounds how many sub names we list in the archive hub's
@@ -39,11 +40,58 @@ func (h *Handler) canonicalHost() string {
 	return host
 }
 
-// indexingAllowed returns true when the instance owner has opted into search
-// engine indexing. Off by default — the global robots meta stays noindex and
-// /robots.txt is "Disallow: /" until the owner flips this.
+// indexingAllowed returns true when the instance allows search engine indexing.
+// ON by default (decentralized discovery) — only an operator who explicitly sets
+// seo.allow_indexing=false flips the global robots meta to noindex and
+// /robots.txt to "Disallow: /".
 func (h *Handler) indexingAllowed() bool {
 	return h.cfg != nil && h.cfg.SEO.AllowIndexing
+}
+
+// npConfiguredSubs returns the subreddits this instance has chosen for Natural
+// Prefetch — its *intent*, what it set out to mirror — lowercased and deduped.
+// Unlike the archived-subs list (which only contains subs that already have
+// stored posts crossing the hub threshold), this reflects the operator's
+// configuration the moment they save it, so a freshly stood-up instance is
+// discoverable by its chosen subs immediately rather than after the first crawl
+// cycle lands. This is the signal decentralized discovery hangs on: it answers
+// "which instance mirrors r/X?" for every advertised X, populated or not.
+func (h *Handler) npConfiguredSubs() []string {
+	if h == nil {
+		return nil
+	}
+	raw := h.siteDefault("prefetch_subs")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return searchquery.Parse(raw).WhiteSubs
+}
+
+// discoverySubs unions the instance's archived subs (already-stored, ranked by
+// the caller) with its configured-but-not-yet-populated NP subs, preserving the
+// archived ordering first and appending NP-only subs after. The result is the
+// full set of subs this instance advertises to crawlers. De-dup is
+// case-insensitive; NP names are emitted in their configured (lowercased) form.
+func discoverySubs(archived, npSubs []string) []string {
+	seen := make(map[string]struct{}, len(archived)+len(npSubs))
+	out := make([]string, 0, len(archived)+len(npSubs))
+	for _, s := range archived {
+		k := strings.ToLower(s)
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range npSubs {
+		k := strings.ToLower(s)
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func (h *Handler) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +110,9 @@ func (h *Handler) handleRobotsTxt(w http.ResponseWriter, r *http.Request) {
 	// either a Reddit duplicate (DMCA risk + thin content) or transient
 	// machinery (settings, media proxies, JSON endpoints).
 	b.WriteString("Allow: /archive\n")
+	// /np.json is the machine-readable advert of this instance's Natural-Prefetch
+	// sub list — the primitive decentralized aggregators crawl to map sub → mirror.
+	b.WriteString("Allow: /np.json\n")
 	b.WriteString("Disallow: /r/\n")
 	b.WriteString("Disallow: /user/\n")
 	b.WriteString("Disallow: /search\n")
@@ -97,6 +148,10 @@ func (h *Handler) decorateArchiveHubSEO(d *render.ArchiveHubPageData, subs []str
 	if !h.indexingAllowed() || d.Search {
 		return
 	}
+	// Advertise the full discovery set — what the instance has archived AND what
+	// it has configured for Natural Prefetch — so search engines can match the
+	// instance against every sub it mirrors, even ones still warming up.
+	subs = discoverySubs(subs, h.npConfiguredSubs())
 	d.Indexable = true
 	d.MetaDescription = h.archiveHubDescription(d.BrandName, subs)
 	d.HeadExtraHTML = h.archiveHubHeadExtra(d.BrandName, d.MetaDescription, subs)
@@ -353,6 +408,7 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 		{Loc: abs("/archive?sort=all"), ChangeFreq: "daily", Priority: "0.7"},
 	}
 
+	seen := make(map[string]struct{})
 	if h.postStore != nil {
 		subs, err := h.postStore.ArchivedSubsByTop(0)
 		if err != nil {
@@ -366,6 +422,7 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 		// floors at 0.3.
 		var maxLU time.Time
 		for i, s := range subs {
+			seen[strings.ToLower(s.Name)] = struct{}{}
 			pri := 0.9 - float64(i)*0.01
 			if pri < 0.3 {
 				pri = 0.3
@@ -388,6 +445,24 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 			hubLastMod = maxLU.UTC().Format("2006-01-02")
 		}
 	}
+
+	// Configured-but-not-yet-archived NP subs still get a sitemap entry so the
+	// instance is crawlable on its advertised intent from minute one. They sit
+	// at the 0.3 floor (no posts yet) and carry no lastmod.
+	for _, name := range h.npConfiguredSubs() {
+		if len(urls) >= sitemapEntryCap {
+			break
+		}
+		if _, ok := seen[strings.ToLower(name)]; ok {
+			continue
+		}
+		seen[strings.ToLower(name)] = struct{}{}
+		urls = append(urls, sitemapURL{
+			Loc:        abs("/archive/r/" + name),
+			ChangeFreq: "daily",
+			Priority:   "0.3",
+		})
+	}
 	if hubLastMod != "" {
 		for i := range urls[:3] {
 			urls[i].LastMod = hubLastMod
@@ -406,4 +481,87 @@ func (h *Handler) handleSitemapXML(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handler: sitemap encode: %v", err)
 	}
 	io.WriteString(w, "\n")
+}
+
+// npDiscovery is the stable, machine-readable shape served at /np.json. It is
+// the decentralized-discovery primitive: aggregators and crawlers fetch it to
+// learn which subreddits this instance mirrors, without scraping HTML or
+// depending on a central index. The schema is intentionally flat and additive —
+// new fields may be appended, existing ones never change meaning.
+type npDiscovery struct {
+	Brand    string               `json:"brand"`
+	Host     string               `json:"host,omitempty"`
+	Archive  string               `json:"archive_url"`
+	Count    int                  `json:"count"`
+	Subs     []string             `json:"subs"`
+	SubLinks []npDiscoverySubLink `json:"sub_links"`
+}
+
+type npDiscoverySubLink struct {
+	Sub      string `json:"sub"`
+	URL      string `json:"url"`
+	Archived bool   `json:"archived"`
+}
+
+// handleNPDiscovery serves GET /np.json — the instance's Natural-Prefetch sub
+// list as JSON. 404s when indexing is off (a private instance advertises
+// nothing). Unions configured NP subs with already-archived subs so the feed
+// reflects both intent and contents.
+func (h *Handler) handleNPDiscovery(w http.ResponseWriter, r *http.Request) {
+	if !h.indexingAllowed() {
+		http.NotFound(w, r)
+		return
+	}
+
+	host := h.canonicalHost()
+	abs := func(path string) string {
+		if host == "" {
+			return path
+		}
+		return host + path
+	}
+
+	archivedSet := make(map[string]struct{})
+	var archived []string
+	if h.postStore != nil {
+		if subs, err := h.postStore.ArchivedSubsByTop(0); err != nil {
+			log.Printf("handler: np.json archived subs: %v", err)
+		} else {
+			for _, s := range subs {
+				archivedSet[strings.ToLower(s.Name)] = struct{}{}
+				archived = append(archived, s.Name)
+			}
+		}
+	}
+
+	subs := discoverySubs(archived, h.npConfiguredSubs())
+	links := make([]npDiscoverySubLink, len(subs))
+	for i, s := range subs {
+		_, isArchived := archivedSet[strings.ToLower(s)]
+		links[i] = npDiscoverySubLink{
+			Sub:      s,
+			URL:      abs("/archive/r/" + s),
+			Archived: isArchived,
+		}
+	}
+
+	payload := npDiscovery{
+		Brand:    h.cfg.Render.BrandName,
+		Host:     host,
+		Archive:  abs("/archive"),
+		Count:    len(subs),
+		Subs:     subs,
+		SubLinks: links,
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=1800")
+	// Cross-origin readable so browser-based aggregators / directory sites can
+	// fetch the advert directly. The payload is already-public config, no secrets.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		log.Printf("handler: np.json encode: %v", err)
+	}
 }

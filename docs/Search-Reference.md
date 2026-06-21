@@ -33,18 +33,51 @@ sub:-meta author:spez comments>=100
 
 ## `/random` endpoint
 
-`/random` selects a random archived post and 302-redirects to its media. It uses the same e621 grammar above — there is no separate /random grammar:
+`GET /random` returns **one random archived post** matching the filters in the
+`q` query parameter. It **never contacts Reddit** — it only ever surfaces what is
+already stored locally — and 503s when nothing matches. There is **no separate
+`/random` grammar**: `q=` takes the exact same unified search box grammar
+documented above, so `?q=sub:golang ups>200 after:2025-01-01` filters by sub
+scope, score and date just as the search box would.
+
+### Response modes
+
+| Query | Response |
+|-------|----------|
+| no media type pinned | a **JSON envelope** describing one random post (`url`, `subreddit`, `post_id`, `title`, `author`, `score`, `created_utc`, `nsfw`, `post_type`, `domain`, `media_done`, plus `media{}` / `gallery[]` when present). |
+| `type:<kind>` pinned | **302 redirect** to the cached media resource — but only to a post whose bytes are **genuinely resident on local disk** (never a live Reddit fetch). If no resident match exists it falls back to the JSON envelope rather than 503. |
+| `mode:raw` (alias `mode:instant` / `mode:ins`) | **raw bytes**: redirects to the first resident media in a fixed `video → image → gif` preference (restricted to the `type:` allow-set if one is given); when no resident media matches, writes the post body (selftext), or its title, as `text/plain`. |
+
+### Filter modifiers (in addition to the full grammar above)
 
 | Modifier | Example | Meaning |
 |----------|---------|---------|
-| `type:<kind>` | `type:image` | Include only posts whose media is of `<kind>`. |
-| `type:-<kind>` | `type:-gif` | Exclude posts of `<kind>`. |
-| `type:<a>+<b>` | `type:image+video` | Include both `<a>` and `<b>`. Combinable with excludes: `type:image+video-gif`. |
-| `mode:raw` / `mode:instant` | `mode:raw` | Return the raw cached media (redirect) or post body as `text/plain` instead of a JSON envelope. |
+| `type:<kind>` | `type:image` | Only posts whose media is of `<kind>`. |
+| `type:-<kind>` | `type:-gif` | Exclude `<kind>`. |
+| `type:<a>+<b>` | `type:image+video` | Both kinds; combinable with excludes: `type:image+video-gif`. |
+| `mode:raw` | `mode:raw` | Return raw media/body instead of a JSON envelope (see table). |
+| `cache_score:<op><n>` | `cache_score:>0` | Filter by the **media cache eviction score** (resident-media-only; resolved per-post in Go). `/archive` + `/random` only. |
 
 Supported `<kind>` tokens: `image` (alias `img`), `video` (alias `vid`), `gif`.
 
-The downstream proxy understands a `dl_title` query parameter so the resulting `Content-Disposition` filename is human-friendly:
+### Browser-friendly `&` separator
+
+Because `net/url` splits a query string on `&`, clauses may be separated by `&`
+in place of a space: `?q=sub:golang&ups>1000&type:image` is equivalent to
+`?q=sub:golang ups>1000 type:image`. A literal `&` inside a value must be
+percent-encoded as `%26`; `+` stays a literal `+` (a grammar joiner), so encode a
+wanted space as `%20`.
+
+### No-replacement traversal
+
+Successive `/random` calls for the **same** filter do not repeat posts: each
+distinct filter keeps its own Redis-backed cursor and walks a shuffled
+permutation of the matching subset to exhaustion before reshuffling (golden-ratio
+origin rotation). Redis being unavailable degrades gracefully to a fresh random
+draw each call.
+
+The downstream proxy understands a `dl_title` query parameter so a redirected
+media response gets a human-friendly `Content-Disposition` filename:
 
 ```
 GET /random?q=type:video

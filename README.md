@@ -8,6 +8,9 @@
 
 <sub>RedMemo serving <code>/r/golang</code> — UI inherited verbatim from Redlib, content served from the local archive when upstream is rate-limited.</sub>
 
+> **▶ Live demo — [redmemo.meekslab.cc](https://redmemo.meekslab.cc)**
+> A public, best-effort instance running the **Public** profile below. Browse and search the archive freely; `/settings` and prefetch controls are TOTP-gated, so treat it as read-only. It may lag or fall back to the local archive when upstream Reddit rate-limits it — that fallback is exactly what RedMemo is for.
+
 ---
 
 **10-second pitch.** Take Redlib's UI, rewrite the back-end in Go, cache the resources actively and passively. Same routes, themes and cookies you already know from Redlib — plus a Postgres + content-addressed media archive underneath, a passive natural-prefetch scheduler, and a TOTP-gated `/settings` panel.

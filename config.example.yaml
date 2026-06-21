@@ -94,16 +94,20 @@ render:
   brand_name: "RedMemo"
   show_archive_badge: true
 
-# SEO controls — off by default. Flip allow_indexing to true on a public
-# instance to expose the archive surfaces (the /archive hub + /archive/r/<sub>
-# pages) to search engines. When off, /robots.txt returns "Disallow: /",
-# /sitemap.xml 404s, and every page keeps a noindex,nofollow meta tag.
+# SEO controls — ON by default. Decentralized discovery is the point: search
+# engines must be able to find which instance mirrors which Natural-Prefetch
+# subs so people can locate a live mirror without a central directory. The
+# archive surfaces (/archive hub + /archive/r/<sub> pages), /sitemap.xml and
+# /np.json (a machine-readable JSON advert of this instance's NP sub list)
+# all expose the chosen subs. Set allow_indexing to false ONLY for a private
+# instance — that flips /robots.txt to "Disallow: /", 404s /sitemap.xml +
+# /np.json, and keeps every page noindex,nofollow.
 #
 # canonical_host is the public-facing origin used for absolute URLs inside
-# sitemap.xml and <link rel="canonical">. Leave empty to fall back to
+# sitemap.xml, /np.json and <link rel="canonical">. Leave empty to fall back to
 # root-relative URLs; set it to your real https origin in production.
 seo:
-  allow_indexing: false
+  allow_indexing: true
   canonical_host: ""
 
 # Link previews — Telegram-style "unfurl" of bare external links in post and
