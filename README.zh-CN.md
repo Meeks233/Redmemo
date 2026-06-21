@@ -17,6 +17,7 @@
 
 - 🗄 **持久化** —— 每一个见过的帖子和媒体都写入 Postgres + 磁盘内容寻址存储。Reddit 那边删掉的内容,你的存档里照样还在。
 - 🐢 **被动** —— 上游被封或限速时,请求自动降级到本地存档,只挂一条小横幅提示,绝不直接 5xx。
+- 🕸 **去中心化** —— 刻意不做实例总目录。每个公开节点各自**对外公布自己镜像了哪些 sub**(`/np.json`、sitemap、存档首页),让人通过普通搜索引擎就能找到幸存的副本——没有可被查封或关停的中心目录。SEO 默认开启,私有局域网实例可关闭。详见[去中心化发现与 SEO](docs/Decentralized-Discovery.md)。
 - 🔐 **门禁** —— `/settings` 由预共享服务端密钥 + TOTP 把守,同一 IP 错三次即锁定。
 - 🦫 **Go + templ** —— 服务端渲染;无 JS 框架,无客户端水合,无客户端状态。
 - 🔎 **搜索** —— e621 风格的统一语法,通查本地存档(`sub:`、`rating:`、`score:>1000`、`flair:` …) —— 详见 [搜索与 URL 参考](docs/Search-Reference.md)。
@@ -76,6 +77,7 @@ RedMemo 只监听 `:8080` —— 请自行在前面架一个负责 TLS 终止的
 - **[Architecture](docs/Architecture.md)** —— 四级失效转移链
 - **[Persistence Layer](docs/Persistence.md)** —— Postgres 表 + 媒体去重
 - **[Natural Prefetch](docs/Natural-Prefetch.md)** —— 被动后台爬取
+- **[Decentralized Discovery & SEO](docs/Decentralized-Discovery.md)** —— 无中心目录;实例如何对外公布自己镜像的 sub
 - **[HR Rate-Limit](docs/HR-Rate-Limit.md)** —— 全局三层限速
 - **[Budget Design](docs/Budget-Design.md)** —— 单次 50 条的页大小、导航栏动态 ring、额度自动限流
 - **[Configuration Reference](docs/Configuration.md)** —— 全部 `REDMEMO_*` 环境变量

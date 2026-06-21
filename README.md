@@ -17,6 +17,7 @@
 
 - 🗄 **Persistent** — every post & media blob ever seen lives in Postgres + an on-disk content-addressed store. Reddit deletions don't take your archive with them.
 - 🐢 **Passive** — when upstream is blocked or rate-limited, requests degrade to the local archive with a small banner, never a hard 5xx.
+- 🕸 **Decentralized** — no central index of instances by design. Each public node **advertises the subs it mirrors** (`/np.json`, sitemap, archive hub) so people find surviving copies through ordinary search engines — no directory to seize or switch off. SEO is on by default; private LAN instances opt out. See [Decentralized Discovery & SEO](docs/Decentralized-Discovery.md).
 - 🔐 **Gated** — `/settings` is locked behind a pre-shared server secret + TOTP, with 3-strike per-IP lockout.
 - 🦫 **Go + templ** — server-side rendered; no JS framework, no client hydration, no client-side state.
 - 🔎 **Search** — e621-style unified grammar across local archive (`sub:`, `rating:`, `score:>1000`, `flair:`, …) — see the [Search & URL Reference](docs/Search-Reference.md).
@@ -76,6 +77,7 @@ The handbook lives in **[`docs/`](docs/README.md)**. Quick jumps:
 - **[Architecture](docs/Architecture.md)** — four-level failover chain
 - **[Persistence Layer](docs/Persistence.md)** — Postgres tables + media dedup
 - **[Natural Prefetch](docs/Natural-Prefetch.md)** — passive background crawler
+- **[Decentralized Discovery & SEO](docs/Decentralized-Discovery.md)** — no central registry; how instances advertise the subs they mirror
 - **[HR Rate-Limit](docs/HR-Rate-Limit.md)** — global three-tier cap
 - **[Budget Design](docs/Budget-Design.md)** — 50-per-call page size, navbar ring, auto-throttle
 - **[Configuration Reference](docs/Configuration.md)** — every `REDMEMO_*` env var

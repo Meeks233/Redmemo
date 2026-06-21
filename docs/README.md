@@ -4,6 +4,8 @@ User-facing handbook for RedMemo — a self-hosted Reddit **archive station**: i
 
 **▶ New here?** See it running first — **[redmemo.meekslab.cc](https://redmemo.meekslab.cc)** (public demo, `/settings` TOTP-gated) — then start with **[Migration from Redlib](Migration-from-Redlib.md)** for the mental model and **[Quick Deployment](Quick-Deployment.md)** to stand up your own.
 
+**Why self-host one?** There is no central index of instances — by design. Every public node instead **advertises the subreddits it mirrors** to the open web, so people find surviving copies through ordinary search engines, with no directory to seize or switch off. See **[Decentralized Discovery & SEO](Decentralized-Discovery.md)**.
+
 ## Getting started
 
 - [Quick Deployment](Quick-Deployment.md) — homelab and public Compose profiles
@@ -18,6 +20,7 @@ User-facing handbook for RedMemo — a self-hosted Reddit **archive station**: i
 - [HR Rate-Limit Layer](HR-Rate-Limit.md) — three-tier global cap shared via Redis
 - [Budget Design](Budget-Design.md) — 50-per-call page size (quota is per-request, not per-item), navbar quota ring, auto-throttle vs Redlib's fixed 25-per-call drain
 - [Link Preview (Unfurl)](Link-Preview.md) — Telegram-style preview cards for bare external links in post/comment bodies
+- [Decentralized Discovery & SEO](Decentralized-Discovery.md) — the no-central-registry philosophy and the crawler-facing surfaces (`/np.json`, sitemap, archive hub) that let people find which instance mirrors a sub
 
 ## Configuration
 
