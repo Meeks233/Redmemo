@@ -74,8 +74,11 @@ func TestUniqueExternalLinks(t *testing.T) {
 	}
 }
 
-// TestEmbedBodyGatesCards pins the gate: a SHORT body with exactly one external
-// link cards it; a multi-link body or a long body stays plain text.
+// TestEmbedBodyGatesCards pins the gate: a SHORT body cards EVERY external link
+// it carries (one or many); only a LONG body stays plain text. The detail page
+// (embedBody) must match the listing's embedBodyCards path, which already cards
+// multi-link short bodies — it previously dropped them by demanding exactly one
+// link.
 func TestEmbedBodyGatesCards(t *testing.T) {
 	ctx := context.Background()
 	one := template.HTML(`<p>see <a href="https://github.com/golang/go">https://github.com/golang/go</a></p>`)
@@ -84,14 +87,32 @@ func TestEmbedBodyGatesCards(t *testing.T) {
 	}
 
 	multi := template.HTML(`<p><a href="https://a.com/1">https://a.com/1</a> and <a href="https://b.com/2">https://b.com/2</a></p>`)
-	if got := embedBody(ctx, multi); strings.Contains(got, "link-preview-lazy") {
-		t.Errorf("multi-link body must stay plain: %s", got)
+	if got := embedBody(ctx, multi); strings.Count(got, "link-preview-lazy") != 2 {
+		t.Errorf("short multi-link body should card both links: %s", got)
 	}
 
 	long := template.HTML(`<p><a href="https://github.com/golang/go">https://github.com/golang/go</a></p>` +
 		strings.Repeat("x", previewExpandThreshold+1))
 	if got := embedBody(ctx, long); strings.Contains(got, "link-preview-lazy") {
 		t.Errorf("long body must stay plain: %s", got)
+	}
+}
+
+// TestEmbedBodySelfHostedReboot is a regression for the real /r/selfhosted post
+// (1u6pxsy): a short "show & tell" self-post that links both its own site and
+// its GitHub repo. Both bare auto-links must upgrade to preview cards on the
+// detail page — the two-link body used to render plain because the gate demanded
+// exactly one external link.
+func TestEmbedBodySelfHostedReboot(t *testing.T) {
+	ctx := context.Background()
+	body := template.HTML(`<!-- SC_OFF --><div class="md">` +
+		`<p>I've been working on a few Projects, but my original finally got a reboot.</p>` +
+		`<p><a href="https://Nestarr.com">https://Nestarr.com</a></p>` +
+		`<p>A self-hosted Home Inventory Program.</p>` +
+		`<p>github: <a href="https://github.com/tokendad/nestarr">https://github.com/tokendad/nestarr</a></p>` +
+		`<p>Looking for critique</p></div><!-- SC_ON -->`)
+	if got := embedBody(ctx, body); strings.Count(got, "link-preview-lazy") != 2 {
+		t.Errorf("self-post with site + repo should card both links: %s", got)
 	}
 }
 
