@@ -1237,7 +1237,7 @@ a.search_subreddit:hover {
         "post_score post_poll   post_thumbnail" auto
         "post_score post_notification post_thumbnail" auto
         "post_score post_footer post_thumbnail" auto
-        / minmax(40px, auto) minmax(0, 1fr) fit-content(min(20%, 152px));
+        / minmax(40px, auto) minmax(0, 1fr) fit-content(150px);
 }
 
 .post:not(:last-child) {
@@ -1826,16 +1826,20 @@ video.lazy-media:not([src]) {
     margin-right: auto;
 }
 
-/* Link-preview cards: the Discord/Telegram-style "social card" unfurl of a bare
-   external link in a post or comment body, built lazily on the client by
-   linkPreview.js once the link scrolls into view. Display variants:
-     --small : compact card, square logo/favicon thumbnail on the left (a site
-               with only an icon, e.g. Stack Overflow's apple-touch-icon);
-     --media : a real photo or video (X/Twitter via fixupx, GitHub repo card,
-               article hero) rendered at its natural aspect ratio — portrait stays
-               portrait, landscape stays landscape — sized inline by the JS;
-     --text  : no media, text only.
-   Themed purely with the portable theme vars: surface + neutral border are a
+/* Link "intel" card: one unified, compact unfurl of an external link, built
+   lazily on the client by linkPreview.js once the link scrolls into view. It is
+   the single preview surface — it replaces BOTH the redlib-native bare #post_url
+   link on link posts and the older heavy full-bleed media card. The shape copies
+   the industry-standard inline embed (Discord / Slack / Telegram unfurl): a small
+   square thumbnail on the left, site + title + description on the right, a thin
+   accent edge. Display variants:
+     --card  : the default. Compact horizontal row. A site icon, an article hero,
+               or a huge og:image alike all collapse into one tidy square chip on
+               the left (object-fit: cover) so no card ever turns into a banner.
+     --video : the one exception — a playable clip (X/Twitter via fixupx, etc.)
+               renders the player on top with the meta below, since a video can't
+               live in a 96px chip.
+   Themed purely with portable theme vars: surface + neutral border are a
    translucent wash of --text (which always contrasts with the background by
    design — unlike --foreground, which equals the background on OLED/black
    themes), so every built-in theme gets a visible card with no per-theme rules.
@@ -1844,85 +1848,94 @@ video.lazy-media:not([src]) {
 .comment_body a.link-preview,
 .post_body a.link-preview {
     display: flex;
+    align-items: stretch;
     width: 100%;
+    max-width: 520px;
     margin: 10px 0;
-    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+    border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
     border-left: 3px solid var(--accent);
     border-radius: 8px;
     overflow: hidden;
-    background: color-mix(in srgb, var(--text) 7%, transparent);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
     color: var(--text);
     text-decoration: none;
-    box-shadow: var(--shadow, 0 1px 3px rgba(0, 0, 0, 0.25));
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-/* Per-variant sizing.
-   --small : compact left-thumbnail card for a small square logo/favicon/avatar.
-   --media : a real photo or video rendered at its NATURAL aspect ratio (portrait
-             stays portrait, landscape stays landscape) and never upscaled.
-             linkPreview.js sets the card's width and the media's aspect-ratio
-             inline from the loaded pixel dimensions, so the card shrink-fits the
-             media — no crushed thumbnails, no cropped banners.
-   --text  : no usable media; title + description only. */
-.link-preview--small,
-.comment_body a.link-preview--small,
-.post_body a.link-preview--small {
+/* Compact (default): thumbnail left, text right. */
+.link-preview--card,
+.comment_body a.link-preview--card,
+.post_body a.link-preview--card {
     flex-direction: row;
-    align-items: stretch;
-    max-width: 460px;
 }
-.link-preview--media,
-.comment_body a.link-preview--media,
-.post_body a.link-preview--media {
+
+/* Video: player on top, meta below. */
+.link-preview--video,
+.comment_body a.link-preview--video,
+.post_body a.link-preview--video {
     flex-direction: column;
-    /* Card width is set inline by JS from the media's real size; this is just the
-       pre-load default and the mobile cap. */
     max-width: min(100%, 440px);
-}
-.link-preview--text,
-.comment_body a.link-preview--text,
-.post_body a.link-preview--text {
-    flex-direction: column;
-    max-width: min(100%, 520px);
 }
 
 .link-preview:hover {
     border-color: var(--accent);
-    background: color-mix(in srgb, var(--text) 11%, transparent);
+    background: color-mix(in srgb, var(--text) 10%, transparent);
     text-decoration: none;
 }
 
-/* The `.link-preview` ancestor raises max-width to specificity (0,2,0) so it
-   beats the body-wide `.comment img { max-width: 50% }` rule that otherwise
-   crushed the media to half the card width. */
+/* When the upgraded card IS a link post's destination — linkPreview.js swapped
+   it in for the bare #post_url, which is a direct child of the .post grid — it
+   must take over the post_media slot the bare link held. Without this it has no
+   grid-area and auto-flows into a stray implicit cell (the top-right corner,
+   overlapping the header). Body/comment cards live inside .post_body /
+   .comment_body, never as a direct .post child, so they're unaffected. */
+.post > a.link-preview {
+    grid-area: post_media;
+    margin: 8px 12px;
+}
+
+/* Inline preview cards in a LISTING body (the "internal cards" mode for long /
+   multi-link posts): centre them horizontally in the body column. The selector
+   matches the base `.post_body a.link-preview` specificity (0,2,1) and, being
+   later in the file, wins so its auto margins actually apply. The card's own
+   rules already centre its contents vertically (link-preview-body uses
+   justify-content: center; the thumbnail is object-fit: cover). */
+.post_preview a.link-preview {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* The `.link-preview` ancestor raises specificity to (0,2,0) so it beats the
+   body-wide `.comment img { max-width: 50% }` rule that otherwise crushed the
+   media to half the card width. */
 .link-preview .link-preview-media {
     display: block;
-    max-width: 100%;
     margin: 0 !important;
     border-radius: 0 !important;
     background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-/* Small: fixed square thumbnail that stretches to the card's height. */
-.link-preview--small .link-preview-media {
+/* Card thumbnail: fixed square chip, cover-cropped, stretched to card height.
+   This is what makes every image-bearing link feel light — a 1200×630 GitHub
+   og:image becomes a neat 96px square instead of a full-width screenshot. */
+.link-preview--card .link-preview-media {
     flex: 0 0 auto;
-    width: 84px;
+    width: 96px;
     align-self: stretch;
     object-fit: cover;
 }
 
-/* Media: fill the card's (JS-set) width; height follows the inline aspect-ratio
-   so the natural proportions are preserved with no crop and no upscale. The 1.91
-   default holds a sensible box for the brief moment before the media loads and JS
-   stamps the real ratio. */
-.link-preview--media .link-preview-media {
+/* Video: fill the card width; height follows the inline aspect-ratio JS stamps
+   from the poster so the clip keeps its natural proportions with no crop. The
+   1.91 default holds a sensible box until the poster loads. */
+.link-preview--video .link-preview-media {
     width: 100%;
     height: auto;
+    max-width: 100%;
     aspect-ratio: 1.91;
 }
 
-.link-preview--media video.link-preview-media {
+.link-preview--video video.link-preview-media {
     object-fit: contain;
     background: #000;
 }
@@ -1931,9 +1944,9 @@ video.lazy-media:not([src]) {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
-    padding: 10px 14px;
+    padding: 9px 13px;
     line-height: 1.3;
 }
 
@@ -2138,7 +2151,15 @@ video.lazy-media:not([src]) {
     }
 }
 
+/* Fixed-width right-side link strip. The grid column is fit-content, so an
+   absent strip (text/self posts with no previewable link) still collapses to 0;
+   when present, this explicit width pins EVERY strip — native Reddit thumbnail
+   or unfurled og:image alike — to one uniform narrow size instead of letting
+   each one fit to its image's intrinsic width (which produced two visibly
+   different strip widths). 140px matches Reddit's native thumbnail resolution
+   so native thumbs fill it pixel-for-pixel with no upscaling. */
 .post_thumbnail {
+    width: 140px;
     border-radius: 5px;
     border: var(--panel-border);
     display: grid;
@@ -2148,15 +2169,19 @@ video.lazy-media:not([src]) {
     margin: 5px;
 }
 
+/* Native-thumbnail box: fill the strip width and pin to the top-left, so the
+   image stretches edge-to-edge at its natural aspect ratio (height follows the
+   svg width:100% below) — the same shape the unfurl path already produces. */
 .post_thumbnail div {
     grid-area: 1 / 1 / 2 / 2;
-    object-fit: cover;
+    width: 100%;
     align-self: center;
-    justify-self: center;
+    justify-self: stretch;
     overflow: hidden;
 }
 
 .post_thumbnail div svg {
+    display: block;
     width: 100%;
     height: auto;
 }
@@ -2190,6 +2215,34 @@ video.lazy-media:not([src]) {
 
 .post_thumbnail img {
     max-width: 100%;
+}
+
+/* An og:image lazily unfurled into the strip (linkPreview.js fillThumb). A link
+   card's og:image is landscape (~1.91:1); cover-cropping it into the tall narrow
+   strip left only a vertical sliver visible ("only a few characters"). Instead
+   render it at its NATURAL aspect, fit to the (moderately widened) strip width
+   and pinned to the top, so the whole preview is legible. The domain label is
+   moved into this box by fillThumb and overlaid on the image's bottom edge. */
+.post_thumbnail .unfurl-thumb-wrap {
+    position: relative;
+    grid-area: 1 / 1 / 2 / 2;
+    align-self: center;
+    justify-self: stretch;
+    width: 100%;
+    overflow: hidden;
+}
+
+.post_thumbnail .unfurl-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.post_thumbnail .unfurl-thumb-wrap span {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
 }
 
 .stickied {
@@ -3886,7 +3939,13 @@ th {
             "post_poll   post_poll   post_thumbnail" auto
             "post_notification post_notification post_thumbnail" auto
             "post_score  post_footer post_thumbnail" auto
-            / auto 1fr fit-content(min(20%, 152px));
+            / auto 1fr fit-content(120px);
+    }
+
+    /* Mirror the desktop fixed strip, narrower for small screens. Kept below the
+       column's fit-content cap so the strip never overflows its track. */
+    .post_thumbnail {
+        width: 104px;
     }
 
     .post_score {

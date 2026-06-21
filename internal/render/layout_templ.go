@@ -391,6 +391,12 @@ func layout(p BasePage, s pageSlots) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
+		if p.Prefs.DisableVisitRedditConfirmation != "on" {
+			templ_7745c5c3_Err = globalRedditModal().Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<script src=\"/quotaRing.js\" defer></script><script src=\"/redditModal.js\" defer></script><script src=\"/searchAutocomplete.js\" defer></script><script src=\"/searchMode.js\" defer></script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err

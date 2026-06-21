@@ -143,9 +143,9 @@ templ postContent(d PostPageData) {
 // upstreamDisabledNotice renders an inline fuckreddit-style block in place of
 // the comment thread when the operator pinned the instance to cache-only mode.
 // The OP is still rendered from the local archive above; this block sits below
-// it as a prompt + direct-to-reddit escape hatch. The post detail header already
-// renders the visitRedditConfirmation modal (when the user hasn't disabled it),
-// so the "Access directly" link here can reuse it via data-leave-modal.
+// it as a prompt + direct-to-reddit escape hatch. The layout renders the shared
+// leave-to-Reddit modal on every page (when the user hasn't disabled it), so the
+// "Access directly" link here drives it via data-leave-modal.
 templ upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) {
 	<div id="error" class="upstream-disabled-inline">
 		<div class="prefs">
@@ -180,22 +180,6 @@ templ upstreamDisabledNotice(post reddit.Post, prefs reddit.Preferences) {
 					}
 				</div>
 			</fieldset>
-		</div>
-	</div>
-}
-
-// visitRedditConfirmation is the "leave to reddit.com" modal (driven by
-// redditModal.js).
-templ visitRedditConfirmation(permalink string) {
-	<div class="modal-overlay" id="reddit-modal">
-		<div class="modal-box">
-			<h2>{ T(ctx, "modal.leave_title") }</h2>
-			<p>{ T(ctx, "modal.leave_body") }</p>
-			<p class="modal-url">{ "https://www.reddit.com" + permalink }</p>
-			<div class="modal-actions">
-				<button class="modal-cancel" type="button" data-modal-close>{ T(ctx, "modal.leave_cancel") }</button>
-				<a class="modal-confirm" href={ templ.SafeURL("https://www.reddit.com" + permalink) } target="_blank" rel="nofollow noopener noreferrer" data-modal-close>{ T(ctx, "modal.leave_confirm") }</a>
-			</div>
 		</div>
 	</div>
 }
@@ -266,7 +250,6 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 						<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off-icon lucide-shield-off"><path d="m2 2 20 20"></path><path d="M5 5a1 1 0 0 0-1 1v7c0 5 3.5 7.5 7.67 8.94a1 1 0 0 0 .67.01c2.35-.82 4.48-1.97 5.9-3.71"></path><path d="M9.309 3.652A12.252 12.252 0 0 0 11.24 2.28a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1v7a9.784 9.784 0 0 1-.08 1.264"></path></svg>
 						<span>{ T(ctx, "post.reddit") }</span>
 					</a>
-					@visitRedditConfirmation(post.Permalink)
 				}
 			</div>
 		</div>
@@ -333,7 +316,20 @@ templ postDetail(post reddit.Post, prefs reddit.Preferences, hasOAuth bool) {
 				}
 			</div>
 		} else if post.PostType == "link" {
-			<a id="post_url" href={ templ.URL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
+			if linkPostPreviewEligible(post) {
+				// Short, single-link post: unfurl the destination into the same lazy
+				// "intel" card as body auto-links. linkPreview.js upgrades this anchor
+				// in place once it scrolls into view, so the link post gets a real
+				// preview instead of the bare redlib URL (which often fetched nothing).
+				// It degrades gracefully — no JS, or an unfurl miss, and it simply stays
+				// the plain link it already is. Being first in the DOM it also wins the
+				// per-URL dedup, so the same URL repeated in the body stays plain text.
+				<a id="post_url" class="link-preview-lazy" data-unfurl={ post.Media.URL } href={ templ.URL(post.Media.URL) } target="_blank" rel="nofollow noopener noreferrer">{ post.Media.URL }</a>
+			} else {
+				// Long or link-heavy post: keep the plain redlib link, no card — the
+				// page never renders the cluttered multi-card layout.
+				<a id="post_url" href={ templ.URL(post.Media.URL) } rel="nofollow">{ post.Media.URL }</a>
+			}
 		}
 		<div class="post_body">
 			@templ.Raw(embedBody(ctx, post.Body))

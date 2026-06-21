@@ -13,18 +13,53 @@
   // live.
 
   var SELECTOR = "a.link-preview-lazy[data-unfurl]";
+  // Listing-card right strip: a link post / single-link self post with no Reddit
+  // thumbnail. We unfurl the link and drop its og:image into the strip (an image
+  // thumbnail, NOT a full card) so the listing matches a normal link post.
+  var THUMB_SELECTOR = "a.post_thumbnail[data-unfurl-thumb]";
   var MAX_CONCURRENT = 2; // gentle on third-party hosts (GitHub et al.)
 
   var queue = [];
   var active = 0;
 
+  // Page-level dedup. A link post repeats its destination URL twice — once as the
+  // top #post_url and again as a bare auto-link in the body ("GitHub: <url>"). We
+  // only ever want ONE intel card per URL, so the first occurrence in document
+  // order wins and every later duplicate stays a plain text link. Keyed by a
+  // trailing-slash-normalised URL so ".../posta" and ".../posta/" collapse.
+  var seen = Object.create(null);
+  function normURL(u) { return (u || "").replace(/\/+$/, "").toLowerCase(); }
+
+  // A long listing body is rendered into a collapsed teaser: .post_clipped caps it
+  // at ~250px with a bottom gradient mask that fades the final lines out (the CSS
+  // mask starts at FADE_START of the box height). A link sitting in that fade tail
+  // — or scrolled clean out below the clip — is "about to disappear"; unfurling a
+  // full intel card there is wasted work and visual noise. So inside an UNEXPANDED
+  // clip we only unfurl links in the crisp top region; the rest are parked until
+  // the user expands the preview (see the change listener below). Once expanded
+  // the clip drops its cap, the whole body is visible, and every link may unfurl.
+  var FADE_START = 0.6; // mirror .post_clipped mask-image gradient stop (#000 60%)
+  function clippedAway(el) {
+    var clip = el.closest && el.closest(".post_clipped");
+    if (!clip) return false;
+    var toggle = clip.parentNode && clip.parentNode.querySelector(".post_expand_toggle");
+    if (toggle && toggle.checked) return false; // expanded: full body shown
+    var offset = el.getBoundingClientRect().top - clip.getBoundingClientRect().top;
+    return offset > clip.clientHeight * FADE_START;
+  }
+
   function pump() {
     while (active < MAX_CONCURRENT && queue.length) {
       var el = queue.shift();
-      if (el && el.isConnected) {
-        active++;
-        unfurl(el);
-      }
+      if (!el || !el.isConnected) continue;
+      // Re-check geometry at dequeue time (images loading above may have pushed the
+      // link down into the fade/clip zone since it was observed). Park it for the
+      // expand re-scan instead of carding a link that's no longer really visible.
+      if (clippedAway(el)) { el.setAttribute("data-unfurl-state", "clipped"); continue; }
+      active++;
+      // A strip thumbnail fills its image; everything else builds a card.
+      if (el.hasAttribute("data-unfurl-thumb")) fillThumb(el);
+      else unfurl(el);
     }
   }
 
@@ -46,6 +81,10 @@
       .then(function (r) { return r.ok ? r.json() : { status: "failed" }; })
       .then(function (data) {
         if (data && data.status === "ok") {
+          // The fetch was in flight; if media loading above pushed this link into
+          // the fade/clip zone meanwhile, park it for the expand re-scan rather
+          // than dropping a card no one can see.
+          if (clippedAway(el)) { el.setAttribute("data-unfurl-state", "clipped"); return; }
           var card = buildCard(data, el.getAttribute("href"));
           if (card && el.parentNode) el.parentNode.replaceChild(card, el);
         } else {
@@ -61,80 +100,102 @@
       .then(done, done);
   }
 
+  // fillThumb unfurls a listing strip's link and, on success, swaps the link/
+  // placeholder for the og:image — a cover-cropped thumbnail filling the strip,
+  // exactly the surface a Reddit-thumbnailed link post already shows. On a miss
+  // (or a metadata-only unfurl with no image) the placeholder is left untouched.
+  function fillThumb(a) {
+    var url = a.getAttribute("data-unfurl-thumb");
+    a.setAttribute("data-unfurl-state", "fetching");
+    fetch("/api/unfurl?url=" + encodeURIComponent(url), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : { status: "failed" }; })
+      .then(function (data) {
+        if (!data || data.status !== "ok" || !data.image) return;
+        var img = el("img", "unfurl-thumb");
+        img.alt = "";
+        // NOTE: no loading="lazy" here. The img is detached until it loads, and a
+        // disconnected lazy image is never fetched — so the load event would never
+        // fire and the strip would hang. fillThumb only runs once the strip is in
+        // view (IntersectionObserver), so an eager load is correct anyway.
+        img.addEventListener("load", function () {
+          var ph = a.querySelector(":scope > svg"); // the placeholder glyph
+          if (ph) ph.parentNode.removeChild(ph);
+          a.classList.remove("no_thumbnail");
+          var wrap = el("div", "unfurl-thumb-wrap");
+          wrap.appendChild(img);
+          // Move the domain label into the image box so it overlays the image's
+          // bottom edge (the box is now natural-aspect, not the full strip).
+          var span = a.querySelector(":scope > span");
+          if (span) wrap.appendChild(span);
+          a.insertBefore(wrap, a.firstChild);
+        });
+        // GitHub's opengraph host (opengraph.githubassets.com) 429s a burst of
+        // card images; retry a few times with jittered backoff before giving up
+        // and leaving the placeholder, mirroring buildCard's image handling.
+        var attempts = 0;
+        img.addEventListener("error", function () {
+          if (attempts < 3) {
+            attempts++;
+            var sep = data.image.indexOf("?") >= 0 ? "&" : "?";
+            setTimeout(function () { img.src = data.image + sep + "rmretry=" + attempts; },
+              1200 * attempts + Math.floor(Math.random() * 1500));
+          }
+        });
+        img.src = data.image;
+      })
+      .catch(function () {})
+      .then(done, done);
+  }
+
   function el(tag, cls) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
     return n;
   }
 
-  // Media display bounds (CSS px). A real photo/video renders at its NATURAL
-  // aspect ratio within these — portrait stays portrait, landscape stays
-  // landscape — and is never upscaled past its native size. Only a small,
-  // square-ish image (a logo / favicon / avatar) collapses to the compact
-  // left-thumbnail layout.
-  var MEDIA_MAX_W = 420, MEDIA_MAX_H = 440, MEDIA_MIN_W = 230, LOGO_MAX = 300;
-
-  // applyMedia sizes the card from the media's REAL dimensions. This is the
-  // authoritative classifier (the server's image_wide is only an initial hint):
-  // og:image:width meta lies often (GitHub stamps summary_large_image on square
-  // avatars; many sites omit it), but the loaded pixels never do.
-  function applyMedia(a, m, w, h) {
-    if (!w || !h) return;
-    a.classList.remove("link-preview--media", "link-preview--small", "link-preview--text");
-    a.style.width = "";
-    m.style.aspectRatio = "";
-    var maxd = Math.max(w, h), r = w / h;
-    if (maxd <= LOGO_MAX && r >= 0.8 && r <= 1.25) {
-      a.classList.add("link-preview--small"); // small square → logo thumbnail (CSS sizes it)
-      return;
-    }
-    // Real media: fit within the bounds preserving aspect, never enlarging.
-    a.classList.add("link-preview--media");
-    var scale = Math.min(MEDIA_MAX_W / w, MEDIA_MAX_H / h, 1);
-    var dw = Math.round(w * scale);
-    a.style.width = Math.max(dw, MEDIA_MIN_W) + "px";
-    m.style.aspectRatio = w + " / " + h; // holds the box; height follows width
+  // sizeVideo stamps the card's aspect-ratio from the poster's real dimensions so
+  // a portrait clip renders portrait before the user ever hits play (a not-yet-
+  // played <video> reports no dimensions of its own). Images need no sizing — the
+  // CSS chip is a fixed square regardless of the source pixels.
+  function sizeVideo(m, w, h) {
+    if (w && h) m.style.aspectRatio = w + " / " + h;
   }
 
   function buildCard(data, href) {
-    // Start every media card as a natural-aspect "media" card (reasonably sized),
-    // not a tiny thumbnail — applyMedia downgrades to a logo thumbnail only if the
-    // loaded pixels are actually small+square. This avoids the jarring "tiny → big"
-    // flip and never leaves a real photo stuck at 84px.
-    var initial = data.image || data.video ? "media" : "text";
-    var a = el("a", "link-preview link-preview--" + initial);
+    // Every link unfurls into ONE compact "intel" card — the industry-standard
+    // inline embed (Discord/Slack/Telegram): a small square thumbnail on the left,
+    // meta on the right. A playable clip is the lone exception (--video) and keeps
+    // the player on top. No more giant full-bleed media cards, no tiny→big flip.
+    var isVideo = !!data.video;
+    var a = el("a", "link-preview link-preview--" + (isVideo ? "video" : "card"));
     a.href = data.url || href;
     a.target = "_blank";
     a.rel = "nofollow noopener noreferrer";
 
-    if (data.video) {
+    if (isVideo) {
       var v = el("video", "link-preview-media");
       v.controls = true;
       v.preload = "none";
       v.playsInline = true;
-      if (data.image) v.poster = data.image;
+      if (data.image) {
+        v.poster = data.image;
+        var probe = new Image();
+        probe.addEventListener("load", function () { sizeVideo(v, probe.naturalWidth, probe.naturalHeight); });
+        probe.src = data.image;
+      }
       v.src = data.video;
       // A click on the <video> must not also follow the card link.
       v.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); });
-      // A not-yet-played video has no readable dimensions, so size the card from
-      // the poster image's aspect (Twitter's video poster matches the clip) — a
-      // portrait clip then renders portrait before the user ever hits play.
-      if (data.image) {
-        var probe = new Image();
-        probe.addEventListener("load", function () { applyMedia(a, v, probe.naturalWidth, probe.naturalHeight); });
-        probe.src = data.image;
-      }
       a.appendChild(v);
     } else if (data.image) {
       var img = el("img", "link-preview-media");
       img.loading = "lazy"; // native defer: only fetched when near the viewport
       img.alt = "";
-      img.addEventListener("load", function () { applyMedia(a, img, img.naturalWidth, img.naturalHeight); });
       // Image hosts that gate by IP (GitHub's opengraph.githubassets.com) can
       // 429 a burst of card images on a link-heavy page. Retry a couple of times
-      // with jittered backoff — the throttle clears quickly — before giving up
-      // and degrading the card to text-only. The cache-buster query forces the
-      // browser to re-request rather than reuse the failed response.
+      // with jittered backoff — the throttle clears quickly — before giving up and
+      // dropping the thumbnail (the card stays a tidy text-only row). The cache-
+      // buster query forces a re-request rather than reuse of the failed response.
       var attempts = 0;
       img.addEventListener("error", function () {
         if (attempts < 3) {
@@ -144,9 +205,6 @@
             1200 * attempts + Math.floor(Math.random() * 1500));
         } else if (img.parentNode) {
           img.parentNode.removeChild(img);
-          a.style.width = "";
-          a.classList.remove("link-preview--media", "link-preview--small");
-          a.classList.add("link-preview--text");
         }
       });
       img.src = data.image;
@@ -183,13 +241,48 @@
       }, { rootMargin: "400px 0px" })
     : null;
 
+  // strip turns an anchor back into a plain text link: a duplicate URL keeps the
+  // bare link (redlib's simplicity) instead of growing a second identical card.
+  function strip(a) {
+    a.classList.remove("link-preview-lazy");
+    a.removeAttribute("data-unfurl");
+    a.setAttribute("data-unfurl-state", "duplicate");
+  }
+
   function scan(root) {
-    (root || document).querySelectorAll(SELECTOR).forEach(function (a) {
+    var r = root || document;
+    r.querySelectorAll(SELECTOR).forEach(function (a) {
       if (a.getAttribute("data-unfurl-state")) return;
+      var key = normURL(a.getAttribute("data-unfurl"));
+      if (key && seen[key]) { strip(a); return; } // already carded elsewhere
+      if (key) seen[key] = true;
       if (observer) observer.observe(a);
       else enqueue(a); // no IO support: just resolve them all
     });
+    // Listing strip thumbnails: no per-URL dedup (each card owns its own strip).
+    r.querySelectorAll(THUMB_SELECTOR).forEach(function (a) {
+      if (a.getAttribute("data-unfurl-state")) return;
+      if (observer) observer.observe(a);
+      else enqueue(a);
+    });
   }
+
+  // Expanding a collapsed preview (.post_clipped) drops its height cap and reveals
+  // the full body — so the links we parked in the old fade/clip zone are now fully
+  // visible and should unfurl. Re-enqueue every parked link under the toggled
+  // wrapper. (The toggle is a pure-CSS checkbox; we only need its change event.)
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains("post_expand_toggle") || !t.checked) return;
+    var wrap = t.closest(".post_body_wrap");
+    if (!wrap) return;
+    wrap.querySelectorAll(SELECTOR).forEach(function (a) {
+      if (a.getAttribute("data-unfurl-state") === "clipped") {
+        a.removeAttribute("data-unfurl-state");
+        enqueue(a);
+      }
+    });
+  });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { scan(document); });

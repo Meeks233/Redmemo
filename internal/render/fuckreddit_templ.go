@@ -283,22 +283,12 @@ func fuckRedditContent(d FuckRedditPageData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if d.Reason != "" && d.From != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. --> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = visitRedditConfirmation(d.From).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
 		if d.Reason != "" && !frReasonIsStatic(d.Reason) {
 			templ_7745c5c3_Err = templ.JSONScript("fr-reason-texts", frReasonTexts(ctx)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " <script>\n\t\t\t// /fuckreddit countdown — server is the sole source of truth. Poll\n\t\t\t// /api/status every 1s, render current_reset, swap reason text when the\n\t\t\t// active tier changes, and redirect back once the degrade lifts.\n\t\t\t(function(){\n\t\t\t\tvar el = document.getElementById('fr-countdown');\n\t\t\t\tif (!el) return;\n\t\t\t\tif (el.getAttribute('data-freeze') === '1') return;\n\t\t\t\tvar reasonEl = document.getElementById('fr-reason-text');\n\t\t\t\tvar fromPath = el.getAttribute('data-from') || '';\n\t\t\t\tvar REASON_TEXTS = {};\n\t\t\t\ttry { REASON_TEXTS = JSON.parse(document.getElementById('fr-reason-texts').textContent); } catch (e) {}\n\t\t\t\tfunction fmt(s) {\n\t\t\t\t\tif (s < 0) s = 0;\n\t\t\t\t\tvar m = Math.floor(s / 60);\n\t\t\t\t\tvar r = s % 60;\n\t\t\t\t\treturn (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;\n\t\t\t\t}\n\t\t\t\tvar lastReason = null;\n\t\t\t\tvar redirecting = false;\n\t\t\t\tfunction poll() {\n\t\t\t\t\tfetch('/api/status').then(function(r){ return r.json(); }).then(function(d){\n\t\t\t\t\t\tvar reason = d.current_reason || '';\n\t\t\t\t\t\tif (!reason) {\n\t\t\t\t\t\t\tif (redirecting) return;\n\t\t\t\t\t\t\tredirecting = true;\n\t\t\t\t\t\t\twindow.location.replace(fromPath || '/');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (reason !== lastReason) {\n\t\t\t\t\t\t\tlastReason = reason;\n\t\t\t\t\t\t\tif (reasonEl && REASON_TEXTS[reason]) {\n\t\t\t\t\t\t\t\treasonEl.textContent = REASON_TEXTS[reason];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tel.textContent = fmt(d.current_reset || 0);\n\t\t\t\t\t}).catch(function(){});\n\t\t\t\t}\n\t\t\t\tpoll();\n\t\t\t\tsetInterval(poll, 1000);\n\t\t\t})();\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " <script>\n\t\t\t// /fuckreddit countdown — server is the sole source of truth. Poll\n\t\t\t// /api/status every 1s, render current_reset, swap reason text when the\n\t\t\t// active tier changes, and redirect back once the degrade lifts.\n\t\t\t(function(){\n\t\t\t\tvar el = document.getElementById('fr-countdown');\n\t\t\t\tif (!el) return;\n\t\t\t\tif (el.getAttribute('data-freeze') === '1') return;\n\t\t\t\tvar reasonEl = document.getElementById('fr-reason-text');\n\t\t\t\tvar fromPath = el.getAttribute('data-from') || '';\n\t\t\t\tvar REASON_TEXTS = {};\n\t\t\t\ttry { REASON_TEXTS = JSON.parse(document.getElementById('fr-reason-texts').textContent); } catch (e) {}\n\t\t\t\tfunction fmt(s) {\n\t\t\t\t\tif (s < 0) s = 0;\n\t\t\t\t\tvar m = Math.floor(s / 60);\n\t\t\t\t\tvar r = s % 60;\n\t\t\t\t\treturn (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;\n\t\t\t\t}\n\t\t\t\tvar lastReason = null;\n\t\t\t\tvar redirecting = false;\n\t\t\t\tfunction poll() {\n\t\t\t\t\tfetch('/api/status').then(function(r){ return r.json(); }).then(function(d){\n\t\t\t\t\t\tvar reason = d.current_reason || '';\n\t\t\t\t\t\tif (!reason) {\n\t\t\t\t\t\t\tif (redirecting) return;\n\t\t\t\t\t\t\tredirecting = true;\n\t\t\t\t\t\t\twindow.location.replace(fromPath || '/');\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (reason !== lastReason) {\n\t\t\t\t\t\t\tlastReason = reason;\n\t\t\t\t\t\t\tif (reasonEl && REASON_TEXTS[reason]) {\n\t\t\t\t\t\t\t\treasonEl.textContent = REASON_TEXTS[reason];\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tel.textContent = fmt(d.current_reset || 0);\n\t\t\t\t\t}).catch(function(){});\n\t\t\t\t}\n\t\t\t\tpoll();\n\t\t\t\tsetInterval(poll, 1000);\n\t\t\t})();\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

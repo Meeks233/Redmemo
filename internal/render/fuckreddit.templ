@@ -67,10 +67,6 @@ templ fuckRedditContent(d FuckRedditPageData) {
 			</fieldset>
 		</div>
 	</div>
-	if d.Reason != "" && d.From != "" {
-		<!-- Modal rendered OUTSIDE #error so the broad `#error a` color rule cannot bleed into the modal anchors. -->
-		@visitRedditConfirmation(d.From)
-	}
 	if d.Reason != "" && !frReasonIsStatic(d.Reason) {
 		@templ.JSONScript("fr-reason-texts", frReasonTexts(ctx))
 		<script>

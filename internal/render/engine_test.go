@@ -204,6 +204,41 @@ func TestRenderPost(t *testing.T) {
 	}
 }
 
+// TestRenderPostLinkUnfurlsURL pins the unified "intel" card behaviour: a link
+// post's destination #post_url carries the lazy-unfurl markers (class +
+// data-unfurl) so linkPreview.js upgrades it into the same compact card as body
+// auto-links — instead of the bare redlib link that often pulled no preview.
+func TestRenderPostLinkUnfurlsURL(t *testing.T) {
+	e := newTestEngine(t)
+	var buf bytes.Buffer
+
+	const dest = "https://github.com/goposta/posta"
+	data := PostPageData{
+		BasePage: BasePage{URL: "/r/golang/comments/abc/test", BrandName: "TestBrand", Version: "0.1.0"},
+		Post: reddit.Post{
+			ID: "abc", Title: "A Link Post", Community: "golang", PostType: "link",
+			Score: [2]string{"100", "100"}, Comments: [2]string{"10", "10"},
+			Author: reddit.Author{Name: "poster"}, RelTime: "1h ago",
+			Media: reddit.Media{URL: dest},
+		},
+		Sort: "confidence",
+	}
+
+	if err := e.RenderPost(&buf, data); err != nil {
+		t.Fatalf("RenderPost() error: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `id="post_url"`) {
+		t.Fatal("link post should still render #post_url")
+	}
+	if !strings.Contains(out, `class="link-preview-lazy"`) {
+		t.Error("#post_url should carry link-preview-lazy so it unfurls into a card")
+	}
+	if !strings.Contains(out, `data-unfurl="`+dest+`"`) {
+		t.Errorf("#post_url should carry data-unfurl=%q; got:\n%s", dest, out)
+	}
+}
+
 // TestRenderPostCloudCheckHint pins the cached-locally cloud-check behaviour:
 //   - the SVG appears next to the comment count only when HasLocalComments is
 //     set (a local copy of the thread exists);

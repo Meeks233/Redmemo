@@ -104,6 +104,14 @@ templ layout(p BasePage, s pageSlots) {
 					</div>
 				</footer>
 			}
+			// The leave-to-Reddit confirmation lives in the layout so it guards
+			// off-site Reddit links on EVERY page, not just the post detail. It
+			// is suppressed only when the viewer has opted out of the prompt; with
+			// no modal present redditModal.js early-returns and links navigate
+			// directly (the documented opt-out behavior).
+			if p.Prefs.DisableVisitRedditConfirmation != "on" {
+				@globalRedditModal()
+			}
 			// Chrome scripts every page needs: the nav quota ring and the
 			// leave-to-Reddit modal handler (a no-op early-return when no modal
 			// is present). defer keeps them off the parser's critical path.

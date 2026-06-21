@@ -3,8 +3,11 @@ package render
 import (
 	"context"
 	"html"
+	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/redmemo/redmemo/internal/reddit"
 )
 
 // markLazyLinks annotates every bare external auto-link in an already-rendered
@@ -45,6 +48,81 @@ func markLazyLinks(_ context.Context, body string) string {
 		return `<a class="link-preview-lazy" data-unfurl="` + m[1] + `" href="` + m[1] +
 			`" target="_blank" rel="nofollow noopener noreferrer">` + m[2] + `</a>`
 	})
+}
+
+// normLink canonicalises a URL for de-duplication: trimmed, lower-cased, and
+// with trailing slashes dropped so ".../posta" and ".../posta/" collapse. Must
+// stay in lock-step with linkPreview.js's normURL so the server's link count and
+// the browser's per-URL card dedup agree.
+func normLink(href string) string {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(href)), "/")
+}
+
+// uniqueExternalLinks returns the distinct bare external (non-reddit, non-image)
+// auto-links in already-rendered body HTML — exactly the links markLazyLinks
+// would upgrade into preview cards. The map is keyed by a normalised URL (so
+// ".../x" and ".../x/" collapse) and values are the original href, so callers
+// can both count uniques and recover a real URL to unfurl. It exists to gate
+// carding: a body earns a card only when it carries a single such link.
+func uniqueExternalLinks(body string) map[string]string {
+	set := make(map[string]string)
+	if body == "" || !strings.Contains(body, "<a ") {
+		return set
+	}
+	for _, m := range externalAutolinkRe.FindAllStringSubmatch(body, -1) {
+		if len(m) != 3 {
+			continue
+		}
+		href := html.UnescapeString(m[1])
+		if strings.TrimSpace(href) != strings.TrimSpace(html.UnescapeString(m[2])) {
+			continue // labelled anchor, not a bare auto-link
+		}
+		if isRedditOrImage(href) {
+			continue
+		}
+		set[normLink(href)] = href
+	}
+	return set
+}
+
+// listingPreviewURL returns the single external link a LISTING card should
+// preview in its right-hand thumbnail strip, or "" if the post has none. For a
+// link post it's the destination; for a SHORT self post it's the lone body link.
+// This is what lets a single-link self post show its preview on the right strip
+// (mirroring link posts) instead of as an inline body card. Long or multi-link
+// posts return "" — no strip preview, no clutter.
+func listingPreviewURL(post reddit.Post) string {
+	// A post past the fold threshold gets no strip preview at all — long posts
+	// stay plain, matching the inline-card gate. Applies to link AND self posts:
+	// a link post with a long write-up (e.g. a "show & tell" with a full README in
+	// the body) should not sprout a tall cropped thumbnail on the right.
+	if isLongBody(post.Body) {
+		return ""
+	}
+	switch post.PostType {
+	case "link":
+		if post.Media.URL != "" && !isRedditOrImage(post.Media.URL) {
+			return post.Media.URL
+		}
+	case "self":
+		if set := uniqueExternalLinks(string(reddit.EmbedBodyImages(post.Body))); len(set) == 1 {
+			for _, orig := range set {
+				return orig
+			}
+		}
+	}
+	return ""
+}
+
+// urlHost is the display host for a preview link's domain label — the bare
+// hostname with a leading "www." dropped, falling back to the raw string if it
+// doesn't parse.
+func urlHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	return strings.TrimPrefix(u.Host, "www.")
 }
 
 // isRedditOrImage reports whether a bare link should be left alone rather than

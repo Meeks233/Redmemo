@@ -42,7 +42,29 @@ type i18nState struct {
 
 type ctxKey int
 
-const i18nKey ctxKey = 0
+const (
+	i18nKey ctxKey = iota
+	upstreamKey
+)
+
+// withUpstream stashes the per-request "may we reach upstream Reddit?" verdict
+// (the operator's disable_initiative_upstream_access switch, inverted) so the
+// render-time body chokepoint embedBody can decide whether Reddit content links
+// stay on-site or point back at reddit.com — without threading the flag through
+// every nested templ component.
+func withUpstream(ctx context.Context, allowed bool) context.Context {
+	return context.WithValue(ctx, upstreamKey, allowed)
+}
+
+// upstreamAllowed reads the flag set by withUpstream. It defaults to true (links
+// localized, the long-standing behavior) when unset, so any render path that
+// does not opt in keeps working unchanged.
+func upstreamAllowed(ctx context.Context) bool {
+	if v, ok := ctx.Value(upstreamKey).(bool); ok {
+		return v
+	}
+	return true
+}
 
 // i18nContext returns a context carrying the translator and html-lang for lang,
 // falling back to DefaultLang when lang is unknown.
@@ -52,6 +74,14 @@ func (e *Engine) i18nContext(lang string) context.Context {
 		t = e.translators[DefaultLang]
 	}
 	return context.WithValue(context.Background(), i18nKey, i18nState{t: t, lang: htmlLang(lang)})
+}
+
+// i18nContextPrefs builds the per-request render context like i18nContext but
+// also binds the upstream-access verdict derived from the viewer's effective
+// preferences (which already fold in the operator site-default). Body-rendering
+// entry points use this so embedBody can apply the Reddit-link intel policy.
+func (e *Engine) i18nContextPrefs(prefs reddit.Preferences) context.Context {
+	return withUpstream(e.i18nContext(prefs.Lang), prefs.DisableInitiativeUpstreamAccess != "on")
 }
 
 // T translates key within the request's locale. Outside a templ render (no
@@ -385,8 +415,17 @@ func flairBoxStyle(fg, bg string) templ.SafeCSS {
 	return templ.SafeCSS(b.String())
 }
 
+// thumbBoxStyle styles the native-thumbnail box in the right-side link strip.
+// The box fills the strip's (fixed, uniform) width and keeps the thumbnail's
+// natural aspect ratio so the image scales proportionally — top/left/right
+// aligned, width filled — instead of being capped at its low intrinsic size
+// (which left a narrow image floating inside the strip). aspect-ratio reserves
+// the correct height up front, avoiding layout shift as the image decodes.
 func thumbBoxStyle(w, h int64) templ.SafeCSS {
-	return templ.SafeCSS("max-width:" + i64(w) + "px;max-height:" + i64(h) + "px;")
+	if w > 0 && h > 0 {
+		return templ.SafeCSS("width:100%;aspect-ratio:" + i64(w) + "/" + i64(h) + ";")
+	}
+	return templ.SafeCSS("width:100%;")
 }
 
 // frReasonTexts maps each degrade reason code to its localized message, used by

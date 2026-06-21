@@ -457,13 +457,13 @@ func (e *Engine) RenderSubreddit(w io.Writer, data SubredditPageData) error {
 		data.AllPostsHiddenNSFW = true
 	}
 	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
-	return subredditPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return subredditPage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 func (e *Engine) RenderPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
 	posts, _ = filterNSFW(posts, prefs)
 	e.markLocalCache(posts, prefs.VideoQuality)
-	ctx := e.i18nContext(prefs.Lang)
+	ctx := e.i18nContextPrefs(prefs)
 	lazy := prefs.LazyMedia == "on"
 	for i, p := range posts {
 		if i > 0 {
@@ -483,7 +483,7 @@ func (e *Engine) RenderPost(w io.Writer, data PostPageData) error {
 	single := []reddit.Post{data.Post}
 	e.markLocalCache(single, data.Prefs.VideoQuality)
 	data.Post = single[0]
-	return postPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return postPage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
@@ -496,7 +496,7 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 		data.AllPostsHiddenNSFW = true
 	}
 	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
-	return searchPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return searchPage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 // RenderSearchPostList renders just the search post-list fragment (the same
@@ -505,14 +505,14 @@ func (e *Engine) RenderSearch(w io.Writer, data SearchPageData) error {
 func (e *Engine) RenderSearchPostList(w io.Writer, posts []reddit.Post, prefs reddit.Preferences) error {
 	posts, _ = filterNSFW(posts, prefs)
 	e.markLocalCache(posts, prefs.VideoQuality)
-	return searchPostList(posts, prefs, prefs.LazyMedia == "on").Render(e.i18nContext(prefs.Lang), w)
+	return searchPostList(posts, prefs, prefs.LazyMedia == "on").Render(e.i18nContextPrefs(prefs), w)
 }
 
 // RenderCommentList emits just the per-thread comment cards the post page
 // wraps each top-level comment in. Used by the comments=load-all partial so a
 // click can swap in the full thread without re-rendering the whole page.
 func (e *Engine) RenderCommentList(w io.Writer, comments []reddit.Comment, prefs reddit.Preferences) error {
-	ctx := e.i18nContext(prefs.Lang)
+	ctx := e.i18nContextPrefs(prefs)
 	for _, c := range comments {
 		if _, err := io.WriteString(w, `<div class="thread">`); err != nil {
 			return err
@@ -532,7 +532,7 @@ func (e *Engine) RenderCommentList(w io.Writer, comments []reddit.Comment, prefs
 // inserts the result directly inside an existing parent's
 // `<blockquote class="replies">` before the load-more button.
 func (e *Engine) RenderReplyList(w io.Writer, replies []reddit.Comment, prefs reddit.Preferences) error {
-	ctx := e.i18nContext(prefs.Lang)
+	ctx := e.i18nContextPrefs(prefs)
 	for _, c := range replies {
 		if err := commentTree(c).Render(ctx, w); err != nil {
 			return err
@@ -551,7 +551,7 @@ func (e *Engine) RenderUser(w io.Writer, data UserPageData) error {
 		data.AllPostsHiddenNSFW = true
 	}
 	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
-	return userPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return userPage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
@@ -560,7 +560,7 @@ func (e *Engine) RenderArchiveHub(w io.Writer, data ArchiveHubPageData) error {
 	}
 	data.SearchPosts, _ = filterNSFW(data.SearchPosts, data.Prefs)
 	e.markLocalCache(data.SearchPosts, data.Prefs.VideoQuality)
-	return archiveHubPage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return archiveHubPage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
@@ -573,7 +573,7 @@ func (e *Engine) RenderArchive(w io.Writer, data ArchivePageData) error {
 		data.AllPostsHiddenNSFW = true
 	}
 	e.markLocalCache(data.Posts, data.Prefs.VideoQuality)
-	return archivePage(data).Render(e.i18nContext(data.Prefs.Lang), w)
+	return archivePage(data).Render(e.i18nContextPrefs(data.Prefs), w)
 }
 
 func (e *Engine) RenderSettings(w io.Writer, data SettingsPageData) error {

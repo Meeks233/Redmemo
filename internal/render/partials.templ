@@ -418,15 +418,20 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 				}
 			}
 		}
-		if post.PostType != "self" && post.PostType != "image" && post.PostType != "video" && post.PostType != "gif" && post.PostType != "gallery" {
+		// The right sidebar strip is shown ONLY for a short, single-link post
+		// (pvURL set): that one link is previewed here as a tidy thumbnail. Long or
+		// multi-link posts get NO sidebar — their link(s) render as inline cards in
+		// the body instead (see postPreview), which avoids the tall empty/cropped
+		// sidebar a long post otherwise produced.
+		{{ pvURL := listingPreviewURL(post) }}
+		if pvURL != "" {
 			<a
 				class={ "post_thumbnail", templ.KV("no_thumbnail", post.Thumbnail.URL == "") }
-				if post.PostType == "link" {
-					href={ templ.SafeURL(post.Media.URL) }
-				} else {
-					href={ templ.SafeURL(post.Permalink) }
-				}
+				href={ templ.SafeURL(pvURL) }
 				rel="nofollow"
+				if post.Thumbnail.URL == "" {
+					data-unfurl-thumb={ pvURL }
+				}
 			>
 				if post.Thumbnail.URL != "" {
 					<div style={ thumbBoxStyle(post.Thumbnail.Width, post.Thumbnail.Height) }>
@@ -444,6 +449,8 @@ templ postInList(post reddit.Post, prefs reddit.Preferences, lazy bool) {
 				<span>
 					if post.PostType == "link" {
 						{ post.Domain }
+					} else if pvURL != "" {
+						{ urlHost(pvURL) }
 					} else {
 						{ post.PostType }
 					}
@@ -488,11 +495,69 @@ func isLongBody(body template.HTML) bool { return len(body) > previewExpandThres
 // deserialized straight from stored JSON (ParsePost does not re-run), so without
 // embedding here their bodies would still render the bare link. Idempotent: a
 // body already embedded by the parser passes through unchanged.
-// embedBody also marks every bare external auto-link for lazy, client-side
-// preview-card upgrading (see preview.go / linkPreview.js); links pass through
-// as plain anchors until the browser unfurls them on scroll.
+//
+// Link preview cards are GATED: a body upgrades its external link into a card
+// only when it is short (within previewExpandThreshold) AND carries exactly one
+// such link. Long or multi-link bodies (e.g. a "Small Projects" megathread of
+// repos) stay plain text — rendering a wall of cards there was the cluttered
+// "two styles mixed" mess. One short body, one link, one tidy card.
 func embedBody(ctx context.Context, body template.HTML) string {
-	return markLazyLinks(ctx, string(reddit.EmbedBodyImages(body)))
+	s := string(reddit.EmbedBodyImages(body))
+	if !isLongBody(body) && len(uniqueExternalLinks(s)) == 1 {
+		s = markLazyLinks(ctx, s)
+	}
+	// Apply the upstream-aware Reddit-link intel last, so it sees the final href
+	// of every anchor: on-site paths stay local when upstream is reachable, and
+	// flip back to reddit.com (guarded by the leave-to-Reddit modal) when the
+	// operator has pinned the instance cache-only.
+	return reviseRedditLinks(s, upstreamAllowed(ctx))
+}
+
+// embedBodyNoCards is the listing-card body variant used when the post's link is
+// already previewed in the right-hand sidebar strip (a short, single-link post):
+// it embeds images and revises Reddit links like embedBody but NEVER upgrades a
+// link to an inline card, so the sidebar and body don't both show the same link.
+func embedBodyNoCards(ctx context.Context, body template.HTML) string {
+	return reviseRedditLinks(string(reddit.EmbedBodyImages(body)), upstreamAllowed(ctx))
+}
+
+// embedBodyCards is the listing-card body variant for the OTHER mode: a long or
+// multi-link post that gets no sidebar strip. Here every external link is
+// upgraded to an inline card (the "internal cards" half of the rule: short
+// single-link → sidebar, else → inline cards), so a link-heavy write-up renders
+// its links as cards in the body instead of a tall empty sidebar.
+func embedBodyCards(ctx context.Context, body template.HTML) string {
+	s := markLazyLinks(ctx, string(reddit.EmbedBodyImages(body)))
+	return reviseRedditLinks(s, upstreamAllowed(ctx))
+}
+
+// linkPostPreviewEligible reports whether a link post's destination (#post_url)
+// should unfurl into a preview card instead of rendering as the bare redlib
+// link. Same gate as bodies: the post must be short (within the expand
+// threshold) AND the destination must be the ONLY unique external link on the
+// page (the body adds no other external link — repeating the destination is
+// fine, it de-dupes to one). A long body, or a body that introduces a second
+// external link, leaves #post_url a plain link so the page never shows a card
+// for a long/link-heavy post.
+func linkPostPreviewEligible(post reddit.Post) bool {
+	if post.PostType != "link" || post.Media.URL == "" || isRedditOrImage(post.Media.URL) {
+		return false
+	}
+	if isLongBody(post.Body) {
+		return false
+	}
+	set := uniqueExternalLinks(string(reddit.EmbedBodyImages(post.Body)))
+	set[normLink(post.Media.URL)] = post.Media.URL
+	return len(set) == 1
+}
+
+// inlineLinkCard renders a link post's destination as a lazy inline preview card
+// inside the listing body — used in the "internal cards" mode (long/multi-link
+// post, no sidebar) where the destination isn't otherwise in the body text.
+// linkPreview.js unfurls it with the same card fetch logic as body auto-links;
+// it degrades to the plain link with no JS / on an unfurl miss.
+templ inlineLinkCard(rawURL string) {
+	<a class="link-preview-lazy" data-unfurl={ rawURL } href={ templ.URL(rawURL) } target="_blank" rel="nofollow noopener noreferrer">{ rawURL }</a>
 }
 
 // postPreview renders the listing-card text body. For bodies long enough to be
@@ -501,17 +566,42 @@ func embedBody(ctx context.Context, body template.HTML) string {
 // checkbox, and CSS (.post_expand_toggle:checked ~ .post_preview) drops the
 // max-height + fade mask so the full body shows in place — no navigation, no
 // script. Short bodies render exactly as before with no extra markup.
+//
+// Card mode mirrors the sidebar gate: when the post got a sidebar strip (short,
+// single link) the body stays plain (the link lives in the sidebar); otherwise
+// the body upgrades its links to inline cards, and a link post additionally
+// prepends its destination as a card so the link is previewed, not dropped.
 templ postPreview(post reddit.Post) {
+	{{ hasSidebar := listingPreviewURL(post) != "" }}
+	{{ inlineLink := !hasSidebar && post.PostType == "link" && post.Media.URL != "" && !isRedditOrImage(post.Media.URL) }}
 	if isLongBody(post.Body) {
 		<div class="post_body_wrap">
 			<input type="checkbox" id={ "expand-" + post.ID } class="post_expand_toggle"/>
-			<div class="post_body post_preview post_clipped">@templ.Raw(embedBody(ctx, post.Body))</div>
+			<div class="post_body post_preview post_clipped">
+				if inlineLink {
+					@inlineLinkCard(post.Media.URL)
+				}
+				if hasSidebar {
+					@templ.Raw(embedBodyNoCards(ctx, post.Body))
+				} else {
+					@templ.Raw(embedBodyCards(ctx, post.Body))
+				}
+			</div>
 			<label for={ "expand-" + post.ID } class="post_expand_label" aria-label={ T(ctx, "post.expand") }>
 				<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down"><path d="m6 9 6 6 6-6"></path></svg>
 			</label>
 		</div>
 	} else {
-		<div class="post_body post_preview">@templ.Raw(embedBody(ctx, post.Body))</div>
+		<div class="post_body post_preview">
+			if inlineLink {
+				@inlineLinkCard(post.Media.URL)
+			}
+			if hasSidebar {
+				@templ.Raw(embedBodyNoCards(ctx, post.Body))
+			} else {
+				@templ.Raw(embedBodyCards(ctx, post.Body))
+			}
+		</div>
 	}
 }
 
@@ -549,6 +639,28 @@ templ repostVariants(post reddit.Post) {
 			</ul>
 		</details>
 	}
+}
+
+// globalRedditModal is the single, page-wide "you are about to leave for
+// reddit.com" confirmation dialog. It is rendered once per page by the layout
+// (when the viewer has not disabled the confirmation) and driven entirely by
+// redditModal.js, which both lifts the real target into the confirm button for
+// explicit `data-leave-modal` triggers AND intercepts any other anchor whose
+// resolved host is reddit.com — so every off-site Reddit link anywhere on the
+// site goes through this second confirmation. The url/href slots start empty;
+// the script fills them on open.
+templ globalRedditModal() {
+	<div class="modal-overlay" id="reddit-modal">
+		<div class="modal-box">
+			<h2>{ T(ctx, "modal.leave_title") }</h2>
+			<p>{ T(ctx, "modal.leave_body") }</p>
+			<p class="modal-url"></p>
+			<div class="modal-actions">
+				<button class="modal-cancel" type="button" data-modal-close>{ T(ctx, "modal.leave_cancel") }</button>
+				<a class="modal-confirm" href="#" target="_blank" rel="nofollow noopener noreferrer" data-modal-close>{ T(ctx, "modal.leave_confirm") }</a>
+			</div>
+		</div>
+	</div>
 }
 
 // bannerIcon resolves a lucide-style icon name to an inline SVG. Keeping the
