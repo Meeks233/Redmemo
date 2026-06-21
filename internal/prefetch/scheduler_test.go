@@ -354,11 +354,18 @@ func TestSleep(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type mockSettings struct {
+	mu   sync.RWMutex
 	data map[string]string
 }
 
-func (m *mockSettings) Get(key string) string { return m.data[key] }
+func (m *mockSettings) Get(key string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.data[key]
+}
 func (m *mockSettings) Set(key, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.data[key] = value
 	return nil
 }

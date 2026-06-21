@@ -218,6 +218,21 @@ func TestL3PlanHangover_FromRows(t *testing.T) {
 	if _, bad := l3PlanHangover(mkRows(big, 184), 0); bad {
 		t.Error("with unknown L1 round size, a self-consistent plan must not be flagged")
 	}
+	// Regression (stale-reference misfire): a healthy cycle sized to its OWN live
+	// L1 round must pass even when post_count == l1Count exactly. In production a
+	// depth=l3 sub stopped writing L2's `post_count`, so LastCyclePostCount froze
+	// at a stale 85 from the last L2 run while the live L1 round grew to 99; the
+	// guard then discarded the perfectly-valid 99-post cycle every restart. The
+	// fix makes the reference track L1's `fetched`, so the count it sees equals
+	// the cycle's own post_count — which must NOT be flagged at the boundary.
+	full99 := make([]int, 20) // 20 waves covering 99 posts (planL3Waves shape)
+	{
+		chunks, _ := planL3Waves(99, 12*time.Hour)
+		full99 = chunks
+	}
+	if _, bad := l3PlanHangover(mkRows(full99, 99), 99); bad {
+		t.Error("a cycle sized to its own live L1 round (99==99) must survive — the stale-reference regression")
+	}
 }
 
 // TestPlanL3Waves_NeverHangover ties the generator to the validator: whatever

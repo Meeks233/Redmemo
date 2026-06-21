@@ -205,10 +205,24 @@ func (s *PrefetchRunStore) PreviousL3CycleID(subreddit, currentCycleID string) (
 	return prev.String, nil
 }
 
-// LastCyclePostCount returns the post_count of the most recent L1-lineage cycle
-// for (bucket, subreddit) — i.e. how many posts the last L1 listing round
-// surfaced. reconcileLoop uses it to size a regenerated L2/L3 cycle the same way
-// a real L1 round would, instead of over-counting the full archive backlog.
+// LastCyclePostCount returns the size of the most recent L1 listing round for
+// (bucket, subreddit) — i.e. how many posts that round surfaced. reconcileLoop
+// uses it to size a regenerated L2/L3 cycle the same way a real L1 round would,
+// instead of over-counting the full archive backlog; the reclaim hangover guard
+// uses it as the reference an L3 cycle's post_count must not overshoot.
+//
+// It reads the round size from BOTH lineage layers, newest row first:
+//   - L1 'ok' rows record it as `fetched` (the authoritative count of posts the
+//     listing returned this round);
+//   - L2 rows mirror it as `post_count`.
+//
+// Reading L1's `fetched` is essential: L1 runs on EVERY cycle regardless of a
+// sub's depth, whereas L2 only writes `post_count` when the sub's depth covers
+// media. A depth=l3 sub (L2 off) therefore never records a fresh `post_count`,
+// so a post_count-only query would freeze at the stale value from the last time
+// L2 happened to run — and the hangover guard would then falsely discard every
+// L3 cycle whose live L1 round grew past that frozen snapshot. Coalescing in
+// L1's `fetched` keeps the reference current.
 //
 // It deliberately excludes standalone L3 cycles (cycle_id 'L3:%'): their
 // post_count is itself derived from an L1 round, so reading it back to size the
@@ -218,13 +232,15 @@ func (s *PrefetchRunStore) PreviousL3CycleID(subreddit, currentCycleID string) (
 func (s *PrefetchRunStore) LastCyclePostCount(bucket, subreddit string) (int, error) {
 	var pc sql.NullInt64
 	err := s.db.QueryRow(`
-		SELECT COALESCE(NULLIF(payload->>'post_count', '')::int, 0)
+		SELECT COALESCE(NULLIF(payload->>'post_count', '')::int,
+		                NULLIF(payload->>'fetched', '')::int, 0)
 		  FROM prefetch_runs
 		 WHERE LOWER(subreddit) = LOWER($2)
 		   AND (bucket = $1 OR $1 = '')
 		   AND (cycle_id IS NULL OR cycle_id NOT LIKE 'L3:%')
-		   AND payload ? 'post_count'
-		   AND COALESCE(NULLIF(payload->>'post_count', '')::int, 0) > 0
+		   AND (payload ? 'post_count' OR payload ? 'fetched')
+		   AND COALESCE(NULLIF(payload->>'post_count', '')::int,
+		                NULLIF(payload->>'fetched', '')::int, 0) > 0
 		 ORDER BY id DESC
 		 LIMIT 1`, bucket, subreddit,
 	).Scan(&pc)
