@@ -3,11 +3,23 @@ package prefetch
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/redmemo/redmemo/internal/store"
 )
+
+// eventsContain reports whether any logged event message contains substr.
+func eventsContain(s *Scheduler, substr string) bool {
+	for _, e := range s.Events.Snapshot() {
+		if strings.Contains(e.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
 
 // TestDriveWaves_PausesOnMidCycleDisable pins the aggressive-disable contract:
 // flipping a layer's depth off mid-cycle stops further waves at the next
@@ -264,6 +276,77 @@ func TestReconcilePostCount_FallsBackToPageLimit(t *testing.T) {
 	chunks, _ := planL3Waves(50, 12*time.Hour)
 	if len(chunks) > 12 {
 		t.Errorf("page-limit-sized L3 plan has %d waves, expected ~10", len(chunks))
+	}
+}
+
+// TestSubArchivedPostCount pins the known/unknown contract the brand-new-sub gate
+// relies on: a seam (or live store) count is "known"; a query error or the total
+// absence of any store is "unknown" so the gate never trips on uncertainty.
+func TestSubArchivedPostCount(t *testing.T) {
+	if n, known := (&Scheduler{postCountFn: func(string) (int, error) { return 7, nil }}).subArchivedPostCount("golang"); !known || n != 7 {
+		t.Errorf("seam count = (%d,%v), want (7,true)", n, known)
+	}
+	if n, known := (&Scheduler{postCountFn: func(string) (int, error) { return 0, nil }}).subArchivedPostCount("golang"); !known || n != 0 {
+		t.Errorf("seam zero = (%d,%v), want (0,true)", n, known)
+	}
+	if _, known := (&Scheduler{postCountFn: func(string) (int, error) { return 0, errors.New("boom") }}).subArchivedPostCount("golang"); known {
+		t.Error("a query error must report unknown, not zero")
+	}
+	if _, known := (&Scheduler{}).subArchivedPostCount("golang"); known {
+		t.Error("no postStore and no seam must report unknown")
+	}
+}
+
+// TestResumeOrRegenerate_SkipsBrandNewSub is the regression test for the golang
+// phantom: a sub freshly added to the crawl list (zero archived posts, first L1
+// fetch not landed) must NOT get a reconcile-generated placeholder L2/L3 cycle —
+// that cycle fires only empty "0 eligible posts — skipped" waves and litters the
+// ledger/ /debug. The reconcile defers to the first L1 fetch's own fan-out.
+func TestResumeOrRegenerate_SkipsBrandNewSub(t *testing.T) {
+	s := &Scheduler{
+		Events:      NewEventLog(20),
+		settings:    &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang", "page_limit": "50"}},
+		postCountFn: func(string) (int, error) { return 0, nil }, // brand-new sub: nothing archived yet
+	}
+	s.resumeOrRegenerate(context.Background(), "L3", "day", "golang")
+
+	if !eventsContain(s, "no posts archived yet") {
+		t.Error("a zero-post sub should log the defer-to-L1 event")
+	}
+	if eventsContain(s, "generating a fresh cycle") {
+		t.Error("a zero-post sub must NOT generate a placeholder L3 cycle")
+	}
+}
+
+// TestResumeOrRegenerate_GeneratesWhenPostsExist is the companion: a sub that
+// already has archived posts (depth flipped back on, e.g. l2 -> l2+l3) is past
+// the gate and DOES regenerate a fresh cycle, so the new-sub guard never starves
+// a legitimately re-enabled layer.
+func TestResumeOrRegenerate_GeneratesWhenPostsExist(t *testing.T) {
+	s := &Scheduler{
+		Events:      NewEventLog(20),
+		settings:    &mockSettings{data: map[string]string{"prefetch_subs": "sub:golang", "page_limit": "50"}},
+		postCountFn: func(string) (int, error) { return 80, nil }, // posts already archived
+		// l3CandidatesFn returns nothing so the spawned wave driver finishes fast
+		// without a DB; we only assert the generate path was entered, not its work.
+		l3CandidatesFn: func(string, string, string, int, int) ([]*store.StoredPost, error) { return nil, nil },
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // keep the spawned driveWaves goroutine from sleeping out the period
+
+	s.resumeOrRegenerate(ctx, "L3", "day", "golang")
+
+	if eventsContain(s, "no posts archived yet") {
+		t.Error("a sub with archived posts must not be deferred as brand-new")
+	}
+	// The "generating a fresh cycle" line is emitted by the spawned goroutine;
+	// give it a beat to run before asserting.
+	deadline := time.Now().Add(2 * time.Second)
+	for !eventsContain(s, "generating a fresh cycle") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !eventsContain(s, "generating a fresh cycle") {
+		t.Error("a sub with archived posts should regenerate a fresh L3 cycle")
 	}
 }
 

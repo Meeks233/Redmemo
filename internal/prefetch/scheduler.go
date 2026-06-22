@@ -200,6 +200,11 @@ type Scheduler struct {
 	// min-comments gate, independent of any media state.
 	l3CandidatesFn func(sub, cycleID, prevCycleID string, limit, minComments int) ([]*store.StoredPost, error)
 
+	// postCountFn, when non-nil, replaces s.postStore.CountBySubreddit so the
+	// brand-new-sub reconcile gate (resumeOrRegenerate) can be exercised without
+	// a DB. Tests return a fixed archived-post count per sub.
+	postCountFn func(sub string) (int, error)
+
 	// bucketGap and bucketBaseOverride let tests shrink the cadence so a
 	// full bucket cycle completes in milliseconds instead of hours.
 	// bucketGap is the per-sub floor; bucketBaseOverride, when non-zero,
@@ -882,6 +887,20 @@ func (s *Scheduler) resumeOrRegenerate(ctx context.Context, layer, tf, sub strin
 		go s.driveReclaimedCycle(ctx, layer, tf, sub, pending)
 		return
 	}
+	// A sub freshly added to the crawl list whose first L1 fetch hasn't landed
+	// any posts yet has nothing for L2/L3 to chew on: ListNeedingMedia /
+	// ListL3Candidates return zero, so a regenerated cycle fires only empty
+	// "0 eligible posts — skipped" waves and litters /debug + the ledger with a
+	// phantom plan (the 10-wave post_count=50 placeholder seen when golang was
+	// first added). Defer to the first L1 fetch's own fan-out (runL2Cycle), which
+	// spawns a correctly-sized L2/L3 cycle once posts actually exist. Only skip
+	// when we can positively confirm zero posts; an unknown count (no store)
+	// keeps the prior regenerate behaviour.
+	if n, known := s.subArchivedPostCount(sub); known && n == 0 {
+		s.Events.Addf(LevelInfo, layer, "reconcile r/%s: %s re-enabled but no posts archived yet — deferring to first L1 fetch", sub, layer)
+		return
+	}
+
 	// No surviving plan — roll a fresh one across the time remaining before the
 	// next L1 cycle so the whole batch still lands before L1 comes round again.
 	// Size it like one L1 round (reconcilePostCount), NOT the full archive
@@ -939,6 +958,29 @@ func (s *Scheduler) timeUntilNextCycle(tf string) time.Duration {
 		}
 	}
 	return minCyclePeriod
+}
+
+// subArchivedPostCount returns how many posts are archived for sub and whether
+// that count is known. It is "unknown" (known=false) when there is no postStore
+// and no postCountFn seam, or the query errors — callers must treat unknown as
+// "don't gate" so a transient DB hiccup never suppresses a legitimate cycle. The
+// postCountFn seam lets tests drive the brand-new-sub gate without a live DB.
+func (s *Scheduler) subArchivedPostCount(sub string) (count int, known bool) {
+	if s.postCountFn != nil {
+		n, err := s.postCountFn(sub)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
+	}
+	if s.postStore != nil {
+		n, err := s.postStore.CountBySubreddit(sub, false)
+		if err != nil {
+			return 0, false
+		}
+		return int(n), true
+	}
+	return 0, false
 }
 
 // reconcilePostCount sizes a reconcile-generated L2/L3 cycle the SAME way a real
