@@ -176,6 +176,55 @@ func TestRemainingBudget_ResetsAfterWindow(t *testing.T) {
 	}
 }
 
+// Regression: the nav ring (RemainingBudget / WindowInfo) and the debug page
+// (TokenStatuses) must report the SAME remaining count. The old code left
+// TokenStatuses showing the raw pre-reset header value while RemainingBudget
+// optimistically replenished once the window elapsed — producing the "debug
+// says 92 but the ring is full" mismatch. After a window elapse both must show
+// the replenished ceiling; within an active window both must show the live count.
+func TestBudgetSurfacesAgree(t *testing.T) {
+	t.Run("window elapsed -> both replenished", func(t *testing.T) {
+		past := time.Now().Add(-1 * time.Minute)
+		mt := &ManagedToken{RateRemaining: 92, RateResetAt: past}
+		p := newTestHolder(mt)
+
+		budget, _ := p.RemainingBudget(context.Background())
+		_, capacity, winRem := p.WindowInfo()
+		statuses := p.TokenStatuses()
+		if len(statuses) != 1 {
+			t.Fatalf("TokenStatuses len = %d, want 1", len(statuses))
+		}
+		debugRem := statuses[0].RateRemaining
+
+		if budget != windowCapacity {
+			t.Errorf("RemainingBudget = %d, want %d after reset", budget, windowCapacity)
+		}
+		if winRem != windowCapacity {
+			t.Errorf("WindowInfo remaining = %d, want %d after reset", winRem, windowCapacity)
+		}
+		if capacity != windowCapacity {
+			t.Errorf("WindowInfo capacity = %d, want %d", capacity, windowCapacity)
+		}
+		if debugRem != budget || debugRem != winRem {
+			t.Errorf("debug=%d ring-budget=%d window=%d; all three must agree", debugRem, budget, winRem)
+		}
+	})
+
+	t.Run("active window -> both live count", func(t *testing.T) {
+		future := time.Now().Add(5 * time.Minute)
+		mt := &ManagedToken{RateRemaining: 92, RateResetAt: future}
+		p := newTestHolder(mt)
+
+		budget, _ := p.RemainingBudget(context.Background())
+		_, _, winRem := p.WindowInfo()
+		debugRem := p.TokenStatuses()[0].RateRemaining
+
+		if budget != 92 || winRem != 92 || debugRem != 92 {
+			t.Errorf("within active window all must read 92: budget=%d window=%d debug=%d", budget, winRem, debugRem)
+		}
+	})
+}
+
 func TestHasAvailableTokens(t *testing.T) {
 	future := time.Now().Add(10 * time.Minute)
 

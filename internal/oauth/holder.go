@@ -63,7 +63,36 @@ const (
 	// stretch the effective cooldown beyond a few minutes — we still want to
 	// probe for recovery on a bounded cadence.
 	maxRefreshCooldown = 5 * time.Minute
+
+	// windowCapacity is the assumed per-window request ceiling for an OAuth
+	// session token. The upstream advertises its remaining budget per request
+	// (X-Ratelimit-Remaining), starting near this value at the top of each
+	// 10-minute window. Used both as the ring's denominator and as the
+	// "replenished" remaining once a window has elapsed.
+	windowCapacity = 99
 )
+
+// effectiveRemaining reports the active token's real usable budget right now.
+// Once RateResetAt has passed the upstream counter has rolled the window over,
+// so the genuine budget is back at the ceiling regardless of the last header
+// value we recorded in the previous window. Every budget-facing surface (the
+// nav ring via RemainingBudget/WindowInfo and the debug page via TokenStatuses)
+// must go through this so they can never disagree — a stale pre-reset count on
+// one and the replenished count on the other was exactly the "debug says 92 but
+// the ring is full" divergence. Callers hold p.mu.
+func effectiveRemaining(mt *ManagedToken) int {
+	if mt == nil {
+		return 0
+	}
+	rem := mt.RateRemaining
+	if time.Now().After(mt.RateResetAt) {
+		rem = windowCapacity
+	}
+	if rem < 0 {
+		rem = 0
+	}
+	return rem
+}
 
 func NewTokenHolder(cfg config.OAuthConfig, client *Client, tokenStore *store.TokenStore, deviceStore *store.DeviceProfileStore, tracker *versionintel.Tracker, c *cache.Cache) *TokenHolder {
 	return &TokenHolder{
@@ -130,10 +159,10 @@ func (p *TokenHolder) Start(ctx context.Context) error {
 			if st.RateRemaining != nil {
 				mt.RateRemaining = *st.RateRemaining
 			} else {
-				mt.RateRemaining = 99
+				mt.RateRemaining = windowCapacity
 			}
 		} else {
-			mt.RateRemaining = 99
+			mt.RateRemaining = windowCapacity
 			mt.RateResetAt = now.Add(10 * time.Minute)
 		}
 
@@ -194,7 +223,7 @@ func (p *TokenHolder) authenticateFromConfig() error {
 func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, backend string) {
 	now := time.Now()
 	expiresAt := now.Add(time.Duration(result.ExpiresIn) * time.Second)
-	remaining := 99
+	remaining := windowCapacity
 
 	st := &store.StoredToken{
 		ClientID:      clientID,
@@ -220,7 +249,7 @@ func (p *TokenHolder) installToken(result *TokenResult, clientID, clientSecret, 
 	p.active = &ManagedToken{
 		StoredToken:   *st,
 		Identity:      result.Identity,
-		RateRemaining: 99,
+		RateRemaining: windowCapacity,
 		RateResetAt:   now.Add(10 * time.Minute),
 	}
 	p.backend = backend
@@ -421,9 +450,9 @@ func (p *TokenHolder) Token() *ManagedToken {
 	}
 
 	if now.After(p.active.RateResetAt) {
-		p.active.RateRemaining = 99
+		p.active.RateRemaining = windowCapacity
 		p.active.RateResetAt = now.Add(10 * time.Minute)
-		remaining := 99
+		remaining := windowCapacity
 		resetAt := p.active.RateResetAt
 		p.active.StoredToken.RateRemaining = &remaining
 		p.active.StoredToken.RateResetAt = &resetAt
@@ -582,14 +611,7 @@ func (p *TokenHolder) RemainingBudget(_ context.Context) (int, error) {
 		return 0, nil
 	}
 
-	remaining := p.active.RateRemaining
-	if time.Now().After(p.active.RateResetAt) {
-		remaining = 99
-	}
-	if remaining < 0 {
-		remaining = 0
-	}
-	return remaining, nil
+	return effectiveRemaining(p.active), nil
 }
 
 type TokenStatusInfo struct {
@@ -614,7 +636,7 @@ func (p *TokenHolder) TokenStatuses() []TokenStatusInfo {
 
 	return []TokenStatusInfo{{
 		Backend:       p.active.StoredToken.Backend,
-		RateRemaining: p.active.RateRemaining,
+		RateRemaining: effectiveRemaining(p.active),
 		RateResetAt:   p.active.RateResetAt,
 		UserAgent:     p.active.Identity.UserAgent,
 		DeviceID:      p.active.Identity.DeviceID,
@@ -634,16 +656,16 @@ func (p *TokenHolder) WindowInfo() (resetAt time.Time, capacity int, remaining i
 	}
 
 	const window = 10 * time.Minute
-	capacity = 99
+	capacity = windowCapacity
 	now := time.Now()
 	tokenReset := p.active.RateResetAt
 	if now.After(tokenReset) {
-		remaining = 99
+		// Window elapsed: budget is replenished. Advance the displayed reset to
+		// the next window boundary so the ring's countdown stays sane.
 		elapsed := now.Sub(tokenReset)
 		tokenReset = tokenReset.Add((elapsed/window + 1) * window)
-	} else if p.active.RateRemaining > 0 {
-		remaining = p.active.RateRemaining
 	}
+	remaining = effectiveRemaining(p.active)
 	resetAt = tokenReset
 	return
 }
